@@ -50,13 +50,7 @@ application {
 }
 
 githubRelease {
-  
-  FilenameFilter filter = { dir, filename -> filename.contains(project.version) }
-  releaseAssets = jar.destinationDir.listFiles filter 
-}
-
-githubRelease {
-    token getProperty('github.token')
+    token findProperty('github.token')
     owner "proDOOMman"
     repo "Coverage41C"
     targetCommitish "master"
