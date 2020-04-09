@@ -82,7 +82,7 @@ esac
 
 EDT_LOCATION=\$(ring edt locations list | sed -n '/./{p;q;}')
 
-CLASSPATH="$classpath:\$EDT_LOCATION/plugins/*"
+CLASSPATH="$classpath:\$EDT_LOCATION/plugins/com._1c.g5.v8.dt.debug.*"
 
 # Determine the Java command to use to start the JVM.
 if [ -n "\$JAVA_HOME" ] ; then

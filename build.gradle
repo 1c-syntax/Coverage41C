@@ -11,7 +11,8 @@ sourceCompatibility = 11
 
 repositories {
     mavenCentral()
-    maven { url "https://jitpack.io" }
+    maven { url 'https://jitpack.io' }
+    maven { url 'https://dl.bintray.com/epsilonlabs/epsilon-standalone/'}
 }
 
 configurations {
@@ -29,15 +30,37 @@ dependencies {
         edtLocation = output.toString().trim().split("\n")[0].trim() + '/plugins/'
     }
     println 'EDT location: ' + edtLocation
+
     compile group: 'info.picocli', name: 'picocli', version: '4.2.0'
     annotationProcessor 'info.picocli:picocli-codegen:4.2.0'
+
     compile group: 'org.slf4j', name: 'slf4j-api', version: '2.0.0-alpha1'
     compile group: 'org.slf4j', name: 'slf4j-simple', version: '2.0.0-alpha1'
+
     compile group: 'org.scala-sbt.ipcsocket', name: 'ipcsocket', version: '1.0.0'
+
+    compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.common', version: '2.18.0'
+    compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.ecore.xmi', version: '2.16.0'
+    compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.ecore.xcore', version: '1.4.0'
+
+    compile group: 'org.eclipse.platform', name: 'org.eclipse.osgi.util', version: '3.5.200'
+
+    compile group: 'org.eclipse.jetty', name: 'jetty-client', version: '9.4.27.v20200227'
+
+    compile group: 'com.google.guava', name: 'guava', version: '28.2-jre'
+
     implementation 'com.github.proDOOMman:mdclasses:676043538506e56870059b10e672e8f77e4ee195'
-    implementation 'com.github.proDOOMman:bsl-language-server:c3144f4e4edb66d67769405850c2ef407e446710'
-    implementation 'com.github.1c-syntax:utils:0.2.1'
-    providedCompile fileTree(edtLocation) { include '*.jar' }
+    implementation('com.github.1c-syntax:bsl-parser:0.13.0') {
+        exclude group: "com.tunnelvisionlabs", module: "antlr4-annotations"
+        exclude group: "com.ibm.icu", module: "*"
+        exclude group: "org.antlr", module: "ST4"
+        exclude group: "org.abego.treelayout", module: "org.abego.treelayout.core"
+        exclude group: "org.antlr", module: "antlr-runtime"
+        exclude group: "org.glassfish", module: "javax.json"
+    }
+
+    providedCompile fileTree(edtLocation) { include 'com._1c.g5.v8.dt.debug.*.jar' }
+
 }
 
 compileJava {

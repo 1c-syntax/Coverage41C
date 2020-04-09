@@ -13,7 +13,6 @@ import com._1c.g5.v8.dt.debug.model.measure.PerformanceInfoMain;
 import com._1c.g5.v8.dt.debug.model.measure.PerformanceInfoModule;
 import com._1c.g5.v8.dt.internal.debug.core.runtime.client.RuntimeDebugHttpClient;
 import com._1c.g5.v8.dt.internal.debug.core.runtime.client.RuntimeDebugModelXmlSerializer;
-import com.github._1c_syntax.bsl.languageserver.utils.Trees;
 import com.github._1c_syntax.bsl.parser.BSLParser;
 import com.github._1c_syntax.bsl.parser.BSLParserRuleContext;
 import com.github._1c_syntax.bsl.parser.Tokenizer;
@@ -25,6 +24,7 @@ import com.github._1c_syntax.mdclasses.metadata.additional.ModuleType;
 import com.github._1c_syntax.mdclasses.metadata.additional.SupportVariant;
 import org.antlr.v4.runtime.tree.TerminalNodeImpl;
 import org.antlr.v4.runtime.tree.Tree;
+import org.antlr.v4.runtime.tree.Trees;
 import org.eclipse.emf.common.util.EList;
 import org.scalasbt.ipcsocket.UnixDomainServerSocket;
 import org.scalasbt.ipcsocket.UnixDomainSocket;
@@ -67,7 +67,7 @@ public class Coverage41C implements Callable<Integer> {
             defaultValue = "start", fallbackValue = "start")
     private CommandAction commandAction;
 
-    @Option(names = {"-i", "--infobase"}, description = "InfoBase name", required = true)
+    @Option(names = {"-i", "--infobase"}, description = "InfoBase name. For file infobase use 'DefAlias' name", required = true)
     private String infobaseAlias;
 
     @Option(names = {"-e", "--extensionName"}, description = "Extension name", defaultValue = "")
@@ -186,6 +186,7 @@ public class Coverage41C implements Callable<Integer> {
             pipeName = sock.toString();
         }
         if (commandAction == CommandAction.stop) {
+            logger.info("Trying to stop main application...");
             Socket client;
             if (isWindows) {
                 client = new Win32NamedPipeSocket(pipeName);
@@ -195,10 +196,13 @@ public class Coverage41C implements Callable<Integer> {
             PrintWriter pipeOut = new PrintWriter(client.getOutputStream(), true);
             BufferedReader pipeIn = new BufferedReader(new InputStreamReader(client.getInputStream()));
             pipeOut.println(EXIT_COMMAND);
+            logger.info("Command send finished");
             String result = pipeIn.readLine();
             if (result.equals(EXIT_RESULT)) {
+                logger.info("OK");
                 return 0;
             } else {
+                logger.info("Incorrect response from main application");
                 return -1;
             }
         }
@@ -360,6 +364,13 @@ public class Coverage41C implements Callable<Integer> {
             }
             Thread.sleep(pingTimeout);
         }
+        logger.info("Disconnecting from dbgs...");
+        try {
+            client.disconnect();
+            client.dispose();
+        } catch (RuntimeDebugClientException e) {
+            logger.error(e.getLocalizedMessage());
+        }
         logger.info("Main thread finished");
         return 0;
     }
@@ -370,18 +381,9 @@ public class Coverage41C implements Callable<Integer> {
         }
         stopExecution.set(true);
 
-        logger.info("Disconnecting from dbgs...");
+        logger.info("Disablig profiling...");
         try {
             client.toggleProfiling(null);
-            CompletableFuture.supplyAsync(() -> {
-                try {
-                    client.disconnect();
-                    client.dispose();
-                } catch (RuntimeDebugClientException e) {
-                    logger.error(e.getLocalizedMessage());
-                }
-                return true;
-            });
         } catch (RuntimeDebugClientException e) {
             logger.error(e.getLocalizedMessage());
         }
@@ -389,6 +391,7 @@ public class Coverage41C implements Callable<Integer> {
         DocumentBuilderFactory icFactory = DocumentBuilderFactory.newInstance();
         DocumentBuilder icBuilder;
         try {
+            URI confUri = Path.of(srcDirName).toUri();
             icBuilder = icFactory.newDocumentBuilder();
             Document doc = icBuilder.newDocument();
             Element mainRootElement = doc.createElement("coverage");
@@ -399,7 +402,7 @@ public class Coverage41C implements Callable<Integer> {
                     return;
                 }
                 Element fileElement = doc.createElement("file");
-                fileElement.setAttribute("path", uri.getPath());
+                fileElement.setAttribute("path", uri.relativize(confUri).getPath());
                 bigDecimalsMap.forEach((bigDecimal, bool) -> {
                     Element lineElement = doc.createElement("lineToCover");
                     lineElement.setAttribute("covered", Boolean.toString(bool));

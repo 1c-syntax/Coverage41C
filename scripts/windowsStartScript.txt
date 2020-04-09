@@ -84,12 +84,15 @@ set CMD_LINE_ARGS=%*
 @rem Setup the command line
 
 set EDT_LOCATION=""
-FOR /F "tokens=*" %%G IN ('ring edt locations list') DO IF EXIST "%%G\\plugins\\com._1c.g5.v8.dt.debug*.jar" (set EDT_LOCATION=%%G\\plugins\\*)
+FOR /F "tokens=*" %%G IN ('ring edt locations list') DO IF EXIST "%%G\\plugins\\com._1c.g5.v8.dt.debug*.jar" (set EDT_LOCATION=%%G\\plugins\\com._1c.g5.v8.dt.debug.*)
+
+set EDT_CLASSPATH=
+for /f "tokens=*" %%F in ('dir /b /a:-d %%EDT_LOCATION%%"') do call set EDT_CLASSPATH=%%EDT_CLASSPATH%%;%%F
 
 set CLASSPATH=$classpath
 
 @rem Execute ${applicationName}
-"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %${optsEnvironmentVar}% <% if ( appNameSystemProperty ) { %>"-D${appNameSystemProperty}=%APP_BASE_NAME%"<% } %> -classpath "%CLASSPATH%;%EDT_LOCATION%" ${mainClassName} %CMD_LINE_ARGS%
+"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %${optsEnvironmentVar}% <% if ( appNameSystemProperty ) { %>"-D${appNameSystemProperty}=%APP_BASE_NAME%"<% } %> -classpath "%CLASSPATH%;%EDT_CLASSPATH%" ${mainClassName} %CMD_LINE_ARGS%
 
 :end
 @rem End local scope for the variables with windows NT shell
