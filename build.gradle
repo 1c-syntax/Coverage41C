@@ -34,8 +34,8 @@ dependencies {
     compile group: 'org.slf4j', name: 'slf4j-api', version: '2.0.0-alpha1'
     compile group: 'org.slf4j', name: 'slf4j-simple', version: '2.0.0-alpha1'
     compile group: 'org.scala-sbt.ipcsocket', name: 'ipcsocket', version: '1.0.0'
-    implementation 'com.github.1c-syntax:mdclasses:v0.4.1'
-    implementation 'com.github.1c-syntax:bsl-language-server:0.14.1'
+    implementation 'com.github.proDOOMman:mdclasses:676043538506e56870059b10e672e8f77e4ee195'
+    implementation 'com.github.proDOOMman:bsl-language-server:c3144f4e4edb66d67769405850c2ef407e446710'
     implementation 'com.github.1c-syntax:utils:0.2.1'
     providedCompile fileTree(edtLocation) { include '*.jar' }
 }
