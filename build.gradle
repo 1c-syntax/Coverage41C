@@ -5,12 +5,13 @@ plugins {
 }
 
 group 'com.clouds42'
-version '1.0-SNAPSHOT'
+version '1.1-SNAPSHOT'
 
 sourceCompatibility = 11
 
 repositories {
     mavenCentral()
+    maven { url "https://jitpack.io" }
 }
 
 configurations {
@@ -19,21 +20,29 @@ configurations {
 
 dependencies {
     def output = new ByteArrayOutputStream()
-    exec {
-        commandLine 'powershell', 'ring', 'edt', 'locations', 'list'
-        standardOutput = output
+    def edtLocation = System.getenv('EDT_LOCATION')
+    if (edtLocation == null) {
+        exec {
+            commandLine 'powershell', 'ring', 'edt', 'locations', 'list'
+            standardOutput = output
+        }
+        edtLocation = output.toString().trim().split("\n")[0].trim() + '/plugins/'
     }
-    def edtLocation = output.toString().trim().split("\n")[0].trim()
     println 'EDT location: ' + edtLocation
     compile group: 'info.picocli', name: 'picocli', version: '4.2.0'
-    compile group: 'com.opencsv', name: 'opencsv', version: '5.1'
+    annotationProcessor 'info.picocli:picocli-codegen:4.2.0'
     compile group: 'org.slf4j', name: 'slf4j-api', version: '2.0.0-alpha1'
     compile group: 'org.slf4j', name: 'slf4j-simple', version: '2.0.0-alpha1'
-    providedCompile fileTree(edtLocation + '/plugins/') { include '*.jar' }
+    compile group: 'org.scala-sbt.ipcsocket', name: 'ipcsocket', version: '1.0.0'
+    implementation 'com.github.1c-syntax:mdclasses:v0.4.1'
+    implementation 'com.github.1c-syntax:bsl-language-server:0.14.1'
+    implementation 'com.github.1c-syntax:utils:0.2.1'
+    providedCompile fileTree(edtLocation) { include '*.jar' }
 }
 
 compileJava {
     sourceSets.main.compileClasspath += configurations.providedCompile
+    options.compilerArgs += ["-Aproject=${project.group}/${project.name}"]
 }
 
 run {
