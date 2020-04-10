@@ -371,6 +371,7 @@ public class Coverage41C implements Callable<Integer> {
         } catch (RuntimeDebugClientException e) {
             logger.error(e.getLocalizedMessage());
         }
+
         logger.info("Main thread finished");
         return 0;
     }
@@ -379,9 +380,8 @@ public class Coverage41C implements Callable<Integer> {
         if (stopExecution.get()) {
             return;
         }
-        stopExecution.set(true);
 
-        logger.info("Disablig profiling...");
+        logger.info("Disabling profiling...");
         try {
             client.toggleProfiling(null);
         } catch (RuntimeDebugClientException e) {
@@ -445,6 +445,8 @@ public class Coverage41C implements Callable<Integer> {
         if (commandListenServer != null) {
             commandListenServer.cancel(true);
         }
+
+        stopExecution.set(true);
 
         logger.info("Bye!");
     }
