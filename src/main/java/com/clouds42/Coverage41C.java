@@ -402,7 +402,7 @@ public class Coverage41C implements Callable<Integer> {
                     return;
                 }
                 Element fileElement = doc.createElement("file");
-                fileElement.setAttribute("path", uri.relativize(confUri).getPath());
+                fileElement.setAttribute("path", confUri.relativize(uri).getPath());
                 bigDecimalsMap.forEach((bigDecimal, bool) -> {
                     Element lineElement = doc.createElement("lineToCover");
                     lineElement.setAttribute("covered", Boolean.toString(bool));
@@ -411,6 +411,17 @@ public class Coverage41C implements Callable<Integer> {
                 });
                 mainRootElement.appendChild(fileElement);
             });
+            long linesToCover = 0;
+            long coveredLinesCount = 0;
+            for (Map<BigDecimal, Boolean> bigDecimalMap : coverageData.values()) {
+                linesToCover += bigDecimalMap.size();
+                coveredLinesCount += bigDecimalMap.values().stream().filter(aBoolean -> aBoolean.booleanValue()).count();
+            }
+            logger.info("Lines to cover: " + linesToCover);
+            logger.info("Covered lines: " + coveredLinesCount);
+            if (linesToCover > 0) {
+                logger.info("Covering: " + Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100. + "%");
+            }
             Transformer transformer = TransformerFactory.newInstance().newTransformer();
             transformer.setOutputProperty(OutputKeys.INDENT, "yes");
             DOMSource source = new DOMSource(doc);
@@ -490,17 +501,14 @@ public class Coverage41C implements Callable<Integer> {
         modulesByType.forEach((uri, moduleType) -> {
             uriListByKey.put(getUriKey(mdObjUuid, moduleType, mdObj), uri);
 
-            if (removeSupport == SupportVariant.NONE) {
-                // lines to cover will be computed in external tool
-                return;
-            }
-
-            SupportVariant moduleSupportVariant = conf.getModuleSupport(uri).values().stream()
-                .min(Comparator.naturalOrder())
-                .orElse(SupportVariant.NONE);
-            if (moduleSupportVariant.compareTo(removeSupport) <= 0) {
-                coverageData.put(uri, new HashMap<>());
-                return;
+            if (removeSupport != SupportVariant.NONE) {
+                SupportVariant moduleSupportVariant = conf.getModuleSupport(uri).values().stream()
+                        .min(Comparator.naturalOrder())
+                        .orElse(SupportVariant.NONE);
+                if (moduleSupportVariant.compareTo(removeSupport) <= 0) {
+                    coverageData.put(uri, new HashMap<>());
+                    return;
+                }
             }
 
             Tokenizer tokenizer = null;
@@ -526,6 +534,7 @@ public class Coverage41C implements Callable<Integer> {
     }
 
     private static boolean mustCovered(Tree node) {
+        // the same as in BSL LS
         return node instanceof BSLParser.StatementContext
                 || node instanceof BSLParser.GlobalMethodCallContext
                 || node instanceof BSLParser.Var_nameContext;

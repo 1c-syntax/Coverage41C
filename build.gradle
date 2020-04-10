@@ -43,13 +43,14 @@ dependencies {
     compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.ecore.xmi', version: '2.16.0'
     compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.ecore.xcore', version: '1.4.0'
 
-    compile group: 'org.eclipse.platform', name: 'org.eclipse.osgi.util', version: '3.5.200'
+    compile group: 'org.eclipse.platform', name: 'org.eclipse.osgi', version: '3.15.200'
 
     compile group: 'org.eclipse.jetty', name: 'jetty-client', version: '9.4.27.v20200227'
 
     compile group: 'com.google.guava', name: 'guava', version: '28.2-jre'
 
-    implementation 'com.github.proDOOMman:mdclasses:676043538506e56870059b10e672e8f77e4ee195'
+    implementation 'com.github.proDOOMman:mdclasses:676043538506e56870059b10e672e8f77e4ee195' // TODO: change to 1c-syntax
+
     implementation('com.github.1c-syntax:bsl-parser:0.13.0') {
         exclude group: "com.tunnelvisionlabs", module: "antlr4-annotations"
         exclude group: "com.ibm.icu", module: "*"
@@ -59,7 +60,8 @@ dependencies {
         exclude group: "org.glassfish", module: "javax.json"
     }
 
-    providedCompile fileTree(edtLocation) { include 'com._1c.g5.v8.dt.debug.*.jar' }
+    providedCompile fileTree(edtLocation) { include 'com._1c.g5.v8.dt.debug.core_*.jar' }
+    providedCompile fileTree(edtLocation) { include 'com._1c.g5.v8.dt.debug.model_*.jar' }
 
 }
 
