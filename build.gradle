@@ -5,12 +5,14 @@ plugins {
 }
 
 group 'com.clouds42'
-version '1.0-SNAPSHOT'
+version '1.1-SNAPSHOT'
 
 sourceCompatibility = 11
 
 repositories {
     mavenCentral()
+    maven { url 'https://jitpack.io' }
+    maven { url 'https://dl.bintray.com/epsilonlabs/epsilon-standalone/'}
 }
 
 configurations {
@@ -19,21 +21,53 @@ configurations {
 
 dependencies {
     def output = new ByteArrayOutputStream()
-    exec {
-        commandLine 'powershell', 'ring', 'edt', 'locations', 'list'
-        standardOutput = output
+    def edtLocation = System.getenv('EDT_LOCATION')
+    if (edtLocation == null) {
+        exec {
+            commandLine 'powershell', 'ring', 'edt', 'locations', 'list'
+            standardOutput = output
+        }
+        edtLocation = output.toString().trim().split("\n")[0].trim() + '/plugins/'
     }
-    def edtLocation = output.toString().trim().split("\n")[0].trim()
     println 'EDT location: ' + edtLocation
+
     compile group: 'info.picocli', name: 'picocli', version: '4.2.0'
-    compile group: 'com.opencsv', name: 'opencsv', version: '5.1'
+    annotationProcessor 'info.picocli:picocli-codegen:4.2.0'
+
     compile group: 'org.slf4j', name: 'slf4j-api', version: '2.0.0-alpha1'
     compile group: 'org.slf4j', name: 'slf4j-simple', version: '2.0.0-alpha1'
-    providedCompile fileTree(edtLocation + '/plugins/') { include '*.jar' }
+
+    compile group: 'org.scala-sbt.ipcsocket', name: 'ipcsocket', version: '1.0.0'
+
+    compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.common', version: '2.18.0'
+    compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.ecore.xmi', version: '2.16.0'
+    compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.ecore.xcore', version: '1.4.0'
+
+    compile group: 'org.eclipse.platform', name: 'org.eclipse.osgi', version: '3.15.200'
+
+    compile group: 'org.eclipse.jetty', name: 'jetty-client', version: '9.4.27.v20200227'
+
+    compile group: 'com.google.guava', name: 'guava', version: '28.2-jre'
+
+    implementation 'com.github.proDOOMman:mdclasses:676043538506e56870059b10e672e8f77e4ee195' // TODO: change to 1c-syntax
+
+    implementation('com.github.1c-syntax:bsl-parser:0.13.0') {
+        exclude group: "com.tunnelvisionlabs", module: "antlr4-annotations"
+        exclude group: "com.ibm.icu", module: "*"
+        exclude group: "org.antlr", module: "ST4"
+        exclude group: "org.abego.treelayout", module: "org.abego.treelayout.core"
+        exclude group: "org.antlr", module: "antlr-runtime"
+        exclude group: "org.glassfish", module: "javax.json"
+    }
+
+    providedCompile fileTree(edtLocation) { include 'com._1c.g5.v8.dt.debug.core_*.jar' }
+    providedCompile fileTree(edtLocation) { include 'com._1c.g5.v8.dt.debug.model_*.jar' }
+
 }
 
 compileJava {
     sourceSets.main.compileClasspath += configurations.providedCompile
+    options.compilerArgs += ["-Aproject=${project.group}/${project.name}"]
 }
 
 run {
