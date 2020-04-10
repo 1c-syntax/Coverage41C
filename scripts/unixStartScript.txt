@@ -80,9 +80,16 @@ case "`uname`" in
     ;;
 esac
 
-EDT_LOCATION=\$(ring edt locations list | sed -n '/./{p;q;}')
+if [[ -z "\$EDT_LOCATION" ]]; then
+    EDT_LOCATION=\$(ring edt locations list | sed -n '/./{p;q;}')
+fi
 
-CLASSPATH="$classpath:\$EDT_LOCATION/plugins/com._1c.g5.v8.dt.debug.*"
+EDT_CLASSPATH=""
+for f in "\$EDT_LOCATION"/com._1c.g5.v8.dt.debug.*; do
+    EDT_CLASSPATH=\$EDT_CLASSPATH:\$f;
+done
+
+CLASSPATH="$classpath\$EDT_CLASSPATH"
 
 # Determine the Java command to use to start the JVM.
 if [ -n "\$JAVA_HOME" ] ; then
