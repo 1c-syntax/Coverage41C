@@ -9,6 +9,7 @@
 3) Проверяем что dbgs.exe (https://its.1c.ru/db/edtdoc/content/197/hdoc/_top/dbgs) запустился и работает. Для этого в браузере открываем его, адрес по умолчанию http://127.0.0.1:1550/. В случае успеха выдолжны увидеть сообщение "... it works!".
 4) Выгружаем исходники конфигурации или расширения в файлы.
 5) Запускаем анализ покрытия командой ```Coverage41C -i <ИмяИнформационнойБазыВКластере> -s <ПутьКИсходникам> -o <ИмяВыходногоФайлаПокрытия> -e <ИмяРасширения>```. Для файловой базы нужно указать адрес отладчика и предопределённое имя информационной базы ```-i DefAlias -u http://127.0.0.1:<Порт>```.
+    > В случае если исходники лежат не в корне проекта, необходимо указать путь к проекту `-P <ПутьКПроекту>`.
 6) Выполняем тесты
 7) Останавливаем программу нажатием Ctrl+C в окне терминала или командой ```Coverage41C -a stop -i <ИмяИнформационнойБазыВКластере> -u http://127.0.0.1:<Порт>```
 8) Полученный файл в формате genericCoverage.xml загружаем в SonarQube.
@@ -27,6 +28,8 @@ Make measures from 1C:Enterprise and save them to genericCoverage.xml file
                            Extension name
   -s, --srcDir=<srcDirName>
                            Directory with sources exported to xml
+  -P, --projectDir
+                           Directory with project
   -o, --out=<outputFile>   Output file name
   -u, --debugger=<debugServerUrl>
                            Debugger url. Default - http://127.0.0.1:1550/
