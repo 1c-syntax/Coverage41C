@@ -76,6 +76,9 @@ public class Coverage41C implements Callable<Integer> {
     @Option(names = {"-s", "--srcDir"}, description = "Directory with sources exported to xml")
     private String srcDirName;
 
+    @Option(names = {"-P", "--projectDir"}, description = "Directory with project", defaultValue = "")
+    private String projectDirName;
+
     @Option(names = {"-o", "--out"}, description = "Output file name")
     private File outputFile;
 
@@ -391,7 +394,14 @@ public class Coverage41C implements Callable<Integer> {
         DocumentBuilderFactory icFactory = DocumentBuilderFactory.newInstance();
         DocumentBuilder icBuilder;
         try {
-            URI confUri = Path.of(srcDirName).toUri();
+            URI projectUri;
+
+            if ("".equals(projectDirName)) {
+                projectUri = Path.of(srcDirName).toUri();
+            } else {
+                projectUri = Path.of(projectDirName).toUri();
+            }
+
             icBuilder = icFactory.newDocumentBuilder();
             Document doc = icBuilder.newDocument();
             Element mainRootElement = doc.createElement("coverage");
@@ -402,7 +412,7 @@ public class Coverage41C implements Callable<Integer> {
                     return;
                 }
                 Element fileElement = doc.createElement("file");
-                fileElement.setAttribute("path", confUri.relativize(uri).getPath());
+                fileElement.setAttribute("path", projectUri.relativize(uri).getPath());
                 bigDecimalsMap.forEach((bigDecimal, bool) -> {
                     Element lineElement = doc.createElement("lineToCover");
                     lineElement.setAttribute("covered", Boolean.toString(bool));
