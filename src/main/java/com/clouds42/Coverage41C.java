@@ -73,10 +73,10 @@ public class Coverage41C implements Callable<Integer> {
     @Option(names = {"-e", "--extensionName"}, description = "Extension name", defaultValue = "")
     private String extensionName;
 
-    @Option(names = {"-s", "--srcDir"}, description = "Directory with sources exported to xml")
+    @Option(names = {"-s", "--srcDir"}, description = "Directory with sources exported to xml", defaultValue = "")
     private String srcDirName;
 
-    @Option(names = {"-P", "--projectDir"}, description = "Directory with project", defaultValue = "")
+    @Option(names = {"-P", "--projectDir"}, description = "Directory with project")
     private String projectDirName;
 
     @Option(names = {"-o", "--out"}, description = "Output file name")
@@ -238,7 +238,7 @@ public class Coverage41C implements Callable<Integer> {
 
         Map<String, URI> uriListByKey = new HashMap<>();
 
-        conf = Configuration.create(Path.of(srcDirName));
+        conf = Configuration.create(Path.of(projectDirName).resolve(srcDirName));
 
         Set<MDObjectBase> configurationChildren = conf.getChildren();
         for (MDObjectBase mdObj : configurationChildren) {
@@ -394,14 +394,8 @@ public class Coverage41C implements Callable<Integer> {
         DocumentBuilderFactory icFactory = DocumentBuilderFactory.newInstance();
         DocumentBuilder icBuilder;
         try {
-            URI projectUri;
 
-            if ("".equals(projectDirName)) {
-                projectUri = Path.of(srcDirName).toUri();
-            } else {
-                projectUri = Path.of(projectDirName).toUri();
-            }
-
+            URI projectUri = Path.of(projectDirName).toUri();
             icBuilder = icFactory.newDocumentBuilder();
             Document doc = icBuilder.newDocument();
             Element mainRootElement = doc.createElement("coverage");
