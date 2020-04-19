@@ -53,10 +53,12 @@ import java.net.Socket;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Stream;
 
 @Command(name = "Coverage41C", mixinStandardHelpOptions = true, version = "Coverage41C 1.0",
         description = "Make measures from 1C:Enterprise and save them to genericCoverage.xml file",
@@ -86,16 +88,19 @@ public class Coverage41C implements Callable<Integer> {
     private String debugServerUrl;
 
     @Option(names = {"-p", "--password"}, description = "Dbgs password", interactive = true)
-    String password;
+    private String password;
 
     @Option(names = {"-n", "--areanames"}, description = "Debug area names (not for general use!)")
-    List<String> debugAreaNames;
+    private List<String> debugAreaNames;
 
     @Option(names = {"-t", "--timeout"}, description = "Ping timeout. Default - ${DEFAULT-VALUE}", defaultValue = "1000")
-    Integer pingTimeout;
+    private Integer pingTimeout;
 
     @Option(names = {"-r", "--removeSupport"}, description = "Remove support values: ${COMPLETION-CANDIDATES}. Default - ${DEFAULT-VALUE}", defaultValue = "NONE")
-    SupportVariant removeSupport;
+    private SupportVariant removeSupport;
+
+    @Option(names = "--verbose", description = "If you need more logs. Default - ${DEFAULT-VALUE}", defaultValue = "false")
+    private Boolean verbose;
 
     private static RuntimeDebugHttpClient client;
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
@@ -112,6 +117,8 @@ public class Coverage41C implements Callable<Integer> {
     };
 
     private static final String EXIT_COMMAND = "EXIT";
+    private static final String DUMP_COMMAND = "DUMP";
+    private static final String CLEAN_COMMAND = "CLEAN";
     private static final String EXIT_RESULT = "OK";
 
     private ServerSocket serverSocket;
@@ -123,7 +130,9 @@ public class Coverage41C implements Callable<Integer> {
 
     private enum CommandAction {
         start,
-        stop
+        stop,
+        dump,
+        clean
     }
 
     private class CommandListenServer {
@@ -144,6 +153,19 @@ public class Coverage41C implements Callable<Integer> {
                     String line;
                     do {
                         line = in.readLine();
+                        if (line != null) {
+                            if (DUMP_COMMAND.equals(line.trim())) {
+                                dumpCoverageFile();
+                                out.println(EXIT_RESULT);
+                            } else if (CLEAN_COMMAND.equals(line.trim())) {
+                                coverageData.forEach((uri, bigDecimalBooleanMap) -> {
+                                    for (var key : bigDecimalBooleanMap.keySet()) {
+                                        bigDecimalBooleanMap.put(key, false);
+                                    }
+                                });
+                                out.println(EXIT_RESULT);
+                            }
+                        }
                     } while (line == null || !line.trim().equals(EXIT_COMMAND));
                     gracefulShutdown(out);
                     out.println(EXIT_RESULT);
@@ -188,8 +210,8 @@ public class Coverage41C implements Callable<Integer> {
             Path sock = tempDir.resolve(String.format("%s_%s.sock", infobaseAlias, debugUri.toString().replaceAll("[^a-zA-Z0-9-_\\.]", "_")));
             pipeName = sock.toString();
         }
-        if (commandAction == CommandAction.stop) {
-            logger.info("Trying to stop main application...");
+        if (commandAction != CommandAction.start) {
+            logger.info("Trying to send command to main application...");
             Socket client;
             if (isWindows) {
                 client = new Win32NamedPipeSocket(pipeName);
@@ -198,7 +220,11 @@ public class Coverage41C implements Callable<Integer> {
             }
             PrintWriter pipeOut = new PrintWriter(client.getOutputStream(), true);
             BufferedReader pipeIn = new BufferedReader(new InputStreamReader(client.getInputStream()));
-            pipeOut.println(EXIT_COMMAND);
+            if (commandAction == CommandAction.stop) {
+                pipeOut.println(EXIT_COMMAND);
+            } else {
+                pipeOut.println(DUMP_COMMAND);
+            }
             logger.info("Command send finished");
             String result = pipeIn.readLine();
             if (result.equals(EXIT_RESULT)) {
@@ -314,9 +340,19 @@ public class Coverage41C implements Callable<Integer> {
                                             Map<BigDecimal, Boolean> coverMap = coverageData.get(uri);
                                             if (!coverMap.isEmpty()) {
                                                 if (!coverMap.containsKey(lineNo)) {
-                                                    logger.info("Can't find line to cover " + lineNo + " in module " + uri);
+                                                    if (verbose.booleanValue()) {
+                                                        logger.info("Can't find line to cover " + lineNo + " in module " + uri);
+                                                        try {
+                                                            Stream<String> all_lines = Files.lines(Paths.get(uri));
+                                                            String specific_line_n = all_lines.skip(lineNo.longValue() - 1).findFirst().get();
+                                                            logger.info(">>> " + specific_line_n);
+                                                        } catch (Exception e) {
+                                                            logger.error(e.getLocalizedMessage());
+                                                        }
+                                                    }
+                                                } else {
+                                                    coverMap.put(lineNo, true);
                                                 }
-                                                coverMap.put(lineNo, true);
                                             }
                                         });
                                     }
@@ -391,6 +427,29 @@ public class Coverage41C implements Callable<Integer> {
             logger.error(e.getLocalizedMessage());
         }
 
+        dumpCoverageFile();
+
+        if (serverSocket != null) {
+            if (serverPipeOut != null) {
+                serverPipeOut.println(EXIT_RESULT);
+            }
+            try {
+                serverSocket.close();
+            } catch (IOException e) {
+                logger.error(e.getLocalizedMessage());
+            }
+        }
+
+        if (commandListenServer != null) {
+            commandListenServer.cancel(true);
+        }
+
+        stopExecution.set(true);
+
+        logger.info("Bye!");
+    }
+
+    private void dumpCoverageFile() {
         DocumentBuilderFactory icFactory = DocumentBuilderFactory.newInstance();
         DocumentBuilder icBuilder;
         try {
@@ -424,7 +483,7 @@ public class Coverage41C implements Callable<Integer> {
             logger.info("Lines to cover: " + linesToCover);
             logger.info("Covered lines: " + coveredLinesCount);
             if (linesToCover > 0) {
-                logger.info("Covering: " + Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100. + "%");
+                logger.info("Coverage: " + Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100. + "%");
             }
             Transformer transformer = TransformerFactory.newInstance().newTransformer();
             transformer.setOutputProperty(OutputKeys.INDENT, "yes");
@@ -432,27 +491,8 @@ public class Coverage41C implements Callable<Integer> {
             StreamResult console = new StreamResult(new FileOutputStream(outputFile));
             transformer.transform(source, console);
         } catch (Exception e) {
-            e.printStackTrace();
+            logger.error(e.getLocalizedMessage());
         }
-
-        if (serverSocket != null) {
-            if (serverPipeOut != null) {
-                serverPipeOut.println(EXIT_RESULT);
-            }
-            try {
-                serverSocket.close();
-            } catch (IOException e) {
-                logger.error(e.getLocalizedMessage());
-            }
-        }
-
-        if (commandListenServer != null) {
-            commandListenServer.cancel(true);
-        }
-
-        stopExecution.set(true);
-
-        logger.info("Bye!");
     }
 
     private String getModuleTypeUuid(ModuleType moduleType, MDObjectBase mdObject) {
