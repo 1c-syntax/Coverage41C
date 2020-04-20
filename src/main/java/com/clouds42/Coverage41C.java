@@ -78,7 +78,7 @@ public class Coverage41C implements Callable<Integer> {
     @Option(names = {"-s", "--srcDir"}, description = "Directory with sources exported to xml", defaultValue = "")
     private String srcDirName;
 
-    @Option(names = {"-P", "--projectDir"}, description = "Directory with project")
+    @Option(names = {"-P", "--projectDir"}, description = "Directory with project", defaultValue = "")
     private String projectDirName;
 
     @Option(names = {"-o", "--out"}, description = "Output file name")
@@ -120,6 +120,9 @@ public class Coverage41C implements Callable<Integer> {
     private static final String DUMP_COMMAND = "DUMP";
     private static final String CLEAN_COMMAND = "CLEAN";
     private static final String EXIT_RESULT = "OK";
+
+    private static final int EXIT_SUCCESS = 0;
+    private static final int EXIT_FAILURE = -1;
 
     private ServerSocket serverSocket;
     private CompletableFuture<Boolean> commandListenServer;
@@ -229,11 +232,22 @@ public class Coverage41C implements Callable<Integer> {
             String result = pipeIn.readLine();
             if (result.equals(EXIT_RESULT)) {
                 logger.info("OK");
-                return 0;
+                return EXIT_SUCCESS;
             } else {
                 logger.info("Incorrect response from main application");
-                return -1;
+                return EXIT_FAILURE;
             }
+        }
+
+        if (srcDirName.isEmpty() && projectDirName.isEmpty()) {
+            logger.info("Missing required arguments: -P (--projectDir) and/or -s (--srcDir)");
+            return EXIT_FAILURE;
+        }
+
+        if (projectDirName.isEmpty() && !srcDirName.isEmpty()) {
+            // for backward compatibility
+            projectDirName = srcDirName;
+            srcDirName = "";
         }
 
         if (isWindows) {
@@ -293,7 +307,7 @@ public class Coverage41C implements Callable<Integer> {
             client.configure(debugServerUrl, debugServerUuid, infobaseAlias);
         } catch (RuntimeDebugClientException e) {
             logger.error(e.getLocalizedMessage());
-            return -1;
+            return EXIT_FAILURE;
         }
 
         Runtime.getRuntime().addShutdownHook(new Thread()
@@ -398,7 +412,7 @@ public class Coverage41C implements Callable<Integer> {
                     client.toggleProfiling(measureUuid);
                 } catch (RuntimeDebugClientException e1) {
                     logger.error(e1.getLocalizedMessage());
-                    return -2;
+                    return EXIT_FAILURE;
                 }
             }
             Thread.sleep(pingTimeout);
@@ -412,7 +426,7 @@ public class Coverage41C implements Callable<Integer> {
         }
 
         logger.info("Main thread finished");
-        return 0;
+        return EXIT_SUCCESS;
     }
 
     private void gracefulShutdown(PrintWriter serverPipeOut) {
@@ -488,8 +502,13 @@ public class Coverage41C implements Callable<Integer> {
             Transformer transformer = TransformerFactory.newInstance().newTransformer();
             transformer.setOutputProperty(OutputKeys.INDENT, "yes");
             DOMSource source = new DOMSource(doc);
-            StreamResult console = new StreamResult(new FileOutputStream(outputFile));
-            transformer.transform(source, console);
+            StreamResult outputStream;
+            if (outputFile == null) {
+                outputStream = new StreamResult(System.out);
+            } else {
+                outputStream = new StreamResult(new FileOutputStream(outputFile));
+            }
+            transformer.transform(source, outputStream);
         } catch (Exception e) {
             logger.error(e.getLocalizedMessage());
         }
