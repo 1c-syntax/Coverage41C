@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <coverage version="1">
     <file path="src/test/resources/configuration/CommonModules/ОбщийМодульПовтИспВызов/Ext/Module.bsl">
-        <lineToCover covered="false" lineNumber="2"/>
+        <lineToCover covered="true" lineNumber="2"/>
     </file>
     <file path="src/test/resources/configuration/Reports/Отчет1/Ext/ObjectModule.bsl">
         <lineToCover covered="true" lineNumber="3"/>
@@ -10,7 +10,7 @@
         <lineToCover covered="false" lineNumber="4"/>
     </file>
     <file path="src/test/resources/configuration/DataProcessors/Обработка1/Ext/ObjectModule.bsl">
-        <lineToCover covered="false" lineNumber="3"/>
+        <lineToCover covered="true" lineNumber="3"/>
     </file>
     <file path="src/test/resources/configuration/DocumentJournals/ЖурналДокументов1/Forms/ФормаСписка/Ext/Form/Module.bsl">
         <lineToCover covered="true" lineNumber="4"/>
@@ -27,12 +27,15 @@
         <lineToCover covered="false" lineNumber="3"/>
     </file>
     <file path="src/test/resources/configuration/DataProcessors/Обработка1/Forms/Форма/Ext/Form/Module.bsl">
-        <lineToCover covered="false" lineNumber="16"/>
-        <lineToCover covered="false" lineNumber="15"/>
-        <lineToCover covered="false" lineNumber="10"/>
-        <lineToCover covered="false" lineNumber="9"/>
+        <lineToCover covered="true" lineNumber="16"/>
+        <lineToCover covered="true" lineNumber="11"/>
+        <lineToCover covered="true" lineNumber="10"/>
+        <lineToCover covered="true" lineNumber="5"/>
         <lineToCover covered="true" lineNumber="4"/>
-        <lineToCover covered="false" lineNumber="17"/>
+        <lineToCover covered="true" lineNumber="20"/>
+        <lineToCover covered="true" lineNumber="19"/>
+        <lineToCover covered="true" lineNumber="18"/>
+        <lineToCover covered="true" lineNumber="17"/>
     </file>
     <file path="src/test/resources/configuration/ChartsOfCalculationTypes/ПланВидовРасчета1/Forms/ФормаВидаРасчета/Ext/Form/Module.bsl">
         <lineToCover covered="true" lineNumber="4"/>
@@ -77,7 +80,7 @@
         <lineToCover covered="true" lineNumber="3"/>
     </file>
     <file path="src/test/resources/configuration/CommonModules/ОбщийМодульПовтИспСеанс/Ext/Module.bsl">
-        <lineToCover covered="false" lineNumber="2"/>
+        <lineToCover covered="true" lineNumber="2"/>
     </file>
     <file path="src/test/resources/configuration/ChartsOfAccounts/ПланСчетов1/Ext/ManagerModule.bsl">
         <lineToCover covered="true" lineNumber="3"/>
@@ -88,11 +91,11 @@
     <file path="src/test/resources/configuration/Documents/Документ1/Ext/ManagerModule.bsl">
         <lineToCover covered="true" lineNumber="3"/>
     </file>
-    <file path="src/test/resources/configuration/CommonModules/ОбщийМодульВызовСервера/Ext/Module.bsl">
-        <lineToCover covered="false" lineNumber="2"/>
-    </file>
     <file path="src/test/resources/configuration/CalculationRegisters/РегистрРасчета1/Ext/ManagerModule.bsl">
         <lineToCover covered="false" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/configuration/CommonModules/ОбщийМодульВызовСервера/Ext/Module.bsl">
+        <lineToCover covered="true" lineNumber="2"/>
     </file>
     <file path="src/test/resources/configuration/ChartsOfAccounts/ПланСчетов1/Forms/ФормаСчета/Ext/Form/Module.bsl">
         <lineToCover covered="true" lineNumber="4"/>
@@ -128,6 +131,7 @@
         <lineToCover covered="true" lineNumber="4"/>
     </file>
     <file path="src/test/resources/configuration/CommonModules/ПростойОбщийМодуль/Ext/Module.bsl">
+        <lineToCover covered="true" lineNumber="11"/>
         <lineToCover covered="false" lineNumber="7"/>
         <lineToCover covered="true" lineNumber="3"/>
     </file>
@@ -141,7 +145,7 @@
         <lineToCover covered="true" lineNumber="3"/>
     </file>
     <file path="src/test/resources/configuration/CommonModules/ГлобальныйОбщийМодуль/Ext/Module.bsl">
-        <lineToCover covered="false" lineNumber="2"/>
+        <lineToCover covered="true" lineNumber="2"/>
     </file>
     <file path="src/test/resources/configuration/Tasks/Задача1/Ext/ManagerModule.bsl">
         <lineToCover covered="true" lineNumber="3"/>
@@ -180,7 +184,7 @@
         <lineToCover covered="false" lineNumber="3"/>
     </file>
     <file path="src/test/resources/configuration/CommonModules/ОбщийМодульПолныеПрава/Ext/Module.bsl">
-        <lineToCover covered="false" lineNumber="2"/>
+        <lineToCover covered="true" lineNumber="2"/>
     </file>
     <file path="src/test/resources/configuration/ExchangePlans/ПланОбмена1/Ext/ManagerModule.bsl">
         <lineToCover covered="true" lineNumber="3"/>

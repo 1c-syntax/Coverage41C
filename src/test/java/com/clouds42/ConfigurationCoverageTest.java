@@ -19,7 +19,6 @@ import java.util.Comparator;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeoutException;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -27,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class ConfigurationCoverageTest {
 
     @Test
-    void testCoverage() throws IOException, InterruptedException, ExecutionException, TimeoutException {
+    void testCoverage() throws IOException, InterruptedException, ExecutionException {
 
         boolean isWindows = System.getProperty ("os.name").toLowerCase().contains("win");
 
@@ -75,13 +74,14 @@ class ConfigurationCoverageTest {
                 "oscript", "src/test/resources/scripts/StartDbgs.os",
                 "--opid", String.valueOf(pid),
                 "--port", String.valueOf(dbgsUrl.getPort()),
-                "--host", dbgsUrl.getHost());
+                "--host", dbgsUrl.getHost(),
+                "--v8version", v8version);
         Process startDbgsProcess = startDbgsProcessBuilder.inheritIO().start();
         assertEquals(0, startDbgsProcess.waitFor());
 
         ProcessBuilder vrunnerInitDevProcessBuilder = new ProcessBuilder();
         vrunnerInitDevProcessBuilder.command(vrunnerExecutable, "init-dev",
-                "--db-user", "Администратор",
+                "--db-user", ibUser,
                 "--db-pwd", ibPassword,
                 "--src", configurationSourceDir.getAbsolutePath(),
                 "--dt", dtPath.getAbsolutePath(),
