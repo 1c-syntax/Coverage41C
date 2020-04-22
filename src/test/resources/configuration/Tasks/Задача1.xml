@@ -1,0 +1,77 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.9">
+	<Task uuid="c251fcec-ec02-4ef4-8f70-4d70db6631ea">
+		<InternalInfo>
+			<xr:GeneratedType name="TaskObject.Задача1" category="Object">
+				<xr:TypeId>8a361b1f-2e4c-40c6-b889-48b5b1b09bfc</xr:TypeId>
+				<xr:ValueId>77e51278-72d7-4b7c-940d-a519fcb086c0</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="TaskRef.Задача1" category="Ref">
+				<xr:TypeId>65cac253-9bb6-44eb-9a81-e017958d73ce</xr:TypeId>
+				<xr:ValueId>8d4d253f-0da7-4beb-9e2f-d2ebe235ab6b</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="TaskSelection.Задача1" category="Selection">
+				<xr:TypeId>933a86de-ccd4-4c2a-8abf-ff7b2484cbb0</xr:TypeId>
+				<xr:ValueId>75c4b18d-29e4-4d6c-aa90-293097040d7c</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="TaskList.Задача1" category="List">
+				<xr:TypeId>58f95300-e800-4203-8093-ac61ce924fe5</xr:TypeId>
+				<xr:ValueId>e5550a7b-40d6-4ea6-b4cc-c3df32f9ccdb</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="TaskManager.Задача1" category="Manager">
+				<xr:TypeId>922cc695-fe96-4477-93dc-4d23c8a62dda</xr:TypeId>
+				<xr:ValueId>66922daa-99e7-4fa9-acf7-4ad4fc8e8cc2</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>Задача1</Name>
+			<Synonym/>
+			<Comment/>
+			<UseStandardCommands>true</UseStandardCommands>
+			<NumberType>String</NumberType>
+			<NumberLength>9</NumberLength>
+			<NumberAllowedLength>Variable</NumberAllowedLength>
+			<CheckUnique>true</CheckUnique>
+			<Autonumbering>true</Autonumbering>
+			<TaskNumberAutoPrefix>DontUse</TaskNumberAutoPrefix>
+			<DescriptionLength>25</DescriptionLength>
+			<Addressing/>
+			<MainAddressingAttribute/>
+			<CurrentPerformer/>
+			<BasedOn/>
+			<Characteristics/>
+			<DefaultPresentation>AsDescription</DefaultPresentation>
+			<EditType>InDialog</EditType>
+			<InputByString>
+				<xr:Field>Task.Задача1.StandardAttribute.Description</xr:Field>
+				<xr:Field>Task.Задача1.StandardAttribute.Number</xr:Field>
+			</InputByString>
+			<SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString>
+			<FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString>
+			<ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString>
+			<CreateOnInput>DontUse</CreateOnInput>
+			<DefaultObjectForm>Task.Задача1.Form.ФормаЗадачи</DefaultObjectForm>
+			<DefaultListForm/>
+			<DefaultChoiceForm/>
+			<AuxiliaryObjectForm/>
+			<AuxiliaryListForm/>
+			<AuxiliaryChoiceForm/>
+			<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>
+			<IncludeHelpInContents>false</IncludeHelpInContents>
+			<DataLockFields/>
+			<DataLockControlMode>Managed</DataLockControlMode>
+			<FullTextSearch>Use</FullTextSearch>
+			<ObjectPresentation/>
+			<ExtendedObjectPresentation/>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+			<DataHistory>DontUse</DataHistory>
+			<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>
+			<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>
+		</Properties>
+		<ChildObjects>
+			<Form>ФормаЗадачи</Form>
+		</ChildObjects>
+	</Task>
+</MetaDataObject>

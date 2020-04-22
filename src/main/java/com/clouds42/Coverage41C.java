@@ -90,6 +90,9 @@ public class Coverage41C implements Callable<Integer> {
     @Option(names = {"-p", "--password"}, description = "Dbgs password", interactive = true)
     private String password;
 
+    @Option(names = {"-p:env", "--password:env"}, description = "Password environment variable name", defaultValue = "")
+    private String passwordEnv;
+
     @Option(names = {"-n", "--areanames"}, description = "Debug area names (not for general use!)")
     private List<String> debugAreaNames;
 
@@ -102,9 +105,9 @@ public class Coverage41C implements Callable<Integer> {
     @Option(names = "--verbose", description = "If you need more logs. Default - ${DEFAULT-VALUE}", defaultValue = "false")
     private Boolean verbose;
 
-    private static RuntimeDebugHttpClient client;
+    private RuntimeDebugHttpClient client;
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
-    private static final Map<URI, Map<BigDecimal, Boolean>> coverageData = new HashMap<URI,Map<BigDecimal, Boolean>> () {
+    private final Map<URI, Map<BigDecimal, Boolean>> coverageData = new HashMap<URI,Map<BigDecimal, Boolean>> () {
         @Override
         public Map<BigDecimal, Boolean> get(Object key) {
             Map<BigDecimal, Boolean> map = super.get(key);
@@ -138,50 +141,42 @@ public class Coverage41C implements Callable<Integer> {
         clean
     }
 
-    private class CommandListenServer {
-        private final ServerSocket serverSocket;
-
-        public CommandListenServer(ServerSocket serverSocket) {
-            this.serverSocket = serverSocket;
-        }
-
-        public void run() throws IOException {
-            while (true) {
-                Socket clientSocket = serverSocket.accept();
-                try {
-                    PrintWriter out =
-                            new PrintWriter(clientSocket.getOutputStream(), true);
-                    BufferedReader in = new BufferedReader(
-                            new InputStreamReader(clientSocket.getInputStream()));
-                    String line;
-                    do {
-                        line = in.readLine();
-                        if (line != null) {
-                            if (DUMP_COMMAND.equals(line.trim())) {
-                                dumpCoverageFile();
-                                out.println(EXIT_RESULT);
-                            } else if (CLEAN_COMMAND.equals(line.trim())) {
-                                coverageData.forEach((uri, bigDecimalBooleanMap) -> {
-                                    for (var key : bigDecimalBooleanMap.keySet()) {
-                                        bigDecimalBooleanMap.put(key, false);
-                                    }
-                                });
-                                out.println(EXIT_RESULT);
-                            }
-                        }
-                    } while (line == null || !line.trim().equals(EXIT_COMMAND));
-                    gracefulShutdown(out);
-                    out.println(EXIT_RESULT);
-                } catch (IOException e) {
-                    logger.error(e.getLocalizedMessage());
-                }
-            }
-        }
-    }
-
     public static void main(String[] args) {
         int exitCode = new CommandLine(new Coverage41C()).execute(args);
         System.exit(exitCode);
+    }
+
+    private Boolean listenSocket(Socket clientSocket) {
+        try {
+            PrintWriter out =
+                    new PrintWriter(clientSocket.getOutputStream(), true);
+            BufferedReader in = new BufferedReader(
+                    new InputStreamReader(clientSocket.getInputStream()));
+            String line;
+            do {
+                line = in.readLine();
+                if (line != null) {
+                    if (DUMP_COMMAND.equals(line.trim())) {
+                        dumpCoverageFile();
+                        out.println(EXIT_RESULT);
+                        return true;
+                    } else if (CLEAN_COMMAND.equals(line.trim())) {
+                        coverageData.forEach((uri, bigDecimalBooleanMap) -> {
+                            for (var key : bigDecimalBooleanMap.keySet()) {
+                                bigDecimalBooleanMap.put(key, false);
+                            }
+                        });
+                        out.println(EXIT_RESULT);
+                        return true;
+                    }
+                }
+            } while (line == null || !line.trim().equals(EXIT_COMMAND));
+            gracefulShutdown(out);
+            return false;
+        } catch (IOException e) {
+            logger.error(e.getLocalizedMessage());
+        }
+        return true;
     }
 
     private void connectAllTargets(List<DebugTargetId> debugTargets) {
@@ -229,7 +224,16 @@ public class Coverage41C implements Callable<Integer> {
                 pipeOut.println(DUMP_COMMAND);
             }
             logger.info("Command send finished");
-            String result = pipeIn.readLine();
+            String result = "";
+            for(int i = 0; i < 30; i++) {
+                try {
+                    result = pipeIn.readLine();
+                    break;
+                } catch(IOException e) {
+                    logger.info("Can't read answer from main app...");
+                    Thread.sleep(1000);
+                }
+            }
             if (result.equals(EXIT_RESULT)) {
                 logger.info("OK");
                 return EXIT_SUCCESS;
@@ -256,11 +260,18 @@ public class Coverage41C implements Callable<Integer> {
             serverSocket = new UnixDomainServerSocket(pipeName);
         }
         commandListenServer = CompletableFuture.supplyAsync(() -> {
-            try {
-                CommandListenServer runner = new CommandListenServer(serverSocket);
-                runner.run();
-            } catch (IOException e) {
-                logger.error(e.getLocalizedMessage());
+            AtomicBoolean stopListen = new AtomicBoolean(false);
+            while(!stopListen.get()) {
+                try {
+                    Socket clientSocket = serverSocket.accept();
+                    CompletableFuture.supplyAsync(() -> listenSocket(clientSocket)).thenAccept(aBoolean -> {
+                        if(aBoolean) {
+                            stopListen.set(false);
+                        }
+                    });
+                } catch (IOException e) {
+                    logger.info("Can't accept socket: " + e.getLocalizedMessage());
+                }
             }
             return true;
         });
@@ -317,6 +328,14 @@ public class Coverage41C implements Callable<Integer> {
                 gracefulShutdown(null);
             }
         });
+
+        if (password != null) {
+            if (password.trim().isEmpty()) {
+                if (!passwordEnv.isEmpty()) {
+                    password = System.getenv(passwordEnv);
+                }
+            }
+        }
 
         while (!stopExecution.get()) {
             try {
@@ -447,15 +466,6 @@ public class Coverage41C implements Callable<Integer> {
             if (serverPipeOut != null) {
                 serverPipeOut.println(EXIT_RESULT);
             }
-            try {
-                serverSocket.close();
-            } catch (IOException e) {
-                logger.error(e.getLocalizedMessage());
-            }
-        }
-
-        if (commandListenServer != null) {
-            commandListenServer.cancel(true);
         }
 
         stopExecution.set(true);
@@ -515,38 +525,38 @@ public class Coverage41C implements Callable<Integer> {
     }
 
     private String getModuleTypeUuid(ModuleType moduleType, MDObjectBase mdObject) {
-        switch (moduleType) {
-            case CommandModule:
-                return "078a6af8-d22c-4248-9c33-7e90075a3d2c";
-            case ObjectModule:
-                return "a637f77f-3840-441d-a1c3-699c8c5cb7e0";
-            case ManagerModule:
-                if (mdObject instanceof SettingsStorage) {
-                    return "0c8cad23-bf8c-468e-b49e-12f1927c048b";
-                } else {
-                    return "d1b64a2c-8078-4982-8190-8f81aefda192";
-                }
-            case FormModule:
-                return "32e087ab-1491-49b6-aba7-43571b41ac2b";
-            case RecordSetModule:
-                return "9f36fd70-4bf4-47f6-b235-935f73aab43f";
-            case ValueManagerModule:
-                return "3e58c91f-9aaa-4f42-8999-4baf33907b75";
-            case ManagedApplicationModule:
-                return "d22e852a-cf8a-4f77-8ccb-3548e7792bea";
-            case SessionModule:
-                return "9b7bbbae-9771-46f2-9e4d-2489e0ffc702";
-            case ExternalConnectionModule:
-                return "a4a9c1e2-1e54-4c7f-af06-4ca341198fac";
-            case OrdinaryApplicationModule:
-                return "a78d9ce3-4e0c-48d5-9863-ae7342eedf94";
-            case HTTPServiceModule:
-            case WEBServiceModule:
-            case CommonModule:
-                return "d5963243-262e-4398-b4d7-fb16d06484f6";
-            case ApplicationModule:
-            case Unknown:
-                break;
+        if (moduleType == ModuleType.CommandModule) {
+            return "078a6af8-d22c-4248-9c33-7e90075a3d2c";
+        } else if (moduleType == ModuleType.ObjectModule) {
+            return "a637f77f-3840-441d-a1c3-699c8c5cb7e0";
+        } else if (moduleType == ModuleType.ManagerModule) {
+            if (mdObject instanceof SettingsStorage) {
+                return "0c8cad23-bf8c-468e-b49e-12f1927c048b";
+            } else {
+                return "d1b64a2c-8078-4982-8190-8f81aefda192";
+            }
+        } else if (moduleType == ModuleType.FormModule) {
+            return "32e087ab-1491-49b6-aba7-43571b41ac2b";
+        } else if (moduleType == ModuleType.RecordSetModule) {
+            return "9f36fd70-4bf4-47f6-b235-935f73aab43f";
+        } else if (moduleType == ModuleType.ValueManagerModule) {
+            return "3e58c91f-9aaa-4f42-8999-4baf33907b75";
+        } else if (moduleType == ModuleType.ManagedApplicationModule) {
+            return "d22e852a-cf8a-4f77-8ccb-3548e7792bea";
+        } else if (moduleType == ModuleType.SessionModule) {
+            return "9b7bbbae-9771-46f2-9e4d-2489e0ffc702";
+        } else if (moduleType == ModuleType.ExternalConnectionModule) {
+            return "a4a9c1e2-1e54-4c7f-af06-4ca341198fac";
+        } else if (moduleType == ModuleType.OrdinaryApplicationModule) {
+            return "a78d9ce3-4e0c-48d5-9863-ae7342eedf94";
+        } else if (moduleType == ModuleType.HTTPServiceModule
+            || moduleType == ModuleType.WEBServiceModule
+            || moduleType == ModuleType.CommonModule) {
+            return "d5963243-262e-4398-b4d7-fb16d06484f6";
+        } else if (moduleType == ModuleType.ApplicationModule
+            || moduleType == ModuleType.Unknown)
+        {
+
         }
         logger.info("Couldn't find UUID for module type: " + moduleType + " for object " + mdObject.getName());
         return "UNKNOWN";

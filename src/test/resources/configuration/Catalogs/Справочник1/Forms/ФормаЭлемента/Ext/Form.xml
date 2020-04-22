@@ -1,0 +1,77 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.9">
+	<WindowOpeningMode>LockOwnerWindow</WindowOpeningMode>
+	<UseForFoldersAndItems>Items</UseForFoldersAndItems>
+	<AutoCommandBar name="ФормаКоманднаяПанель" id="-1"/>
+	<Events>
+		<Event name="BeforeWrite">ПередЗаписью</Event>
+	</Events>
+	<ChildItems>
+		<InputField name="Ссылка" id="1">
+			<DataPath>Объект.Ref</DataPath>
+			<EditMode>EnterOnInput</EditMode>
+			<ContextMenu name="СсылкаКонтекстноеМеню" id="2"/>
+			<ExtendedTooltip name="СсылкаРасширеннаяПодсказка" id="3"/>
+		</InputField>
+		<InputField name="Код" id="4">
+			<DataPath>Объект.Code</DataPath>
+			<EditMode>EnterOnInput</EditMode>
+			<ContextMenu name="КодКонтекстноеМеню" id="5"/>
+			<ExtendedTooltip name="КодРасширеннаяПодсказка" id="6"/>
+		</InputField>
+		<InputField name="Наименование" id="7">
+			<DataPath>Объект.Description</DataPath>
+			<EditMode>EnterOnInput</EditMode>
+			<ContextMenu name="НаименованиеКонтекстноеМеню" id="8"/>
+			<ExtendedTooltip name="НаименованиеРасширеннаяПодсказка" id="9"/>
+		</InputField>
+		<CheckBoxField name="ПометкаУдаления" id="10">
+			<DataPath>Объект.DeletionMark</DataPath>
+			<EditMode>EnterOnInput</EditMode>
+			<CheckBoxType>Auto</CheckBoxType>
+			<ContextMenu name="ПометкаУдаленияКонтекстноеМеню" id="11"/>
+			<ExtendedTooltip name="ПометкаУдаленияРасширеннаяПодсказка" id="12"/>
+		</CheckBoxField>
+		<CheckBoxField name="Предопределенный" id="13">
+			<DataPath>Объект.Predefined</DataPath>
+			<EditMode>EnterOnInput</EditMode>
+			<CheckBoxType>Auto</CheckBoxType>
+			<ContextMenu name="ПредопределенныйКонтекстноеМеню" id="14"/>
+			<ExtendedTooltip name="ПредопределенныйРасширеннаяПодсказка" id="15"/>
+		</CheckBoxField>
+		<InputField name="ИмяПредопределенныхДанных" id="16">
+			<DataPath>Объект.PredefinedDataName</DataPath>
+			<EditMode>EnterOnInput</EditMode>
+			<ContextMenu name="ИмяПредопределенныхДанныхКонтекстноеМеню" id="17"/>
+			<ExtendedTooltip name="ИмяПредопределенныхДанныхРасширеннаяПодсказка" id="18"/>
+		</InputField>
+		<InputField name="Реквизит1" id="19">
+			<DataPath>Объект.Реквизит1</DataPath>
+			<EditMode>EnterOnInput</EditMode>
+			<ContextMenu name="Реквизит1КонтекстноеМеню" id="20"/>
+			<ExtendedTooltip name="Реквизит1РасширеннаяПодсказка" id="21"/>
+		</InputField>
+		<InputField name="Реквизит2" id="22">
+			<DataPath>Объект.Реквизит2</DataPath>
+			<EditMode>EnterOnInput</EditMode>
+			<ContextMenu name="Реквизит2КонтекстноеМеню" id="23"/>
+			<ExtendedTooltip name="Реквизит2РасширеннаяПодсказка" id="24"/>
+		</InputField>
+		<CheckBoxField name="Реквизит3" id="25">
+			<DataPath>Объект.Реквизит3</DataPath>
+			<EditMode>EnterOnInput</EditMode>
+			<CheckBoxType>Auto</CheckBoxType>
+			<ContextMenu name="Реквизит3КонтекстноеМеню" id="26"/>
+			<ExtendedTooltip name="Реквизит3РасширеннаяПодсказка" id="27"/>
+		</CheckBoxField>
+	</ChildItems>
+	<Attributes>
+		<Attribute name="Объект" id="1">
+			<Type>
+				<v8:Type>cfg:CatalogObject.Справочник1</v8:Type>
+			</Type>
+			<MainAttribute>true</MainAttribute>
+			<SavedData>true</SavedData>
+		</Attribute>
+	</Attributes>
+</Form>

@@ -63,15 +63,28 @@ dependencies {
     providedCompile fileTree(edtLocation) { include 'com._1c.g5.v8.dt.debug.core_*.jar' }
     providedCompile fileTree(edtLocation) { include 'com._1c.g5.v8.dt.debug.model_*.jar' }
 
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.6.2'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.6.2'
+    testCompile 'org.xmlunit:xmlunit-core:2.6.4'
+    testCompile 'org.xmlunit:xmlunit-matchers:2.6.4'
+    testCompile 'com.fasterxml.jackson.core:jackson-core:2.9.6'
+    testCompile 'com.fasterxml.jackson.core:jackson-databind:2.9.6'
 }
 
-compileJava {
+tasks.withType(JavaCompile) {
     sourceSets.main.compileClasspath += configurations.providedCompile
     options.compilerArgs += ["-Aproject=${project.group}/${project.name}"]
+    options.encoding = 'UTF-8'
 }
 
 run {
     classpath += configurations.providedCompile
+}
+
+test {
+    classpath += configurations.providedCompile
+    useJUnitPlatform()
+    testLogging.showStandardStreams = true
 }
 
 startScripts {

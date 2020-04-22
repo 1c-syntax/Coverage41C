@@ -1,0 +1,94 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.9">
+	<ChartOfCharacteristicTypes uuid="f53a24c3-f1dc-43b7-8dcf-eeb8c0b7f452">
+		<InternalInfo>
+			<xr:GeneratedType name="ChartOfCharacteristicTypesObject.ПланВидовХарактеристик1" category="Object">
+				<xr:TypeId>a888f719-ee29-4cfe-829b-7d338191ee47</xr:TypeId>
+				<xr:ValueId>d29b3a5f-a1d4-4054-8c43-a86d96d48045</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ChartOfCharacteristicTypesRef.ПланВидовХарактеристик1" category="Ref">
+				<xr:TypeId>0f8cef84-e977-438e-9c12-d447f9e630b7</xr:TypeId>
+				<xr:ValueId>3363bfc6-71e5-4ca6-bf9e-118eb1fdf3d7</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ChartOfCharacteristicTypesSelection.ПланВидовХарактеристик1" category="Selection">
+				<xr:TypeId>36249330-abd7-45e9-af58-6b59234a4488</xr:TypeId>
+				<xr:ValueId>08a7ea67-e86f-49bc-b30a-f0878a9b6fa1</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ChartOfCharacteristicTypesList.ПланВидовХарактеристик1" category="List">
+				<xr:TypeId>d57339ec-c092-41f9-9571-7645174d1ce8</xr:TypeId>
+				<xr:ValueId>690ac3e8-4045-460c-964c-5531acd69f60</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="Characteristic.ПланВидовХарактеристик1" category="Characteristic">
+				<xr:TypeId>53d57c8e-02dd-4366-b0f9-854f0ed0ea61</xr:TypeId>
+				<xr:ValueId>eb1e8106-cd51-42d5-92bd-82734d7b7440</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ChartOfCharacteristicTypesManager.ПланВидовХарактеристик1" category="Manager">
+				<xr:TypeId>7628ad23-e406-4161-a855-d6f34622ab02</xr:TypeId>
+				<xr:ValueId>df24f15c-d914-4a0e-8363-c16333735e65</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>ПланВидовХарактеристик1</Name>
+			<Synonym/>
+			<Comment/>
+			<UseStandardCommands>true</UseStandardCommands>
+			<IncludeHelpInContents>false</IncludeHelpInContents>
+			<CharacteristicExtValues/>
+			<Type>
+				<v8:Type>xs:string</v8:Type>
+				<v8:StringQualifiers>
+					<v8:Length>10</v8:Length>
+					<v8:AllowedLength>Variable</v8:AllowedLength>
+				</v8:StringQualifiers>
+			</Type>
+			<Hierarchical>false</Hierarchical>
+			<FoldersOnTop>true</FoldersOnTop>
+			<CodeLength>9</CodeLength>
+			<CodeAllowedLength>Variable</CodeAllowedLength>
+			<DescriptionLength>25</DescriptionLength>
+			<CodeSeries>WholeCharacteristicKind</CodeSeries>
+			<CheckUnique>true</CheckUnique>
+			<Autonumbering>true</Autonumbering>
+			<DefaultPresentation>AsDescription</DefaultPresentation>
+			<Characteristics/>
+			<PredefinedDataUpdate>Auto</PredefinedDataUpdate>
+			<EditType>InDialog</EditType>
+			<QuickChoice>false</QuickChoice>
+			<ChoiceMode>BothWays</ChoiceMode>
+			<InputByString>
+				<xr:Field>ChartOfCharacteristicTypes.ПланВидовХарактеристик1.StandardAttribute.Description</xr:Field>
+				<xr:Field>ChartOfCharacteristicTypes.ПланВидовХарактеристик1.StandardAttribute.Code</xr:Field>
+			</InputByString>
+			<CreateOnInput>DontUse</CreateOnInput>
+			<SearchStringModeOnInputByString>Begin</SearchStringModeOnInputByString>
+			<ChoiceDataGetModeOnInputByString>Directly</ChoiceDataGetModeOnInputByString>
+			<FullTextSearchOnInputByString>DontUse</FullTextSearchOnInputByString>
+			<ChoiceHistoryOnInput>Auto</ChoiceHistoryOnInput>
+			<DefaultObjectForm>ChartOfCharacteristicTypes.ПланВидовХарактеристик1.Form.ФормаЭлемента</DefaultObjectForm>
+			<DefaultFolderForm/>
+			<DefaultListForm/>
+			<DefaultChoiceForm/>
+			<DefaultFolderChoiceForm/>
+			<AuxiliaryObjectForm/>
+			<AuxiliaryFolderForm/>
+			<AuxiliaryListForm/>
+			<AuxiliaryChoiceForm/>
+			<AuxiliaryFolderChoiceForm/>
+			<BasedOn/>
+			<DataLockFields/>
+			<DataLockControlMode>Managed</DataLockControlMode>
+			<FullTextSearch>Use</FullTextSearch>
+			<ObjectPresentation/>
+			<ExtendedObjectPresentation/>
+			<ListPresentation/>
+			<ExtendedListPresentation/>
+			<Explanation/>
+			<DataHistory>DontUse</DataHistory>
+			<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>
+			<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>
+		</Properties>
+		<ChildObjects>
+			<Form>ФормаЭлемента</Form>
+		</ChildObjects>
+	</ChartOfCharacteristicTypes>
+</MetaDataObject>
