@@ -133,6 +133,7 @@ public class Coverage41C implements Callable<Integer> {
     private Configuration conf;
 
     private AtomicBoolean stopExecution = new AtomicBoolean(false);
+    private boolean rawMode = false;
 
     private enum CommandAction {
         start,
@@ -244,8 +245,8 @@ public class Coverage41C implements Callable<Integer> {
         }
 
         if (srcDirName.isEmpty() && projectDirName.isEmpty()) {
-            logger.info("Missing required arguments: -P (--projectDir) and/or -s (--srcDir)");
-            return EXIT_FAILURE;
+            logger.info("Sources directory not set. Enabling RAW mode");
+            rawMode = true;
         }
 
         if (projectDirName.isEmpty() && !srcDirName.isEmpty()) {
@@ -285,32 +286,34 @@ public class Coverage41C implements Callable<Integer> {
             debugAreaNames = new ArrayList<>();
         }
 
-        logger.info("Reading configuration sources...");
-
         Map<String, URI> uriListByKey = new HashMap<>();
 
-        conf = Configuration.create(Path.of(projectDirName).resolve(srcDirName));
+        if (!rawMode) {
+            logger.info("Reading configuration sources...");
 
-        Set<MDObjectBase> configurationChildren = conf.getChildren();
-        for (MDObjectBase mdObj : configurationChildren) {
+            conf = Configuration.create(Path.of(projectDirName).resolve(srcDirName));
 
-            addAllModulesToList(uriListByKey, mdObj);
+            Set<MDObjectBase> configurationChildren = conf.getChildren();
+            for (MDObjectBase mdObj : configurationChildren) {
 
-            List<com.github._1c_syntax.mdclasses.mdo.Command> commandsList = mdObj.getCommands();
-            if (commandsList != null) {
-                commandsList.forEach(cmd -> {
-                    addAllModulesToList(uriListByKey, cmd);
-                });
+                addAllModulesToList(uriListByKey, mdObj);
+
+                List<com.github._1c_syntax.mdclasses.mdo.Command> commandsList = mdObj.getCommands();
+                if (commandsList != null) {
+                    commandsList.forEach(cmd -> {
+                        addAllModulesToList(uriListByKey, cmd);
+                    });
+                }
+
+                List<Form> formsList = mdObj.getForms();
+                if (formsList != null) {
+                    formsList.forEach(form -> {
+                        addAllModulesToList(uriListByKey, form);
+                    });
+                }
             }
-
-            List<Form> formsList = mdObj.getForms();
-            if (formsList != null) {
-                formsList.forEach(form -> {
-                    addAllModulesToList(uriListByKey, form);
-                });
-            }
+            logger.info("Configuration sources reading DONE");
         }
-        logger.info("Configuration sources reading DONE");
 
         boolean firstRun = true;
 
@@ -362,7 +365,12 @@ public class Coverage41C implements Callable<Integer> {
                                     String propertyId = moduleId.getPropertyID();
                                     String key = getUriKey(objectId, propertyId);
 
-                                    URI uri = uriListByKey.get(key);
+                                    URI uri;
+                                    if (!rawMode) {
+                                        uri = uriListByKey.get(key);
+                                    } else {
+                                        uri = URI.create("file:///" + key);
+                                    }
                                     if (uri == null) {
                                         logger.info("Couldn't find object id " + objectId
                                                 + ", property id " + propertyId + " in sources!");
@@ -371,8 +379,8 @@ public class Coverage41C implements Callable<Integer> {
                                         lineInfoList.forEach(lineInfo -> {
                                             BigDecimal lineNo = lineInfo.getLineNo();
                                             Map<BigDecimal, Boolean> coverMap = coverageData.get(uri);
-                                            if (!coverMap.isEmpty()) {
-                                                if (!coverMap.containsKey(lineNo)) {
+                                            if (!coverMap.isEmpty() || rawMode) {
+                                                if (!rawMode && !coverMap.containsKey(lineNo)) {
                                                     if (verbose.booleanValue()) {
                                                         logger.info("Can't find line to cover " + lineNo + " in module " + uri);
                                                         try {
