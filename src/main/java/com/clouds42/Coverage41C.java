@@ -53,10 +53,12 @@ import java.net.Socket;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Stream;
 
 @Command(name = "Coverage41C", mixinStandardHelpOptions = true, version = "Coverage41C 1.0",
         description = "Make measures from 1C:Enterprise and save them to genericCoverage.xml file",
@@ -73,10 +75,14 @@ public class Coverage41C implements Callable<Integer> {
     @Option(names = {"-e", "--extensionName"}, description = "Extension name", defaultValue = "")
     private String extensionName;
 
+    @Option(names = {"-x", "--externalDataProcessor"}, description = "External data processor (or external report) url",
+            defaultValue = "")
+    private String externalDataProcessorUrl;
+
     @Option(names = {"-s", "--srcDir"}, description = "Directory with sources exported to xml", defaultValue = "")
     private String srcDirName;
 
-    @Option(names = {"-P", "--projectDir"}, description = "Directory with project")
+    @Option(names = {"-P", "--projectDir"}, description = "Directory with project", defaultValue = "")
     private String projectDirName;
 
     @Option(names = {"-o", "--out"}, description = "Output file name")
@@ -86,20 +92,26 @@ public class Coverage41C implements Callable<Integer> {
     private String debugServerUrl;
 
     @Option(names = {"-p", "--password"}, description = "Dbgs password", interactive = true)
-    String password;
+    private String password;
+
+    @Option(names = {"-p:env", "--password:env"}, description = "Password environment variable name", defaultValue = "")
+    private String passwordEnv;
 
     @Option(names = {"-n", "--areanames"}, description = "Debug area names (not for general use!)")
-    List<String> debugAreaNames;
+    private List<String> debugAreaNames;
 
     @Option(names = {"-t", "--timeout"}, description = "Ping timeout. Default - ${DEFAULT-VALUE}", defaultValue = "1000")
-    Integer pingTimeout;
+    private Integer pingTimeout;
 
     @Option(names = {"-r", "--removeSupport"}, description = "Remove support values: ${COMPLETION-CANDIDATES}. Default - ${DEFAULT-VALUE}", defaultValue = "NONE")
-    SupportVariant removeSupport;
+    private SupportVariant removeSupport;
 
-    private static RuntimeDebugHttpClient client;
+    @Option(names = "--verbose", description = "If you need more logs. Default - ${DEFAULT-VALUE}", defaultValue = "false")
+    private Boolean verbose;
+
+    private RuntimeDebugHttpClient client;
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
-    private static final Map<URI, Map<BigDecimal, Boolean>> coverageData = new HashMap<URI,Map<BigDecimal, Boolean>> () {
+    private final Map<URI, Map<BigDecimal, Boolean>> coverageData = new HashMap<URI,Map<BigDecimal, Boolean>> () {
         @Override
         public Map<BigDecimal, Boolean> get(Object key) {
             Map<BigDecimal, Boolean> map = super.get(key);
@@ -112,7 +124,14 @@ public class Coverage41C implements Callable<Integer> {
     };
 
     private static final String EXIT_COMMAND = "EXIT";
+    private static final String DUMP_COMMAND = "DUMP";
+    private static final String CLEAN_COMMAND = "CLEAN";
+    private static final String CHECK_COMMAND = "CHECK";
     private static final String EXIT_RESULT = "OK";
+    private static final String FAIL_RESULT = "ER";
+
+    private static final int EXIT_SUCCESS = 0;
+    private static final int EXIT_FAILURE = -1;
 
     private ServerSocket serverSocket;
     private CompletableFuture<Boolean> commandListenServer;
@@ -120,43 +139,64 @@ public class Coverage41C implements Callable<Integer> {
     private Configuration conf;
 
     private AtomicBoolean stopExecution = new AtomicBoolean(false);
+    private boolean rawMode = false;
+    private boolean systemStarted = false;
 
     private enum CommandAction {
         start,
-        stop
-    }
-
-    private class CommandListenServer {
-        private final ServerSocket serverSocket;
-
-        public CommandListenServer(ServerSocket serverSocket) {
-            this.serverSocket = serverSocket;
-        }
-
-        public void run() throws IOException {
-            while (true) {
-                Socket clientSocket = serverSocket.accept();
-                try {
-                    PrintWriter out =
-                            new PrintWriter(clientSocket.getOutputStream(), true);
-                    BufferedReader in = new BufferedReader(
-                            new InputStreamReader(clientSocket.getInputStream()));
-                    String line;
-                    do {
-                        line = in.readLine();
-                    } while (line == null || !line.trim().equals(EXIT_COMMAND));
-                    gracefulShutdown(out);
-                    out.println(EXIT_RESULT);
-                } catch (IOException e) {
-                    logger.error(e.getLocalizedMessage());
-                }
-            }
-        }
+        stop,
+        dump,
+        clean,
+        check
     }
 
     public static void main(String[] args) {
         int exitCode = new CommandLine(new Coverage41C()).execute(args);
         System.exit(exitCode);
+    }
+
+    private Boolean listenSocket(Socket clientSocket) {
+        try {
+            PrintWriter out =
+                    new PrintWriter(clientSocket.getOutputStream(), true);
+            BufferedReader in = new BufferedReader(
+                    new InputStreamReader(clientSocket.getInputStream()));
+            String line;
+            do {
+                line = in.readLine();
+                if (line != null) {
+                    logger.info("Get command: " + line.trim());
+                    if (DUMP_COMMAND.equals(line.trim())) {
+                        dumpCoverageFile();
+                        out.println(EXIT_RESULT);
+                        return true;
+                    } else if (CLEAN_COMMAND.equals(line.trim())) {
+                        coverageData.forEach((uri, bigDecimalBooleanMap) -> {
+                            for (var key : bigDecimalBooleanMap.keySet()) {
+                                bigDecimalBooleanMap.put(key, false);
+                            }
+                        });
+                        out.println(EXIT_RESULT);
+                        return true;
+                    } else if (CHECK_COMMAND.equals(line.trim())) {
+                        for (int i = 0; i<60; i++) {
+                            if (systemStarted) {
+                                out.println(EXIT_RESULT);
+                                return true;
+                            }
+                            Thread.sleep(1000);
+                        }
+                        out.println(FAIL_RESULT);
+                        return true;
+                    }
+                }
+            } while (line == null || !line.trim().equals(EXIT_COMMAND));
+            gracefulShutdown(out);
+            return false;
+        } catch (IOException | InterruptedException e) {
+            logger.error(e.getLocalizedMessage());
+        }
+        return true;
     }
 
     private void connectAllTargets(List<DebugTargetId> debugTargets) {
@@ -188,8 +228,8 @@ public class Coverage41C implements Callable<Integer> {
             Path sock = tempDir.resolve(String.format("%s_%s.sock", infobaseAlias, debugUri.toString().replaceAll("[^a-zA-Z0-9-_\\.]", "_")));
             pipeName = sock.toString();
         }
-        if (commandAction == CommandAction.stop) {
-            logger.info("Trying to stop main application...");
+        if (commandAction != CommandAction.start) {
+            logger.info("Trying to send command to main application...");
             Socket client;
             if (isWindows) {
                 client = new Win32NamedPipeSocket(pipeName);
@@ -198,16 +238,48 @@ public class Coverage41C implements Callable<Integer> {
             }
             PrintWriter pipeOut = new PrintWriter(client.getOutputStream(), true);
             BufferedReader pipeIn = new BufferedReader(new InputStreamReader(client.getInputStream()));
-            pipeOut.println(EXIT_COMMAND);
-            logger.info("Command send finished");
-            String result = pipeIn.readLine();
-            if (result.equals(EXIT_RESULT)) {
-                logger.info("OK");
-                return 0;
+            String commandText;
+            if (commandAction == CommandAction.stop) {
+                commandText = EXIT_COMMAND;
+            } else if (commandAction == CommandAction.dump) {
+                commandText = DUMP_COMMAND;
+            } else if (commandAction == CommandAction.check) {
+                commandText = CHECK_COMMAND;
+            } else if (commandAction == CommandAction.clean) {
+                commandText = CLEAN_COMMAND;
             } else {
-                logger.info("Incorrect response from main application");
-                return -1;
+                throw new Exception("Unknown command");
             }
+            pipeOut.println(commandText);
+            logger.info("Command send finished: " + commandText);
+            String result = "";
+            for(int i = 0; i < 60; i++) {
+                try {
+                    result = pipeIn.readLine();
+                    break;
+                } catch(IOException e) {
+                    logger.info("Can't read answer from main app...");
+                    Thread.sleep(1000);
+                }
+            }
+            if (result.equals(EXIT_RESULT)) {
+                logger.info("Command success: " + commandText);
+                return EXIT_SUCCESS;
+            } else {
+                logger.info("Command failed: " + commandText);
+                return EXIT_FAILURE;
+            }
+        }
+
+        if (srcDirName.isEmpty() && projectDirName.isEmpty()) {
+            logger.info("Sources directory not set. Enabling RAW mode");
+            rawMode = true;
+        }
+
+        if (projectDirName.isEmpty() && !srcDirName.isEmpty()) {
+            // for backward compatibility
+            projectDirName = srcDirName;
+            srcDirName = "";
         }
 
         if (isWindows) {
@@ -216,11 +288,18 @@ public class Coverage41C implements Callable<Integer> {
             serverSocket = new UnixDomainServerSocket(pipeName);
         }
         commandListenServer = CompletableFuture.supplyAsync(() -> {
-            try {
-                CommandListenServer runner = new CommandListenServer(serverSocket);
-                runner.run();
-            } catch (IOException e) {
-                logger.error(e.getLocalizedMessage());
+            AtomicBoolean stopListen = new AtomicBoolean(false);
+            while(!stopListen.get()) {
+                try {
+                    Socket clientSocket = serverSocket.accept();
+                    CompletableFuture.supplyAsync(() -> listenSocket(clientSocket)).thenAccept(aBoolean -> {
+                        if(aBoolean) {
+                            stopListen.set(false);
+                        }
+                    });
+                } catch (IOException e) {
+                    logger.info("Can't accept socket: " + e.getLocalizedMessage());
+                }
             }
             return true;
         });
@@ -234,32 +313,34 @@ public class Coverage41C implements Callable<Integer> {
             debugAreaNames = new ArrayList<>();
         }
 
-        logger.info("Reading configuration sources...");
-
         Map<String, URI> uriListByKey = new HashMap<>();
 
-        conf = Configuration.create(Path.of(projectDirName).resolve(srcDirName));
+        if (!rawMode) {
+            logger.info("Reading configuration sources...");
 
-        Set<MDObjectBase> configurationChildren = conf.getChildren();
-        for (MDObjectBase mdObj : configurationChildren) {
+            conf = Configuration.create(Path.of(projectDirName).resolve(srcDirName));
 
-            addAllModulesToList(uriListByKey, mdObj);
+            Set<MDObjectBase> configurationChildren = conf.getChildren();
+            for (MDObjectBase mdObj : configurationChildren) {
 
-            List<com.github._1c_syntax.mdclasses.mdo.Command> commandsList = mdObj.getCommands();
-            if (commandsList != null) {
-                commandsList.forEach(cmd -> {
-                    addAllModulesToList(uriListByKey, cmd);
-                });
+                addAllModulesToList(uriListByKey, mdObj);
+
+                List<com.github._1c_syntax.mdclasses.mdo.Command> commandsList = mdObj.getCommands();
+                if (commandsList != null) {
+                    commandsList.forEach(cmd -> {
+                        addAllModulesToList(uriListByKey, cmd);
+                    });
+                }
+
+                List<Form> formsList = mdObj.getForms();
+                if (formsList != null) {
+                    formsList.forEach(form -> {
+                        addAllModulesToList(uriListByKey, form);
+                    });
+                }
             }
-
-            List<Form> formsList = mdObj.getForms();
-            if (formsList != null) {
-                formsList.forEach(form -> {
-                    addAllModulesToList(uriListByKey, form);
-                });
-            }
+            logger.info("Configuration sources reading DONE");
         }
-        logger.info("Configuration sources reading DONE");
 
         boolean firstRun = true;
 
@@ -267,7 +348,7 @@ public class Coverage41C implements Callable<Integer> {
             client.configure(debugServerUrl, debugServerUuid, infobaseAlias);
         } catch (RuntimeDebugClientException e) {
             logger.error(e.getLocalizedMessage());
-            return -1;
+            return EXIT_FAILURE;
         }
 
         Runtime.getRuntime().addShutdownHook(new Thread()
@@ -277,6 +358,14 @@ public class Coverage41C implements Callable<Integer> {
                 gracefulShutdown(null);
             }
         });
+
+        if (password != null) {
+            if (password.trim().isEmpty()) {
+                if (!passwordEnv.isEmpty()) {
+                    password = System.getenv(passwordEnv);
+                }
+            }
+        }
 
         while (!stopExecution.get()) {
             try {
@@ -296,14 +385,20 @@ public class Coverage41C implements Callable<Integer> {
                             EList<PerformanceInfoModule> moduleInfoList = measure.getModuleData();
                             moduleInfoList.forEach(moduleInfo -> {
                                 BSLModuleIdInternal moduleId = moduleInfo.getModuleID();
-                                String url = moduleId.getURL();
+                                String moduleUrl = moduleId.getURL();
                                 String moduleExtensionName = moduleId.getExtensionName();
-                                if (this.extensionName.equals(moduleExtensionName)) {
+                                if (this.extensionName.equals(moduleExtensionName)
+                                    && this.externalDataProcessorUrl.equals(moduleUrl)) {
                                     String objectId = moduleId.getObjectID();
                                     String propertyId = moduleId.getPropertyID();
                                     String key = getUriKey(objectId, propertyId);
 
-                                    URI uri = uriListByKey.get(key);
+                                    URI uri;
+                                    if (!rawMode) {
+                                        uri = uriListByKey.get(key);
+                                    } else {
+                                        uri = URI.create("file:///" + key);
+                                    }
                                     if (uri == null) {
                                         logger.info("Couldn't find object id " + objectId
                                                 + ", property id " + propertyId + " in sources!");
@@ -312,11 +407,21 @@ public class Coverage41C implements Callable<Integer> {
                                         lineInfoList.forEach(lineInfo -> {
                                             BigDecimal lineNo = lineInfo.getLineNo();
                                             Map<BigDecimal, Boolean> coverMap = coverageData.get(uri);
-                                            if (!coverMap.isEmpty()) {
-                                                if (!coverMap.containsKey(lineNo)) {
-                                                    logger.info("Can't find line to cover " + lineNo + " in module " + uri);
+                                            if (!coverMap.isEmpty() || rawMode) {
+                                                if (!rawMode && !coverMap.containsKey(lineNo)) {
+                                                    if (verbose.booleanValue()) {
+                                                        logger.info("Can't find line to cover " + lineNo + " in module " + uri);
+                                                        try {
+                                                            Stream<String> all_lines = Files.lines(Paths.get(uri));
+                                                            String specific_line_n = all_lines.skip(lineNo.longValue() - 1).findFirst().get();
+                                                            logger.info(">>> " + specific_line_n);
+                                                        } catch (Exception e) {
+                                                            logger.error(e.getLocalizedMessage());
+                                                        }
+                                                    }
+                                                } else {
+                                                    coverMap.put(lineNo, true);
                                                 }
-                                                coverMap.put(lineNo, true);
                                             }
                                         });
                                     }
@@ -360,9 +465,11 @@ public class Coverage41C implements Callable<Integer> {
 
                     client.toggleProfiling(null);
                     client.toggleProfiling(measureUuid);
+
+                    systemStarted = true;
                 } catch (RuntimeDebugClientException e1) {
                     logger.error(e1.getLocalizedMessage());
-                    return -2;
+                    return EXIT_FAILURE;
                 }
             }
             Thread.sleep(pingTimeout);
@@ -376,7 +483,7 @@ public class Coverage41C implements Callable<Integer> {
         }
 
         logger.info("Main thread finished");
-        return 0;
+        return EXIT_SUCCESS;
     }
 
     private void gracefulShutdown(PrintWriter serverPipeOut) {
@@ -391,6 +498,20 @@ public class Coverage41C implements Callable<Integer> {
             logger.error(e.getLocalizedMessage());
         }
 
+        dumpCoverageFile();
+
+        if (serverSocket != null) {
+            if (serverPipeOut != null) {
+                serverPipeOut.println(EXIT_RESULT);
+            }
+        }
+
+        stopExecution.set(true);
+
+        logger.info("Bye!");
+    }
+
+    private void dumpCoverageFile() {
         DocumentBuilderFactory icFactory = DocumentBuilderFactory.newInstance();
         DocumentBuilder icBuilder;
         try {
@@ -424,70 +545,56 @@ public class Coverage41C implements Callable<Integer> {
             logger.info("Lines to cover: " + linesToCover);
             logger.info("Covered lines: " + coveredLinesCount);
             if (linesToCover > 0) {
-                logger.info("Covering: " + Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100. + "%");
+                logger.info("Coverage: " + Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100. + "%");
             }
             Transformer transformer = TransformerFactory.newInstance().newTransformer();
             transformer.setOutputProperty(OutputKeys.INDENT, "yes");
             DOMSource source = new DOMSource(doc);
-            StreamResult console = new StreamResult(new FileOutputStream(outputFile));
-            transformer.transform(source, console);
+            StreamResult outputStream;
+            if (outputFile == null) {
+                outputStream = new StreamResult(System.out);
+            } else {
+                outputStream = new StreamResult(new FileOutputStream(outputFile));
+            }
+            transformer.transform(source, outputStream);
         } catch (Exception e) {
-            e.printStackTrace();
+            logger.error(e.getLocalizedMessage());
         }
-
-        if (serverSocket != null) {
-            if (serverPipeOut != null) {
-                serverPipeOut.println(EXIT_RESULT);
-            }
-            try {
-                serverSocket.close();
-            } catch (IOException e) {
-                logger.error(e.getLocalizedMessage());
-            }
-        }
-
-        if (commandListenServer != null) {
-            commandListenServer.cancel(true);
-        }
-
-        stopExecution.set(true);
-
-        logger.info("Bye!");
     }
 
     private String getModuleTypeUuid(ModuleType moduleType, MDObjectBase mdObject) {
-        switch (moduleType) {
-            case CommandModule:
-                return "078a6af8-d22c-4248-9c33-7e90075a3d2c";
-            case ObjectModule:
-                return "a637f77f-3840-441d-a1c3-699c8c5cb7e0";
-            case ManagerModule:
-                if (mdObject instanceof SettingsStorage) {
-                    return "0c8cad23-bf8c-468e-b49e-12f1927c048b";
-                } else {
-                    return "d1b64a2c-8078-4982-8190-8f81aefda192";
-                }
-            case FormModule:
-                return "32e087ab-1491-49b6-aba7-43571b41ac2b";
-            case RecordSetModule:
-                return "9f36fd70-4bf4-47f6-b235-935f73aab43f";
-            case ValueManagerModule:
-                return "3e58c91f-9aaa-4f42-8999-4baf33907b75";
-            case ManagedApplicationModule:
-                return "d22e852a-cf8a-4f77-8ccb-3548e7792bea";
-            case SessionModule:
-                return "9b7bbbae-9771-46f2-9e4d-2489e0ffc702";
-            case ExternalConnectionModule:
-                return "a4a9c1e2-1e54-4c7f-af06-4ca341198fac";
-            case OrdinaryApplicationModule:
-                return "a78d9ce3-4e0c-48d5-9863-ae7342eedf94";
-            case HTTPServiceModule:
-            case WEBServiceModule:
-            case CommonModule:
-                return "d5963243-262e-4398-b4d7-fb16d06484f6";
-            case ApplicationModule:
-            case Unknown:
-                break;
+        if (moduleType == ModuleType.CommandModule) {
+            return "078a6af8-d22c-4248-9c33-7e90075a3d2c";
+        } else if (moduleType == ModuleType.ObjectModule) {
+            return "a637f77f-3840-441d-a1c3-699c8c5cb7e0";
+        } else if (moduleType == ModuleType.ManagerModule) {
+            if (mdObject instanceof SettingsStorage) {
+                return "0c8cad23-bf8c-468e-b49e-12f1927c048b";
+            } else {
+                return "d1b64a2c-8078-4982-8190-8f81aefda192";
+            }
+        } else if (moduleType == ModuleType.FormModule) {
+            return "32e087ab-1491-49b6-aba7-43571b41ac2b";
+        } else if (moduleType == ModuleType.RecordSetModule) {
+            return "9f36fd70-4bf4-47f6-b235-935f73aab43f";
+        } else if (moduleType == ModuleType.ValueManagerModule) {
+            return "3e58c91f-9aaa-4f42-8999-4baf33907b75";
+        } else if (moduleType == ModuleType.ManagedApplicationModule) {
+            return "d22e852a-cf8a-4f77-8ccb-3548e7792bea";
+        } else if (moduleType == ModuleType.SessionModule) {
+            return "9b7bbbae-9771-46f2-9e4d-2489e0ffc702";
+        } else if (moduleType == ModuleType.ExternalConnectionModule) {
+            return "a4a9c1e2-1e54-4c7f-af06-4ca341198fac";
+        } else if (moduleType == ModuleType.OrdinaryApplicationModule) {
+            return "a78d9ce3-4e0c-48d5-9863-ae7342eedf94";
+        } else if (moduleType == ModuleType.HTTPServiceModule
+            || moduleType == ModuleType.WEBServiceModule
+            || moduleType == ModuleType.CommonModule) {
+            return "d5963243-262e-4398-b4d7-fb16d06484f6";
+        } else if (moduleType == ModuleType.ApplicationModule
+            || moduleType == ModuleType.Unknown)
+        {
+
         }
         logger.info("Couldn't find UUID for module type: " + moduleType + " for object " + mdObject.getName());
         return "UNKNOWN";

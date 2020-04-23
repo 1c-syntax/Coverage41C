@@ -1,0 +1,74 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.9">
+	<WindowOpeningMode>LockOwnerWindow</WindowOpeningMode>
+	<AutoCommandBar name="ФормаКоманднаяПанель" id="-1"/>
+	<Events>
+		<Event name="OnOpen">ПриОткрытии</Event>
+	</Events>
+	<ChildItems>
+		<InputField name="Код" id="1">
+			<DataPath>Объект.Code</DataPath>
+			<EditMode>EnterOnInput</EditMode>
+			<ContextMenu name="КодКонтекстноеМеню" id="2"/>
+			<ExtendedTooltip name="КодРасширеннаяПодсказка" id="3"/>
+		</InputField>
+		<InputField name="Наименование" id="4">
+			<DataPath>Объект.Description</DataPath>
+			<EditMode>EnterOnInput</EditMode>
+			<ContextMenu name="НаименованиеКонтекстноеМеню" id="5"/>
+			<ExtendedTooltip name="НаименованиеРасширеннаяПодсказка" id="6"/>
+		</InputField>
+		<Table name="ВедущиеВидыРасчета" id="7">
+			<Representation>List</Representation>
+			<AutoInsertNewRow>true</AutoInsertNewRow>
+			<EnableStartDrag>true</EnableStartDrag>
+			<EnableDrag>true</EnableDrag>
+			<DataPath>Объект.LeadingCalculationTypes</DataPath>
+			<RowFilter xsi:nil="true"/>
+			<ContextMenu name="ВедущиеВидыРасчетаКонтекстноеМеню" id="8"/>
+			<AutoCommandBar name="ВедущиеВидыРасчетаКоманднаяПанель" id="9"/>
+			<ExtendedTooltip name="ВедущиеВидыРасчетаРасширеннаяПодсказка" id="10"/>
+			<SearchStringAddition name="ВедущиеВидыРасчетаСтрокаПоиска" id="11">
+				<AdditionSource>
+					<Item>ВедущиеВидыРасчета</Item>
+					<Type>SearchStringRepresentation</Type>
+				</AdditionSource>
+				<ContextMenu name="ВедущиеВидыРасчетаСтрокаПоискаКонтекстноеМеню" id="12"/>
+				<ExtendedTooltip name="ВедущиеВидыРасчетаСтрокаПоискаРасширеннаяПодсказка" id="13"/>
+			</SearchStringAddition>
+			<ViewStatusAddition name="ВедущиеВидыРасчетаСостояниеПросмотра" id="14">
+				<AdditionSource>
+					<Item>ВедущиеВидыРасчета</Item>
+					<Type>ViewStatusRepresentation</Type>
+				</AdditionSource>
+				<ContextMenu name="ВедущиеВидыРасчетаСостояниеПросмотраКонтекстноеМеню" id="15"/>
+				<ExtendedTooltip name="ВедущиеВидыРасчетаСостояниеПросмотраРасширеннаяПодсказка" id="16"/>
+			</ViewStatusAddition>
+			<SearchControlAddition name="ВедущиеВидыРасчетаУправлениеПоиском" id="17">
+				<AdditionSource>
+					<Item>ВедущиеВидыРасчета</Item>
+					<Type>SearchControl</Type>
+				</AdditionSource>
+				<ContextMenu name="ВедущиеВидыРасчетаУправлениеПоискомКонтекстноеМеню" id="18"/>
+				<ExtendedTooltip name="ВедущиеВидыРасчетаУправлениеПоискомРасширеннаяПодсказка" id="19"/>
+			</SearchControlAddition>
+			<ChildItems>
+				<InputField name="ВедущиеВидыРасчетаВидРасчета" id="20">
+					<DataPath>Объект.LeadingCalculationTypes.CalculationType</DataPath>
+					<EditMode>EnterOnInput</EditMode>
+					<ContextMenu name="ВедущиеВидыРасчетаВидРасчетаКонтекстноеМеню" id="21"/>
+					<ExtendedTooltip name="ВедущиеВидыРасчетаВидРасчетаРасширеннаяПодсказка" id="22"/>
+				</InputField>
+			</ChildItems>
+		</Table>
+	</ChildItems>
+	<Attributes>
+		<Attribute name="Объект" id="1">
+			<Type>
+				<v8:Type>cfg:ChartOfCalculationTypesObject.ПланВидовРасчета1</v8:Type>
+			</Type>
+			<MainAttribute>true</MainAttribute>
+			<SavedData>true</SavedData>
+		</Attribute>
+	</Attributes>
+</Form>

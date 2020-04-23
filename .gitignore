@@ -22,3 +22,5 @@ gradle-app.setting
 /.settings
 /.vscode
 /bin/
+/choco/*.nupkg
+.scannerwork
