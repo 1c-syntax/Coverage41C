@@ -185,6 +185,7 @@
 			<CommonPicture>ОбщаяКартинка1</CommonPicture>
 			<Interface>Интерфейс1</Interface>
 			<SessionParameter>ПараметрСеанса1</SessionParameter>
+			<SessionParameter>НачалоСеанса</SessionParameter>
 			<Role>Роль1</Role>
 			<CommonTemplate>Макет</CommonTemplate>
 			<FilterCriterion>КритерийОтбора1</FilterCriterion>
@@ -210,6 +211,7 @@
 			<CommonCommand>ОбщаяКоманда1</CommonCommand>
 			<CommandGroup>ГруппаКоманд1</CommandGroup>
 			<Constant>Константа1</Constant>
+			<Constant>ДатаЗавершенияФоновогоЗадания</Constant>
 			<CommonForm>Константы</CommonForm>
 			<Catalog>Справочник1</Catalog>
 			<Document>Документ1</Document>

@@ -1,28 +1,21 @@
 ﻿<?xml version="1.0" encoding="UTF-8"?>
 <MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.9">
-	<Subsystem uuid="3d00f7d6-e3b0-49cf-8093-e2e4f6ea2293">
+	<SessionParameter uuid="f8ec4953-ad45-4993-84fe-8c1db1118c80">
 		<Properties>
-			<Name>ПерваяПодсистема</Name>
+			<Name>НачалоСеанса</Name>
 			<Synonym>
 				<v8:item>
 					<v8:lang>ru</v8:lang>
-					<v8:content>Первая подсистема</v8:content>
+					<v8:content>Начало сеанса</v8:content>
 				</v8:item>
 			</Synonym>
 			<Comment/>
-			<IncludeHelpInContents>true</IncludeHelpInContents>
-			<IncludeInCommandInterface>true</IncludeInCommandInterface>
-			<Explanation/>
-			<Picture/>
-			<Content>
-				<xr:Item xsi:type="xr:MDObjectRef">ChartOfAccounts.ПланСчетов1</xr:Item>
-				<xr:Item xsi:type="xr:MDObjectRef">BusinessProcess.БизнесПроцесс1</xr:Item>
-				<xr:Item xsi:type="xr:MDObjectRef">Constant.ДатаЗавершенияФоновогоЗадания</xr:Item>
-			</Content>
+			<Type>
+				<v8:Type>xs:dateTime</v8:Type>
+				<v8:DateQualifiers>
+					<v8:DateFractions>DateTime</v8:DateFractions>
+				</v8:DateQualifiers>
+			</Type>
 		</Properties>
-		<ChildObjects>
-			<Subsystem>ПодчиненнаяПодсистема</Subsystem>
-			<Subsystem>ПочиненнаяСистема2</Subsystem>
-		</ChildObjects>
-	</Subsystem>
+	</SessionParameter>
 </MetaDataObject>

@@ -12,12 +12,34 @@
 	<Events>
 		<Event name="OnOpen">ПриОткрытии</Event>
 	</Events>
+	<ChildItems>
+		<InputField name="Статус" id="3">
+			<DataPath>Статус</DataPath>
+			<ContextMenu name="СтатусКонтекстноеМеню" id="4"/>
+			<ExtendedTooltip name="СтатусРасширеннаяПодсказка" id="5"/>
+		</InputField>
+	</ChildItems>
 	<Attributes>
 		<Attribute name="Объект" id="1">
 			<Type>
 				<v8:Type>cfg:DataProcessorObject.Обработка1</v8:Type>
 			</Type>
 			<MainAttribute>true</MainAttribute>
+		</Attribute>
+		<Attribute name="Статус" id="2">
+			<Title>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Статус</v8:content>
+				</v8:item>
+			</Title>
+			<Type>
+				<v8:Type>xs:string</v8:Type>
+				<v8:StringQualifiers>
+					<v8:Length>0</v8:Length>
+					<v8:AllowedLength>Variable</v8:AllowedLength>
+				</v8:StringQualifiers>
+			</Type>
 		</Attribute>
 	</Attributes>
 	<Commands>
