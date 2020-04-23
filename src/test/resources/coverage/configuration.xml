@@ -119,7 +119,7 @@
         <lineToCover covered="false" lineNumber="3"/>
     </file>
     <file path="src/test/resources/configuration/CommonCommands/ОбщаяКоманда1/Ext/CommandModule.bsl">
-        <lineToCover covered="false" lineNumber="5"/>
+        <lineToCover covered="true" lineNumber="5"/>
     </file>
     <file path="src/test/resources/configuration/Ext/ExternalConnectionModule.bsl">
         <lineToCover covered="false" lineNumber="4"/>

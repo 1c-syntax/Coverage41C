@@ -18,6 +18,7 @@
 				<xr:Item xsi:type="xr:MDObjectRef">ChartOfAccounts.ПланСчетов1</xr:Item>
 				<xr:Item xsi:type="xr:MDObjectRef">BusinessProcess.БизнесПроцесс1</xr:Item>
 				<xr:Item xsi:type="xr:MDObjectRef">Constant.ДатаЗавершенияФоновогоЗадания</xr:Item>
+				<xr:Item xsi:type="xr:MDObjectRef">CommonCommand.ОбщаяКоманда1</xr:Item>
 			</Content>
 		</Properties>
 		<ChildObjects>

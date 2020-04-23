@@ -171,7 +171,7 @@
 		<Metadata name="SettingsStorage.ХранилищеНастроек1.ManagerModule" id="e7a9947d-7565-4681-b75c-c9a229b45042.8" configVersion="4e6794b1b33733478a3e9ed12b3b7fdb00000000"/>
 		<Metadata name="Style.Стиль1" id="2ef7f6ca-b11c-4e2d-a233-5c5b01675e9a" configVersion="8ffb1b8c283b9446b3be0250a3aec97700000000"/>
 		<Metadata name="StyleItem.ЭлементСтиля1" id="68047ae8-62aa-4696-9780-d364feb3cc10" configVersion="a72f9f6ff0a864458dbf59120f9be83900000000"/>
-		<Metadata name="Subsystem.ПерваяПодсистема" id="3d00f7d6-e3b0-49cf-8093-e2e4f6ea2293" configVersion="541c2e29a1272e449049493349c922cd00000000"/>
+		<Metadata name="Subsystem.ПерваяПодсистема" id="3d00f7d6-e3b0-49cf-8093-e2e4f6ea2293" configVersion="3f09260a2b481e44adc03b1711edb96400000000"/>
 		<Metadata name="Subsystem.ПерваяПодсистема.Subsystem.ПодчиненнаяПодсистема" id="0fbc4f99-ef89-4d98-9b8f-d26c216c8e31" configVersion="a492f4adf35d0d4cb899bbf059e0ce6200000000"/>
 		<Metadata name="Subsystem.ПерваяПодсистема.Subsystem.ПочиненнаяСистема2" id="c2e12fa5-e679-4932-8c37-db175f268b3d" configVersion="0a0af36e265e464496c7d0810cacfe2000000000"/>
 		<Metadata name="Subsystem.ПерваяПодсистема.Subsystem.ПочиненнаяСистема2.CommandInterface" id="c2e12fa5-e679-4932-8c37-db175f268b3d.1" configVersion="ead4270055fe5442b4efcc157262d98a00000000"/>
