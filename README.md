@@ -9,38 +9,47 @@
 3) Проверяем что dbgs.exe (https://its.1c.ru/db/edtdoc/content/197/hdoc/_top/dbgs) запустился и работает. Для этого в браузере открываем его, адрес по умолчанию http://127.0.0.1:1550/. В случае успеха выдолжны увидеть сообщение "... it works!".
 4) Выгружаем исходники конфигурации или расширения в файлы.
 5) Запускаем анализ покрытия командой ```Coverage41C -i <ИмяИнформационнойБазыВКластере> -P <ПутьКПроекту> -s <ПутьКИсходникамОтносительноКорняПроекта> -o <ИмяВыходногоФайлаПокрытия> -e <ИмяРасширения>```. Для файловой базы нужно указать адрес отладчика и предопределённое имя информационной базы ```-i DefAlias -u http://127.0.0.1:<Порт>```.
-6) Выполняем тесты
-7) Останавливаем программу нажатием Ctrl+C в окне терминала или командой ```Coverage41C -a stop -i <ИмяИнформационнойБазыВКластере> -u http://127.0.0.1:<Порт>```
-8) Полученный файл в формате genericCoverage.xml загружаем в SonarQube.
+6) (Опционально, полезно для конвейера) Проверяем статус программы командой ```Coverage41C -i <ИмяИнформационнойБазыВКластере> -a check```.
+7) Выполняем тесты
+8) Останавливаем программу нажатием Ctrl+C в окне терминала или командой ```Coverage41C -a stop -i <ИмяИнформационнойБазыВКластере> -u http://127.0.0.1:<Порт>```
+9) Полученный файл в формате genericCoverage.xml загружаем в SonarQube.
 
 ```cmd
-Usage: Coverage41C [-hV] [-p] [-a=<commandAction>] [-e=<extensionName>]
-                   -i=<infobaseAlias> [-o=<outputFile>] [-r=<removeSupport>]
-                   [-s=<srcDirName>] [-t=<pingTimeout>] [-u=<debugServerUrl>]
-                   [-n=<debugAreaNames>]...
-Make measures from 1C:Enterprise and save them to genericCoverage.xml file
-  -a, --action=<commandAction>
-                           Action: start, stop. Default - start
-  -i, --infobase=<infobaseAlias>
-                           InfoBase name
-  -e, --extensionName=<extensionName>
-                           Extension name
-  -s, --srcDir=<srcDirName>
-                           Directory with sources exported to xml
-  -P, --projectDir=<projectDirName>
-                           Directory with project
-  -o, --out=<outputFile>   Output file name
-  -u, --debugger=<debugServerUrl>
-                           Debugger url. Default - http://127.0.0.1:1550/
-  -p, --password           Dbgs password
-  -n, --areanames=<debugAreaNames>
-                           Debug area names (not for general use!)
-  -t, --timeout=<pingTimeout>
-                           Ping timeout. Default - 1000
-  -r, --removeSupport=<removeSupport>
-                           Remove support values: NOT_EDITABLE,
-                             EDITABLE_SUPPORT_ENABLED, NOT_SUPPORTED, NONE.
-                             Default - NONE
-  -h, --help               Show this help message and exit.
-  -V, --version            Print version information and exit.
+Usage: Coverage41C [-hV] [-p] [--verbose] [-a=<commandAction>]
+                       [-e=<extensionName>] -i=<infobaseAlias> [-o=<outputFile>]
+                       [-P=<projectDirName>] [-p:env=<passwordEnv>]
+                       [-r=<removeSupport>] [-s=<srcDirName>] [-t=<pingTimeout>]
+                       [-u=<debugServerUrl>] [-x=<externalDataProcessorUrl>]
+                       [-n=<debugAreaNames>]...
+    Make measures from 1C:Enterprise and save them to genericCoverage.xml file
+      -a, --action=<commandAction>
+                               Action: start, stop, dump, clean, check. Default -
+                                 start
+      -i, --infobase=<infobaseAlias>
+                               InfoBase name. For file infobase use 'DefAlias' name
+      -e, --extensionName=<extensionName>
+                               Extension name
+      -x, --externalDataProcessor=<externalDataProcessorUrl>
+                               External data processor (or external report) url
+      -s, --srcDir=<srcDirName>
+                               Directory with sources exported to xml
+      -P, --projectDir=<projectDirName>
+                               Directory with project
+      -o, --out=<outputFile>   Output file name
+      -u, --debugger=<debugServerUrl>
+                               Debugger url. Default - http://127.0.0.1:1550/
+      -p, --password           Dbgs password
+          -p:env, --password:env=<passwordEnv>
+                               Password environment variable name
+      -n, --areanames=<debugAreaNames>
+                               Debug area names (not for general use!)
+      -t, --timeout=<pingTimeout>
+                               Ping timeout. Default - 1000
+      -r, --removeSupport=<removeSupport>
+                               Remove support values: NOT_EDITABLE,
+                                 EDITABLE_SUPPORT_ENABLED, NOT_SUPPORTED, NONE.
+                                 Default - NONE
+          --verbose            If you need more logs. Default - false
+      -h, --help               Show this help message and exit.
+      -V, --version            Print version information and exit.
 ```
