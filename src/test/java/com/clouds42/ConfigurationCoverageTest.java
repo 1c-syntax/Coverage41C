@@ -100,6 +100,22 @@ class ConfigurationCoverageTest {
             return mainAppReturnCode;
         });
 
+        Thread.sleep(500); // wait for socket server
+
+        String[] mainAppCheckArguments = {
+                "-i", fileIbName,
+                "-u", dbgsUrlString,
+                "-a", "check"};
+        int mainAppCheckResult = new CommandLine(new Coverage41C()).execute(mainAppCheckArguments);
+        assertEquals(0, mainAppCheckResult);
+
+        String[] mainAppCleanArguments = {
+                "-i", fileIbName,
+                "-u", dbgsUrlString,
+                "-a", "clean"};
+        int mainAppCleanResult = new CommandLine(new Coverage41C()).execute(mainAppCleanArguments);
+        assertEquals(0, mainAppCleanResult);
+
         ProcessBuilder vrunnerVanessaProcessBuilder = new ProcessBuilder();
         vrunnerVanessaProcessBuilder.command(vrunnerExecutable, "vanessa",
                 "--root", bddRootDir.getAbsolutePath(),

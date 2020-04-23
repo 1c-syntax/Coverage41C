@@ -75,6 +75,10 @@ public class Coverage41C implements Callable<Integer> {
     @Option(names = {"-e", "--extensionName"}, description = "Extension name", defaultValue = "")
     private String extensionName;
 
+    @Option(names = {"-x", "--externalDataProcessor"}, description = "External data processor (or external report) url",
+            defaultValue = "")
+    private String externalDataProcessorUrl;
+
     @Option(names = {"-s", "--srcDir"}, description = "Directory with sources exported to xml", defaultValue = "")
     private String srcDirName;
 
@@ -122,7 +126,9 @@ public class Coverage41C implements Callable<Integer> {
     private static final String EXIT_COMMAND = "EXIT";
     private static final String DUMP_COMMAND = "DUMP";
     private static final String CLEAN_COMMAND = "CLEAN";
+    private static final String CHECK_COMMAND = "CHECK";
     private static final String EXIT_RESULT = "OK";
+    private static final String FAIL_RESULT = "ER";
 
     private static final int EXIT_SUCCESS = 0;
     private static final int EXIT_FAILURE = -1;
@@ -134,12 +140,14 @@ public class Coverage41C implements Callable<Integer> {
 
     private AtomicBoolean stopExecution = new AtomicBoolean(false);
     private boolean rawMode = false;
+    private boolean systemStarted = false;
 
     private enum CommandAction {
         start,
         stop,
         dump,
-        clean
+        clean,
+        check
     }
 
     public static void main(String[] args) {
@@ -157,6 +165,7 @@ public class Coverage41C implements Callable<Integer> {
             do {
                 line = in.readLine();
                 if (line != null) {
+                    logger.info("Get command: " + line.trim());
                     if (DUMP_COMMAND.equals(line.trim())) {
                         dumpCoverageFile();
                         out.println(EXIT_RESULT);
@@ -169,12 +178,22 @@ public class Coverage41C implements Callable<Integer> {
                         });
                         out.println(EXIT_RESULT);
                         return true;
+                    } else if (CHECK_COMMAND.equals(line.trim())) {
+                        for (int i = 0; i<60; i++) {
+                            if (systemStarted) {
+                                out.println(EXIT_RESULT);
+                                return true;
+                            }
+                            Thread.sleep(1000);
+                        }
+                        out.println(FAIL_RESULT);
+                        return true;
                     }
                 }
             } while (line == null || !line.trim().equals(EXIT_COMMAND));
             gracefulShutdown(out);
             return false;
-        } catch (IOException e) {
+        } catch (IOException | InterruptedException e) {
             logger.error(e.getLocalizedMessage());
         }
         return true;
@@ -219,14 +238,22 @@ public class Coverage41C implements Callable<Integer> {
             }
             PrintWriter pipeOut = new PrintWriter(client.getOutputStream(), true);
             BufferedReader pipeIn = new BufferedReader(new InputStreamReader(client.getInputStream()));
+            String commandText;
             if (commandAction == CommandAction.stop) {
-                pipeOut.println(EXIT_COMMAND);
+                commandText = EXIT_COMMAND;
+            } else if (commandAction == CommandAction.dump) {
+                commandText = DUMP_COMMAND;
+            } else if (commandAction == CommandAction.check) {
+                commandText = CHECK_COMMAND;
+            } else if (commandAction == CommandAction.clean) {
+                commandText = CLEAN_COMMAND;
             } else {
-                pipeOut.println(DUMP_COMMAND);
+                throw new Exception("Unknown command");
             }
-            logger.info("Command send finished");
+            pipeOut.println(commandText);
+            logger.info("Command send finished: " + commandText);
             String result = "";
-            for(int i = 0; i < 30; i++) {
+            for(int i = 0; i < 60; i++) {
                 try {
                     result = pipeIn.readLine();
                     break;
@@ -236,10 +263,10 @@ public class Coverage41C implements Callable<Integer> {
                 }
             }
             if (result.equals(EXIT_RESULT)) {
-                logger.info("OK");
+                logger.info("Command success: " + commandText);
                 return EXIT_SUCCESS;
             } else {
-                logger.info("Incorrect response from main application");
+                logger.info("Command failed: " + commandText);
                 return EXIT_FAILURE;
             }
         }
@@ -358,9 +385,10 @@ public class Coverage41C implements Callable<Integer> {
                             EList<PerformanceInfoModule> moduleInfoList = measure.getModuleData();
                             moduleInfoList.forEach(moduleInfo -> {
                                 BSLModuleIdInternal moduleId = moduleInfo.getModuleID();
-                                String url = moduleId.getURL();
+                                String moduleUrl = moduleId.getURL();
                                 String moduleExtensionName = moduleId.getExtensionName();
-                                if (this.extensionName.equals(moduleExtensionName)) {
+                                if (this.extensionName.equals(moduleExtensionName)
+                                    && this.externalDataProcessorUrl.equals(moduleUrl)) {
                                     String objectId = moduleId.getObjectID();
                                     String propertyId = moduleId.getPropertyID();
                                     String key = getUriKey(objectId, propertyId);
@@ -437,6 +465,8 @@ public class Coverage41C implements Callable<Integer> {
 
                     client.toggleProfiling(null);
                     client.toggleProfiling(measureUuid);
+
+                    systemStarted = true;
                 } catch (RuntimeDebugClientException e1) {
                     logger.error(e1.getLocalizedMessage());
                     return EXIT_FAILURE;
