@@ -23,8 +23,12 @@ dependencies {
     def output = new ByteArrayOutputStream()
     def edtLocation = System.getenv('EDT_LOCATION')
     if (edtLocation == null) {
+        def ringExecutable = 'ring.sh'
+        if (System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('windows')) {
+            ringExecutable = 'ring.cmd'
+        }
         exec {
-            commandLine 'powershell', 'ring', 'edt', 'locations', 'list'
+            commandLine ringExecutable, 'edt', 'locations', 'list'
             standardOutput = output
         }
         edtLocation = output.toString().trim().split("\n")[0].trim() + '/plugins/'
