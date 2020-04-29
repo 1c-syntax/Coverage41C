@@ -2,6 +2,7 @@ plugins {
     id 'java'
     id 'application'
     id "com.github.breadmoirai.github-release" version "2.2.12"
+    id "com.github.jarmstrong.buildconfig" version "1.9.0"
 }
 
 group 'com.clouds42'
@@ -98,6 +99,13 @@ startScripts {
 
 application {
     mainClassName = 'com.clouds42.Coverage41C'
+}
+
+buildConfig {
+    className("BuildConfig")
+    packageName("com.clouds42")
+    buildConfigField("String", "APP_VERSION", "\"${project.version}\"")
+    buildConfigField("long", "BUILD_TIME", "${System.currentTimeMillis()}L")
 }
 
 githubRelease {

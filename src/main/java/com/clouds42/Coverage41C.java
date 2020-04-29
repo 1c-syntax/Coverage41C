@@ -66,7 +66,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-@Command(name = "Coverage41C", mixinStandardHelpOptions = true,
+@Command(name = "Coverage41C", mixinStandardHelpOptions = true, version = BuildConfig.APP_VERSION,
         description = "Make measures from 1C:Enterprise and save them to genericCoverage.xml file",
         sortOptions = false)
 public class Coverage41C implements Callable<Integer> {
