@@ -97,6 +97,9 @@ public class Coverage41C implements Callable<Integer> {
     @Option(names = {"-u", "--debugger"}, description = "Debugger url. Default - ${DEFAULT-VALUE}", defaultValue = "http://127.0.0.1:1550/")
     private String debugServerUrl;
 
+    @Option(names = {"-u:file", "--debugger:file"}, description = "Debugger url file name", defaultValue = "")
+    private String debugServerUrlFileName;
+
     @Option(names = {"-p", "--password"}, description = "Dbgs password", interactive = true)
     private String password;
 
@@ -225,6 +228,9 @@ public class Coverage41C implements Callable<Integer> {
 
         boolean isWindows = System.getProperty ("os.name").toLowerCase().contains("win");
 
+        if (!debugServerUrlFileName.isEmpty()) {
+            debugServerUrl = "http://" + Files.lines(Path.of(debugServerUrlFileName)).findFirst().get().trim();
+        }
         URI debugUri = URI.create(debugServerUrl);
         String pipeName;
         if (isWindows) {
