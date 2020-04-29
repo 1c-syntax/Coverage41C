@@ -1,6 +1,7 @@
 package com.clouds42;
 
 import com._1c.g5.v8.dt.debug.core.runtime.client.RuntimeDebugClientException;
+import com._1c.g5.v8.dt.debug.model.area.DebugAreaInfo;
 import com._1c.g5.v8.dt.debug.model.base.data.BSLModuleIdInternal;
 import com._1c.g5.v8.dt.debug.model.base.data.DebugTargetId;
 import com._1c.g5.v8.dt.debug.model.base.data.DebugTargetType;
@@ -45,6 +46,9 @@ import javax.xml.transform.Transformer;
 import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
+import javax.xml.xpath.XPath;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathFactory;
 import java.io.*;
 import java.lang.invoke.MethodHandles;
 import java.math.BigDecimal;
@@ -58,9 +62,10 @@ import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-@Command(name = "Coverage41C", mixinStandardHelpOptions = true, version = "Coverage41C 1.0",
+@Command(name = "Coverage41C", mixinStandardHelpOptions = true, version = "Coverage41C 1.3-SNAPSHOT",
         description = "Make measures from 1C:Enterprise and save them to genericCoverage.xml file",
         sortOptions = false)
 public class Coverage41C implements Callable<Integer> {
@@ -318,27 +323,90 @@ public class Coverage41C implements Callable<Integer> {
         if (!rawMode) {
             logger.info("Reading configuration sources...");
 
-            conf = Configuration.create(Path.of(projectDirName).resolve(srcDirName));
+            if (externalDataProcessorUrl.isEmpty()) {
 
-            Set<MDObjectBase> configurationChildren = conf.getChildren();
-            for (MDObjectBase mdObj : configurationChildren) {
+                conf = Configuration.create(Path.of(projectDirName).resolve(srcDirName));
 
-                addAllModulesToList(uriListByKey, mdObj);
+                Set<MDObjectBase> configurationChildren = conf.getChildren();
+                for (MDObjectBase mdObj : configurationChildren) {
 
-                List<com.github._1c_syntax.mdclasses.mdo.Command> commandsList = mdObj.getCommands();
-                if (commandsList != null) {
-                    commandsList.forEach(cmd -> {
-                        addAllModulesToList(uriListByKey, cmd);
-                    });
+                    addAllModulesToList(uriListByKey, mdObj);
+
+                    List<com.github._1c_syntax.mdclasses.mdo.Command> commandsList = mdObj.getCommands();
+                    if (commandsList != null) {
+                        commandsList.forEach(cmd -> {
+                            addAllModulesToList(uriListByKey, cmd);
+                        });
+                    }
+
+                    List<Form> formsList = mdObj.getForms();
+                    if (formsList != null) {
+                        formsList.forEach(form -> {
+                            addAllModulesToList(uriListByKey, form);
+                        });
+                    }
                 }
 
-                List<Form> formsList = mdObj.getForms();
-                if (formsList != null) {
-                    formsList.forEach(form -> {
-                        addAllModulesToList(uriListByKey, form);
+            } else {
+
+                // TODO: EDT
+
+                conf = Configuration.create();
+
+                File externalDataprocessorRootXmlFile = Path.of(projectDirName).resolve(srcDirName).toFile();
+                FileInputStream fileIS = new FileInputStream(externalDataprocessorRootXmlFile);
+                DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
+                DocumentBuilder builder = builderFactory.newDocumentBuilder();
+                Document xmlDocument = builder.parse(fileIS);
+                XPath xPath = XPathFactory.newInstance().newXPath();
+                String nameExpression = "/MetaDataObject/ExternalDataProcessor/Properties/Name/text()";
+                String uuidExpression = "/MetaDataObject/ExternalDataProcessor/@uuid";
+                String externalDataProcessorName = (String) xPath.compile(nameExpression).evaluate(xmlDocument,
+                        XPathConstants.STRING);
+                String externalDataProcessorUuid = (String) xPath.compile(uuidExpression).evaluate(xmlDocument,
+                        XPathConstants.STRING);
+                uriListByKey.put(getUriKey(externalDataProcessorUuid, ModuleType.ObjectModule, null),
+                        Paths.get(externalDataprocessorRootXmlFile.getParent(),
+                                externalDataProcessorName, "Ext", "ObjectModule.bsl").toUri());
+
+                var externalDataProcessorPath = Paths.get(
+                        externalDataprocessorRootXmlFile.getParent(),
+                                externalDataProcessorName, "Forms");
+                try (Stream<Path> walk = Files.list(externalDataProcessorPath)) {
+
+                    List<String> result = walk.map(x -> x.toString())
+                            .filter(f -> f.endsWith(".xml")).collect(Collectors.toList());
+
+                    XPath formXPath = XPathFactory.newInstance().newXPath();
+                    String formUuidExpression = "/MetaDataObject/Form/@uuid";
+                    String formNameExpression = "/MetaDataObject/Form/Properties/Name/text()";
+
+                    result.forEach(formXmlFileName -> {
+                        try {
+                            FileInputStream formFileIS = new FileInputStream(formXmlFileName);
+                            Document formXmlDocument = builder.parse(formFileIS);
+                            String formUuid = (String) formXPath.compile(formUuidExpression).evaluate(formXmlDocument,
+                                    XPathConstants.STRING);
+                            String formName = (String) formXPath.compile(formNameExpression).evaluate(formXmlDocument,
+                                    XPathConstants.STRING);
+                            uriListByKey.put(getUriKey(formUuid, ModuleType.FormModule, null),
+                                    Paths.get(externalDataProcessorPath.toString(),
+                                            formName, "Ext", "Form", "Module.bsl").toUri());
+                        } catch (Exception e) {
+                            logger.error("Can't read form xml: " + e.getLocalizedMessage());
+                        }
                     });
+
+                    uriListByKey.forEach((s, uri) -> {
+                        addCoverageData(uri);
+                    });
+
+                } catch (IOException e) {
+                    e.printStackTrace();
                 }
+
             }
+
             logger.info("Configuration sources reading DONE");
         }
 
@@ -367,6 +435,8 @@ public class Coverage41C implements Callable<Integer> {
             }
         }
 
+        Set<String> externalDataProcessorsUriSet = new HashSet<String>();
+
         while (!stopExecution.get()) {
             try {
                 if (firstRun) {
@@ -386,6 +456,10 @@ public class Coverage41C implements Callable<Integer> {
                             moduleInfoList.forEach(moduleInfo -> {
                                 BSLModuleIdInternal moduleId = moduleInfo.getModuleID();
                                 String moduleUrl = moduleId.getURL();
+                                if (verbose && !externalDataProcessorsUriSet.contains(moduleUrl)) {
+                                    logger.info("Found external data processor: " + moduleUrl);
+                                    externalDataProcessorsUriSet.add(moduleUrl);
+                                }
                                 String moduleExtensionName = moduleId.getExtensionName();
                                 if (this.extensionName.equals(moduleExtensionName)
                                     && this.externalDataProcessorUrl.equals(moduleUrl)) {
@@ -624,26 +698,30 @@ public class Coverage41C implements Callable<Integer> {
                 }
             }
 
-            Tokenizer tokenizer = null;
-            try {
-                tokenizer = new Tokenizer(Files.readString(Path.of(uri)));
-            } catch (IOException e) {
-                logger.error(e.getLocalizedMessage());
-                return;
-            }
-
-            int[] linesToCover = Trees.getDescendants(tokenizer.getAst()).stream()
-                    .filter(node -> !(node instanceof TerminalNodeImpl))
-                    .filter(Coverage41C::mustCovered)
-                    .mapToInt(node -> ((BSLParserRuleContext) node).getStart().getLine())
-                    .distinct().toArray();
-            Map<BigDecimal, Boolean> coverMap = new HashMap<>();
-            for(int lineNumber : linesToCover) {
-                coverMap.put(new BigDecimal(lineNumber), false);
-            }
-            coverageData.put(uri, coverMap);
+            addCoverageData(uri);
 
         });
+    }
+
+    private void addCoverageData(URI uri) {
+        Tokenizer tokenizer = null;
+        try {
+            tokenizer = new Tokenizer(Files.readString(Path.of(uri)));
+        } catch (IOException e) {
+            logger.error(e.getLocalizedMessage());
+            return;
+        }
+
+        int[] linesToCover = Trees.getDescendants(tokenizer.getAst()).stream()
+                .filter(node -> !(node instanceof TerminalNodeImpl))
+                .filter(Coverage41C::mustCovered)
+                .mapToInt(node -> ((BSLParserRuleContext) node).getStart().getLine())
+                .distinct().toArray();
+        Map<BigDecimal, Boolean> coverMap = new HashMap<>();
+        for(int lineNumber : linesToCover) {
+            coverMap.put(new BigDecimal(lineNumber), false);
+        }
+        coverageData.put(uri, coverMap);
     }
 
     private static boolean mustCovered(Tree node) {
