@@ -5,7 +5,7 @@ plugins {
 }
 
 group 'com.clouds42'
-version '1.2-SNAPSHOT'
+version '1.3-SNAPSHOT'
 
 sourceCompatibility = 11
 
@@ -53,7 +53,7 @@ dependencies {
 
     compile group: 'com.google.guava', name: 'guava', version: '28.2-jre'
 
-    implementation 'com.github.proDOOMman:mdclasses:676043538506e56870059b10e672e8f77e4ee195' // TODO: change to 1c-syntax
+    implementation 'com.github.1c-syntax:mdclasses:42fcc53f34b08a7a748528c9dd53ae1a2e04bb40' // TODO: change to release
 
     implementation('com.github.1c-syntax:bsl-parser:0.13.0') {
         exclude group: "com.tunnelvisionlabs", module: "antlr4-annotations"
