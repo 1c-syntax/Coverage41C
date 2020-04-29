@@ -34,6 +34,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
@@ -45,6 +47,9 @@ import javax.xml.transform.Transformer;
 import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
+import javax.xml.xpath.XPath;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathFactory;
 import java.io.*;
 import java.lang.invoke.MethodHandles;
 import java.math.BigDecimal;
@@ -58,9 +63,10 @@ import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-@Command(name = "Coverage41C", mixinStandardHelpOptions = true, version = "Coverage41C 1.0",
+@Command(name = "Coverage41C", mixinStandardHelpOptions = true, version = BuildConfig.APP_VERSION,
         description = "Make measures from 1C:Enterprise and save them to genericCoverage.xml file",
         sortOptions = false)
 public class Coverage41C implements Callable<Integer> {
@@ -69,7 +75,8 @@ public class Coverage41C implements Callable<Integer> {
             defaultValue = "start", fallbackValue = "start")
     private CommandAction commandAction;
 
-    @Option(names = {"-i", "--infobase"}, description = "InfoBase name. For file infobase use 'DefAlias' name", required = true)
+    @Option(names = {"-i", "--infobase"}, description = "InfoBase name. For file infobase use 'DefAlias' name." +
+            "  Default - ${DEFAULT-VALUE}", defaultValue = "DefAlias")
     private String infobaseAlias;
 
     @Option(names = {"-e", "--extensionName"}, description = "Extension name", defaultValue = "")
@@ -88,8 +95,14 @@ public class Coverage41C implements Callable<Integer> {
     @Option(names = {"-o", "--out"}, description = "Output file name")
     private File outputFile;
 
+    @Option(names = {"-c", "--convertFile"}, description = "Input file name with RAW xml coverage data")
+    private File inputRawXmlFile;
+
     @Option(names = {"-u", "--debugger"}, description = "Debugger url. Default - ${DEFAULT-VALUE}", defaultValue = "http://127.0.0.1:1550/")
     private String debugServerUrl;
+
+    @Option(names = {"-u:file", "--debugger:file"}, description = "Debugger url file name", defaultValue = "")
+    private String debugServerUrlFileName;
 
     @Option(names = {"-p", "--password"}, description = "Dbgs password", interactive = true)
     private String password;
@@ -147,7 +160,8 @@ public class Coverage41C implements Callable<Integer> {
         stop,
         dump,
         clean,
-        check
+        check,
+        convert
     }
 
     public static void main(String[] args) {
@@ -219,6 +233,69 @@ public class Coverage41C implements Callable<Integer> {
 
         boolean isWindows = System.getProperty ("os.name").toLowerCase().contains("win");
 
+        if (projectDirName.isEmpty() && !srcDirName.isEmpty()) {
+            // for backward compatibility
+            projectDirName = srcDirName;
+            srcDirName = "";
+        }
+
+        if (commandAction == CommandAction.convert) {
+            Map<String, URI> uriListByKey = readMetadata();
+
+            FileInputStream fileIS = new FileInputStream(inputRawXmlFile);
+            DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
+            DocumentBuilder builder = builderFactory.newDocumentBuilder();
+            Document xmlDocument = builder.parse(fileIS);
+            NodeList fileNodeList = xmlDocument.getElementsByTagName("file");
+            for(int fileNodeNumber = 0; fileNodeNumber < fileNodeList.getLength(); fileNodeNumber++) {
+                Node fileNode = fileNodeList.item(fileNodeNumber);
+                String fileKey = fileNode.getAttributes().getNamedItem("path").getTextContent();
+                if (fileKey.startsWith("/")) {
+                    fileKey = fileKey.substring(1);
+                }
+                URI fileUri = uriListByKey.get(fileKey);
+                if (fileUri == null) {
+                    logger.error("Can't find file key: " + fileKey);
+                    continue;
+                }
+                Map<BigDecimal, Boolean> coverMap = coverageData.get(fileUri);
+                if (!coverMap.isEmpty()) {
+                    NodeList lineNoNodeList = fileNode.getChildNodes();
+                    for (int lineNoNodeNumber = 0; lineNoNodeNumber < lineNoNodeList.getLength(); lineNoNodeNumber++) {
+                        Node lineNoNode = lineNoNodeList.item(lineNoNodeNumber);
+                        if (!lineNoNode.getNodeName().equals("lineToCover")) {
+                            continue;
+                        }
+                        if (!lineNoNode.getAttributes().getNamedItem("covered").getTextContent().equals("true")) {
+                            continue;
+                        }
+                        BigDecimal lineNo = new BigDecimal(lineNoNode.getAttributes().getNamedItem("lineNumber").getTextContent());
+                        if (!coverMap.containsKey(lineNo)) {
+                            if (verbose.booleanValue()) {
+                                logger.info("Can't find line to cover " + lineNo + " in module " + fileUri);
+                                try {
+                                    Stream<String> all_lines = Files.lines(Paths.get(fileUri));
+                                    String specific_line_n = all_lines.skip(lineNo.longValue() - 1).findFirst().get();
+                                    logger.info(">>> " + specific_line_n);
+                                } catch (Exception e) {
+                                    logger.error(e.getLocalizedMessage());
+                                }
+                            }
+                        } else {
+                            coverMap.put(lineNo, true);
+                        }
+                    }
+                }
+            }
+            dumpCoverageFile();
+            logger.info("Convert done");
+
+            return 0;
+        }
+
+        if (!debugServerUrlFileName.isEmpty()) {
+            debugServerUrl = "http://" + Files.lines(Path.of(debugServerUrlFileName)).findFirst().get().trim();
+        }
         URI debugUri = URI.create(debugServerUrl);
         String pipeName;
         if (isWindows) {
@@ -276,12 +353,6 @@ public class Coverage41C implements Callable<Integer> {
             rawMode = true;
         }
 
-        if (projectDirName.isEmpty() && !srcDirName.isEmpty()) {
-            // for backward compatibility
-            projectDirName = srcDirName;
-            srcDirName = "";
-        }
-
         if (isWindows) {
             serverSocket = new Win32NamedPipeServerSocket(pipeName);
         } else {
@@ -313,34 +384,7 @@ public class Coverage41C implements Callable<Integer> {
             debugAreaNames = new ArrayList<>();
         }
 
-        Map<String, URI> uriListByKey = new HashMap<>();
-
-        if (!rawMode) {
-            logger.info("Reading configuration sources...");
-
-            conf = Configuration.create(Path.of(projectDirName).resolve(srcDirName));
-
-            Set<MDObjectBase> configurationChildren = conf.getChildren();
-            for (MDObjectBase mdObj : configurationChildren) {
-
-                addAllModulesToList(uriListByKey, mdObj);
-
-                List<com.github._1c_syntax.mdclasses.mdo.Command> commandsList = mdObj.getCommands();
-                if (commandsList != null) {
-                    commandsList.forEach(cmd -> {
-                        addAllModulesToList(uriListByKey, cmd);
-                    });
-                }
-
-                List<Form> formsList = mdObj.getForms();
-                if (formsList != null) {
-                    formsList.forEach(form -> {
-                        addAllModulesToList(uriListByKey, form);
-                    });
-                }
-            }
-            logger.info("Configuration sources reading DONE");
-        }
+        Map<String, URI> uriListByKey = readMetadata();
 
         boolean firstRun = true;
 
@@ -367,6 +411,8 @@ public class Coverage41C implements Callable<Integer> {
             }
         }
 
+        Set<String> externalDataProcessorsUriSet = new HashSet<String>();
+
         while (!stopExecution.get()) {
             try {
                 if (firstRun) {
@@ -386,6 +432,10 @@ public class Coverage41C implements Callable<Integer> {
                             moduleInfoList.forEach(moduleInfo -> {
                                 BSLModuleIdInternal moduleId = moduleInfo.getModuleID();
                                 String moduleUrl = moduleId.getURL();
+                                if (verbose && !moduleUrl.isEmpty() && !externalDataProcessorsUriSet.contains(moduleUrl)) {
+                                    logger.info("Found external data processor: " + moduleUrl);
+                                    externalDataProcessorsUriSet.add(moduleUrl);
+                                }
                                 String moduleExtensionName = moduleId.getExtensionName();
                                 if (this.extensionName.equals(moduleExtensionName)
                                     && this.externalDataProcessorUrl.equals(moduleUrl)) {
@@ -484,6 +534,143 @@ public class Coverage41C implements Callable<Integer> {
 
         logger.info("Main thread finished");
         return EXIT_SUCCESS;
+    }
+
+    private Map<String, URI> readMetadata() throws Exception {
+
+        Map<String, URI> uriListByKey = new HashMap<>();
+
+        if (!rawMode) {
+            logger.info("Reading configuration sources...");
+
+            if (externalDataProcessorUrl.isEmpty()) {
+
+                conf = Configuration.create(Path.of(projectDirName).resolve(srcDirName));
+
+                Set<MDObjectBase> configurationChildren = conf.getChildren();
+                for (MDObjectBase mdObj : configurationChildren) {
+
+                    addAllModulesToList(uriListByKey, mdObj);
+
+                    List<com.github._1c_syntax.mdclasses.mdo.Command> commandsList = mdObj.getCommands();
+                    if (commandsList != null) {
+                        commandsList.forEach(cmd -> {
+                            addAllModulesToList(uriListByKey, cmd);
+                        });
+                    }
+
+                    List<Form> formsList = mdObj.getForms();
+                    if (formsList != null) {
+                        formsList.forEach(form -> {
+                            addAllModulesToList(uriListByKey, form);
+                        });
+                    }
+                }
+
+            } else {
+
+                conf = Configuration.create();
+
+                File externalDataprocessorRootXmlFile = Path.of(projectDirName).resolve(srcDirName).toFile();
+
+                XPath xPath = XPathFactory.newInstance().newXPath();
+                FileInputStream fileIS = new FileInputStream(externalDataprocessorRootXmlFile);
+                DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
+                DocumentBuilder builder = builderFactory.newDocumentBuilder();
+                Document xmlDocument = builder.parse(fileIS);
+                String documentRootTagName = xmlDocument.getDocumentElement().getTagName();
+                if (documentRootTagName.equals("MetaDataObject")) {
+                    // CONFIGURATOR
+                    String nameExpression = "/MetaDataObject/ExternalDataProcessor/Properties/Name/text()";
+                    String uuidExpression = "/MetaDataObject/ExternalDataProcessor/@uuid";
+                    String externalDataProcessorName = (String) xPath.compile(nameExpression).evaluate(xmlDocument,
+                            XPathConstants.STRING);
+                    String externalDataProcessorUuid = (String) xPath.compile(uuidExpression).evaluate(xmlDocument,
+                            XPathConstants.STRING);
+                    uriListByKey.put(getUriKey(externalDataProcessorUuid, ModuleType.ObjectModule, null),
+                            Paths.get(externalDataprocessorRootXmlFile.getParent(),
+                                    externalDataProcessorName, "Ext", "ObjectModule.bsl").toUri());
+
+                    var externalDataProcessorPath = Paths.get(
+                            externalDataprocessorRootXmlFile.getParent(),
+                            externalDataProcessorName, "Forms");
+                    try (Stream<Path> walk = Files.list(externalDataProcessorPath)) {
+
+                        List<String> result = walk.map(x -> x.toString())
+                                .filter(f -> f.endsWith(".xml")).collect(Collectors.toList());
+
+                        XPath formXPath = XPathFactory.newInstance().newXPath();
+                        String formUuidExpression = "/MetaDataObject/Form/@uuid";
+                        String formNameExpression = "/MetaDataObject/Form/Properties/Name/text()";
+
+                        result.forEach(formXmlFileName -> {
+                            try {
+                                FileInputStream formFileIS = new FileInputStream(formXmlFileName);
+                                Document formXmlDocument = builder.parse(formFileIS);
+                                String formUuid = (String) formXPath.compile(formUuidExpression).evaluate(formXmlDocument,
+                                        XPathConstants.STRING);
+                                String formName = (String) formXPath.compile(formNameExpression).evaluate(formXmlDocument,
+                                        XPathConstants.STRING);
+                                uriListByKey.put(getUriKey(formUuid, ModuleType.FormModule, null),
+                                        Paths.get(externalDataProcessorPath.toString(),
+                                                formName, "Ext", "Form", "Module.bsl").toUri());
+                            } catch (Exception e) {
+                                logger.error("Can't read form xml: " + e.getLocalizedMessage());
+                            }
+                        });
+
+
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                } else if (documentRootTagName.equals("mdclass:ExternalDataProcessor")) {
+                    // EDT
+                    var externalDataProcessorPath = Paths.get(
+                            externalDataprocessorRootXmlFile.getParent(),
+                            "Forms");
+                    String uuidExpression = "/ExternalDataProcessor/@uuid";
+                    String externalDataProcessorUuid = (String) xPath.compile(uuidExpression).evaluate(xmlDocument,
+                            XPathConstants.STRING);
+                    uriListByKey.put(getUriKey(externalDataProcessorUuid, ModuleType.ObjectModule, null),
+                            Paths.get(externalDataprocessorRootXmlFile.getParent(),
+                                    "ObjectModule.bsl").toUri());
+                    String formUuidExpression = "/ExternalDataProcessor/forms";
+                    NodeList externalDataProcessorFormsNodeList = (NodeList) xPath.compile(formUuidExpression).evaluate(xmlDocument,
+                            XPathConstants.NODESET);
+                    for (int nodeNumber = 0; nodeNumber < externalDataProcessorFormsNodeList.getLength(); nodeNumber++) {
+                        Node externalDataProcessorFormsNode = externalDataProcessorFormsNodeList.item(nodeNumber);
+                        String formUuid = externalDataProcessorFormsNode.getAttributes().getNamedItem("uuid").getTextContent();
+                        String formName = "";
+                        NodeList childNodes = externalDataProcessorFormsNode.getChildNodes();
+                        for (int childNodeNumber = 0; childNodeNumber < childNodes.getLength(); childNodeNumber++) {
+                            Node childNode = childNodes.item(childNodeNumber);
+                            if (childNode.getNodeName().equals("name")) {
+                                formName = childNode.getTextContent();
+                                break;
+                            }
+                        }
+                        if (formName.isEmpty()) {
+                            logger.error("Can't find form name: " + formUuid);
+                            continue;
+                        }
+                        uriListByKey.put(getUriKey(formUuid, ModuleType.FormModule, null),
+                                Paths.get(externalDataProcessorPath.toString(),
+                                        formName, "Module.bsl").toUri());
+                    }
+                } else {
+                    throw new Exception("Unknown source format");
+                }
+
+                uriListByKey.forEach((s, uri) -> {
+                    addCoverageData(uri);
+                });
+
+            }
+
+            logger.info("Configuration sources reading DONE");
+        }
+
+        return uriListByKey;
     }
 
     private void gracefulShutdown(PrintWriter serverPipeOut) {
@@ -624,26 +811,30 @@ public class Coverage41C implements Callable<Integer> {
                 }
             }
 
-            Tokenizer tokenizer = null;
-            try {
-                tokenizer = new Tokenizer(Files.readString(Path.of(uri)));
-            } catch (IOException e) {
-                logger.error(e.getLocalizedMessage());
-                return;
-            }
-
-            int[] linesToCover = Trees.getDescendants(tokenizer.getAst()).stream()
-                    .filter(node -> !(node instanceof TerminalNodeImpl))
-                    .filter(Coverage41C::mustCovered)
-                    .mapToInt(node -> ((BSLParserRuleContext) node).getStart().getLine())
-                    .distinct().toArray();
-            Map<BigDecimal, Boolean> coverMap = new HashMap<>();
-            for(int lineNumber : linesToCover) {
-                coverMap.put(new BigDecimal(lineNumber), false);
-            }
-            coverageData.put(uri, coverMap);
+            addCoverageData(uri);
 
         });
+    }
+
+    private void addCoverageData(URI uri) {
+        Tokenizer tokenizer = null;
+        try {
+            tokenizer = new Tokenizer(Files.readString(Path.of(uri)));
+        } catch (IOException e) {
+            logger.error(e.getLocalizedMessage());
+            return;
+        }
+
+        int[] linesToCover = Trees.getDescendants(tokenizer.getAst()).stream()
+                .filter(node -> !(node instanceof TerminalNodeImpl))
+                .filter(Coverage41C::mustCovered)
+                .mapToInt(node -> ((BSLParserRuleContext) node).getStart().getLine())
+                .distinct().toArray();
+        Map<BigDecimal, Boolean> coverMap = new HashMap<>();
+        for(int lineNumber : linesToCover) {
+            coverMap.put(new BigDecimal(lineNumber), false);
+        }
+        coverageData.put(uri, coverMap);
     }
 
     private static boolean mustCovered(Tree node) {

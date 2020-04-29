@@ -62,7 +62,7 @@ class ConfigurationCoverageTest {
         String[] mainAppHelpArguments = {"--help"};
         assertEquals(0, new CommandLine(new Coverage41C()).execute(mainAppHelpArguments));
 
-        Files.walk(Path.of(buildDirName))
+        Files.walk(Path.of(buildDirName, "ib"))
                 .sorted(Comparator.reverseOrder())
                 .map(Path::toFile)
                 .forEach(File::delete);
