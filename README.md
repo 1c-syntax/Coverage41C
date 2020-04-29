@@ -16,40 +16,45 @@
 
 ```cmd
 Usage: Coverage41C [-hV] [-p] [--verbose] [-a=<commandAction>]
-                       [-e=<extensionName>] -i=<infobaseAlias> [-o=<outputFile>]
-                       [-P=<projectDirName>] [-p:env=<passwordEnv>]
-                       [-r=<removeSupport>] [-s=<srcDirName>] [-t=<pingTimeout>]
-                       [-u=<debugServerUrl>] [-x=<externalDataProcessorUrl>]
-                       [-n=<debugAreaNames>]...
-    Make measures from 1C:Enterprise and save them to genericCoverage.xml file
-      -a, --action=<commandAction>
-                               Action: start, stop, dump, clean, check. Default -
-                                 start
-      -i, --infobase=<infobaseAlias>
-                               InfoBase name. For file infobase use 'DefAlias' name
-      -e, --extensionName=<extensionName>
-                               Extension name
-      -x, --externalDataProcessor=<externalDataProcessorUrl>
-                               External data processor (or external report) url
-      -s, --srcDir=<srcDirName>
-                               Directory with sources exported to xml
-      -P, --projectDir=<projectDirName>
-                               Directory with project
-      -o, --out=<outputFile>   Output file name
-      -u, --debugger=<debugServerUrl>
-                               Debugger url. Default - http://127.0.0.1:1550/
-      -p, --password           Dbgs password
-          -p:env, --password:env=<passwordEnv>
-                               Password environment variable name
-      -n, --areanames=<debugAreaNames>
-                               Debug area names (not for general use!)
-      -t, --timeout=<pingTimeout>
-                               Ping timeout. Default - 1000
-      -r, --removeSupport=<removeSupport>
-                               Remove support values: NOT_EDITABLE,
-                                 EDITABLE_SUPPORT_ENABLED, NOT_SUPPORTED, NONE.
-                                 Default - NONE
-          --verbose            If you need more logs. Default - false
-      -h, --help               Show this help message and exit.
-      -V, --version            Print version information and exit.
+                   [-c=<inputRawXmlFile>] [-e=<extensionName>]
+                   -i=<infobaseAlias> [-o=<outputFile>] [-P=<projectDirName>]
+                   [-p:env=<passwordEnv>] [-r=<removeSupport>]
+                   [-s=<srcDirName>] [-t=<pingTimeout>] [-u=<debugServerUrl>]
+                   [-u:file=<debugServerUrlFileName>]
+                   [-x=<externalDataProcessorUrl>] [-n=<debugAreaNames>]...
+Make measures from 1C:Enterprise and save them to genericCoverage.xml file
+  -a, --action=<commandAction>
+                           Action: start, stop, dump, clean, check, convert.
+                             Default - start
+  -i, --infobase=<infobaseAlias>
+                           InfoBase name. For file infobase use 'DefAlias' name
+  -e, --extensionName=<extensionName>
+                           Extension name
+  -x, --externalDataProcessor=<externalDataProcessorUrl>
+                           External data processor (or external report) url
+  -s, --srcDir=<srcDirName>
+                           Directory with sources exported to xml
+  -P, --projectDir=<projectDirName>
+                           Directory with project
+  -o, --out=<outputFile>   Output file name
+  -c, --convertFile=<inputRawXmlFile>
+                           Input file name with RAW xml coverage data
+  -u, --debugger=<debugServerUrl>
+                           Debugger url. Default - http://127.0.0.1:1550/
+      -u:file, --debugger:file=<debugServerUrlFileName>
+                           Debugger url file name
+  -p, --password           Dbgs password
+      -p:env, --password:env=<passwordEnv>
+                           Password environment variable name
+  -n, --areanames=<debugAreaNames>
+                           Debug area names (not for general use!)
+  -t, --timeout=<pingTimeout>
+                           Ping timeout. Default - 1000
+  -r, --removeSupport=<removeSupport>
+                           Remove support values: NOT_EDITABLE,
+                             EDITABLE_SUPPORT_ENABLED, NOT_SUPPORTED, NONE.
+                             Default - NONE
+      --verbose            If you need more logs. Default - false
+  -h, --help               Show this help message and exit.
+  -V, --version            Print version information and exit.
 ```
