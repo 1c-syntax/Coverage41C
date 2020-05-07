@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mdclass:Catalog xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:core="http://g5.1c.ru/v8/dt/mcore" xmlns:mdclass="http://g5.1c.ru/v8/dt/metadata/mdclass" uuid="eeef463d-d5e7-42f2-ae53-10279661f59d">
+  <producedTypes>
+    <objectType typeId="72a5f281-3128-4f46-ab9e-d0c9409b905f" valueTypeId="e3f46204-ef43-4e5a-a927-704d531654cc"/>
+    <refType typeId="aacd0c79-9dd1-4f5d-a272-b39d0fb05c86" valueTypeId="c791a17a-3429-41a3-bd96-ada38ad08e9a"/>
+    <selectionType typeId="7689f2f6-c0d3-49f0-80aa-d9dddc67edef" valueTypeId="e0516882-f606-4a94-be98-030738d85a74"/>
+    <listType typeId="1a104a31-e522-44be-92cd-b235cbd79ad6" valueTypeId="c7693ad5-1365-4d2a-92d1-bb635b78318e"/>
+    <managerType typeId="1ad334c0-8023-44d2-9cda-6edb87e003e7" valueTypeId="5002a93e-3dfc-4971-8cc8-7b95af65016b"/>
+  </producedTypes>
+  <name>Справочник1</name>
+  <useStandardCommands>true</useStandardCommands>
+  <inputByString>Catalog.Справочник1.StandardAttribute.Description</inputByString>
+  <inputByString>Catalog.Справочник1.StandardAttribute.Code</inputByString>
+  <fullTextSearchOnInputByString>DontUse</fullTextSearchOnInputByString>
+  <createOnInput>Use</createOnInput>
+  <dataLockControlMode>Managed</dataLockControlMode>
+  <fullTextSearch>Use</fullTextSearch>
+  <levelCount>2</levelCount>
+  <foldersOnTop>true</foldersOnTop>
+  <codeLength>9</codeLength>
+  <descriptionLength>25</descriptionLength>
+  <codeType>String</codeType>
+  <codeAllowedLength>Variable</codeAllowedLength>
+  <checkUnique>true</checkUnique>
+  <autonumbering>true</autonumbering>
+  <defaultPresentation>AsDescription</defaultPresentation>
+  <editType>InDialog</editType>
+  <choiceMode>BothWays</choiceMode>
+  <defaultObjectForm>Catalog.Справочник1.Form.ФормаЭлемента</defaultObjectForm>
+  <defaultListForm>Catalog.Справочник1.Form.ФормаСписка</defaultListForm>
+  <defaultChoiceForm>Catalog.Справочник1.Form.ФормаВыбора</defaultChoiceForm>
+  <attributes uuid="f4b6bb58-962f-4811-809c-84514f07f16d">
+    <name>Реквизит1</name>
+    <type>
+      <types>String</types>
+      <stringQualifiers>
+        <length>10</length>
+      </stringQualifiers>
+    </type>
+    <minValue xsi:type="core:UndefinedValue"/>
+    <maxValue xsi:type="core:UndefinedValue"/>
+    <fillValue xsi:type="core:StringValue">
+      <value></value>
+    </fillValue>
+    <fullTextSearch>Use</fullTextSearch>
+    <dataHistory>Use</dataHistory>
+  </attributes>
+  <attributes uuid="dff5b5d8-762d-4490-a336-dcc8d93c17d5">
+    <name>Реквизит2</name>
+    <type>
+      <types>Number</types>
+      <numberQualifiers>
+        <precision>10</precision>
+      </numberQualifiers>
+    </type>
+    <minValue xsi:type="core:UndefinedValue"/>
+    <maxValue xsi:type="core:UndefinedValue"/>
+    <fillValue xsi:type="core:UndefinedValue"/>
+    <fullTextSearch>Use</fullTextSearch>
+    <dataHistory>Use</dataHistory>
+  </attributes>
+  <attributes uuid="ecd3c57a-75c8-474c-9c48-ac4c3831ab15">
+    <name>Реквизит3</name>
+    <type>
+      <types>Boolean</types>
+    </type>
+    <minValue xsi:type="core:UndefinedValue"/>
+    <maxValue xsi:type="core:UndefinedValue"/>
+    <fillValue xsi:type="core:UndefinedValue"/>
+    <fullTextSearch>Use</fullTextSearch>
+    <dataHistory>Use</dataHistory>
+  </attributes>
+  <tabularSections uuid="451202c5-b1af-4bce-a705-0b5570071588">
+    <producedTypes>
+      <objectType typeId="81efde9e-f885-44a4-b581-707fc5ef159e" valueTypeId="4ddd7844-c70c-4fa3-89d3-4582f3f5980e"/>
+      <rowType typeId="9bb115e7-990f-483f-ae16-fa15a8886ec4" valueTypeId="06d30d0d-ad29-440f-8a35-848f55afa37e"/>
+    </producedTypes>
+    <name>ТабличнаяЧасть1</name>
+    <attributes uuid="5e4add7a-846d-4242-a919-97dabde8d54b">
+      <name>Реквизит1</name>
+      <type>
+        <types>String</types>
+        <stringQualifiers>
+          <length>10</length>
+        </stringQualifiers>
+      </type>
+      <minValue xsi:type="core:UndefinedValue"/>
+      <maxValue xsi:type="core:UndefinedValue"/>
+      <dataHistory>Use</dataHistory>
+      <fullTextSearch>Use</fullTextSearch>
+    </attributes>
+    <attributes uuid="7580cfcb-eadd-4bfe-8199-ce1c14867e10">
+      <name>Реквизит2</name>
+      <type>
+        <types>Number</types>
+        <numberQualifiers>
+          <precision>10</precision>
+        </numberQualifiers>
+      </type>
+      <minValue xsi:type="core:UndefinedValue"/>
+      <maxValue xsi:type="core:UndefinedValue"/>
+      <dataHistory>Use</dataHistory>
+      <fullTextSearch>Use</fullTextSearch>
+    </attributes>
+  </tabularSections>
+  <forms uuid="175b035e-ee35-4fdf-a8b4-c30ce49dee61">
+    <name>ФормаЭлемента</name>
+    <synonym>
+      <key>ru</key>
+      <value>Форма элемента</value>
+    </synonym>
+    <usePurposes>PersonalComputer</usePurposes>
+    <usePurposes>MobileDevice</usePurposes>
+  </forms>
+  <forms uuid="1feb8a5b-989e-440d-afe3-9472183c335c">
+    <name>ФормаСписка</name>
+    <synonym>
+      <key>ru</key>
+      <value>Форма списка</value>
+    </synonym>
+    <usePurposes>PersonalComputer</usePurposes>
+    <usePurposes>MobileDevice</usePurposes>
+  </forms>
+  <forms uuid="3b3346ea-1b32-4a2c-b3a6-1a9651659f0c">
+    <name>ФормаВыбора</name>
+    <synonym>
+      <key>ru</key>
+      <value>Форма выбора</value>
+    </synonym>
+    <usePurposes>PersonalComputer</usePurposes>
+    <usePurposes>MobileDevice</usePurposes>
+  </forms>
+  <templates uuid="42def71b-52cc-4e34-8a08-82f0dfcd47bf">
+    <name>Макет</name>
+    <synonym>
+      <key>ru</key>
+      <value>Макет</value>
+    </synonym>
+  </templates>
+  <templates uuid="42def71b-52cc-4e34-8a08-82f0dfcd47b3">
+    <name>Макет2</name>
+    <synonym>
+      <key>ru</key>
+      <value>Макет с длинным синонимом, с запятыми</value>
+    </synonym>
+  </templates>
+  <commands uuid="342ec3c7-82d4-42bb-a5ff-8a756f110744">
+    <name>Команда1</name>
+    <group>CommandGroup.ГруппаКоманд1</group>
+    <commandParameterType/>
+    <representation>Auto</representation>
+    <shortcut></shortcut>
+  </commands>
+</mdclass:Catalog>

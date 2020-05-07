@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mdclass:Subsystem xmlns:mdclass="http://g5.1c.ru/v8/dt/metadata/mdclass" uuid="3d00f7d6-e3b0-49cf-8093-e2e4f6ea2293">
+  <name>ПерваяПодсистема</name>
+  <synonym>
+    <key>ru</key>
+    <value>Первая подсистема</value>
+  </synonym>
+  <includeHelpInContents>true</includeHelpInContents>
+  <includeInCommandInterface>true</includeInCommandInterface>
+  <content>ChartOfAccounts.ПланСчетов1</content>
+  <content>BusinessProcess.БизнесПроцесс1</content>
+  <content>Constant.ДатаЗавершенияФоновогоЗадания</content>
+  <content>CommonCommand.ОбщаяКоманда1</content>
+  <subsystems>ПодчиненнаяПодсистема</subsystems>
+  <subsystems>ПочиненнаяСистема2</subsystems>
+</mdclass:Subsystem>

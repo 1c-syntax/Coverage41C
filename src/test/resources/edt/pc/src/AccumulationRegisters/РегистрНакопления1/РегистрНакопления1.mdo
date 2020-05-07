@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mdclass:AccumulationRegister xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:core="http://g5.1c.ru/v8/dt/mcore" xmlns:mdclass="http://g5.1c.ru/v8/dt/metadata/mdclass" uuid="8ea07f36-d671-4649-bc7a-94daa939e77f">
+  <producedTypes>
+    <selectionType typeId="52e2d320-a2c1-457b-9ab3-31be042c9dce" valueTypeId="56120353-cc95-42f2-aada-3e589f99814e"/>
+    <listType typeId="3ecc0e29-a605-4d25-83cd-82658780314d" valueTypeId="50baa608-260a-43b3-90ca-6ed8149558fb"/>
+    <managerType typeId="5b28c444-abfa-4d65-8732-0d89249e476e" valueTypeId="e2db1381-968e-48c7-828f-cff78e9168df"/>
+    <recordSetType typeId="a60f3ee0-9553-4c98-b339-d2cf52f4b5b7" valueTypeId="2c6e0608-29c8-4e5e-93ae-f2b4f8c650b4"/>
+    <recordKeyType typeId="f0e917cf-e4ef-45c9-928d-643e28e2ca3d" valueTypeId="7b707178-2151-4600-ac3b-17c1160e7e60"/>
+    <recordType typeId="8e7ec4e6-0db5-4c54-bb2a-70b2493f4a9b" valueTypeId="96b9bf92-befe-448c-bd8c-ac86cc60582b"/>
+  </producedTypes>
+  <name>РегистрНакопления1</name>
+  <useStandardCommands>true</useStandardCommands>
+  <defaultListForm>AccumulationRegister.РегистрНакопления1.Form.ФормаСписка</defaultListForm>
+  <dataLockControlMode>Managed</dataLockControlMode>
+  <enableTotalsSplitting>true</enableTotalsSplitting>
+  <resources uuid="a187a281-f5cd-4e1c-8f3f-37212a840339">
+    <name>Ресурс1</name>
+    <type>
+      <types>Number</types>
+      <numberQualifiers>
+        <precision>10</precision>
+      </numberQualifiers>
+    </type>
+    <minValue xsi:type="core:UndefinedValue"/>
+    <maxValue xsi:type="core:UndefinedValue"/>
+    <fullTextSearch>Use</fullTextSearch>
+  </resources>
+  <dimensions uuid="461cae93-fe90-4bbb-8f79-0963e2d39ec5">
+    <name>Измерение1</name>
+    <type>
+      <types>String</types>
+      <stringQualifiers>
+        <length>10</length>
+      </stringQualifiers>
+    </type>
+    <minValue xsi:type="core:UndefinedValue"/>
+    <maxValue xsi:type="core:UndefinedValue"/>
+    <fullTextSearch>Use</fullTextSearch>
+    <useInTotals>true</useInTotals>
+  </dimensions>
+  <forms uuid="6adc9271-744f-4cda-88c9-59156ece5b89">
+    <name>ФормаСписка</name>
+    <synonym>
+      <key>ru</key>
+      <value>Форма списка</value>
+    </synonym>
+    <usePurposes>PersonalComputer</usePurposes>
+    <usePurposes>MobileDevice</usePurposes>
+  </forms>
+</mdclass:AccumulationRegister>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mdclass:Constant xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:core="http://g5.1c.ru/v8/dt/mcore" xmlns:mdclass="http://g5.1c.ru/v8/dt/metadata/mdclass" uuid="d42ac573-3c10-4f7e-8b10-dadbc45c196c">
+  <producedTypes>
+    <managerType typeId="7d1a9da5-29d8-4c53-b53a-0f0ff45f54f1" valueTypeId="93516b36-24f1-4bc2-bebd-ca324fc0c745"/>
+    <valueManagerType typeId="4a84d22e-41ac-4238-8063-033473187547" valueTypeId="915de161-81c6-44f7-b1e7-b92fdb2bdc66"/>
+    <valueKeyType typeId="338114a0-a486-48e7-a51e-a7901c83cb8a" valueTypeId="070f8531-cb25-4f6d-bb2f-817313cbba7a"/>
+  </producedTypes>
+  <name>ДатаЗавершенияФоновогоЗадания</name>
+  <synonym>
+    <key>ru</key>
+    <value>Дата завершения фонового задания</value>
+  </synonym>
+  <type>
+    <types>Date</types>
+    <dateQualifiers/>
+  </type>
+  <minValue xsi:type="core:UndefinedValue"/>
+  <maxValue xsi:type="core:UndefinedValue"/>
+  <dataLockControlMode>Managed</dataLockControlMode>
+</mdclass:Constant>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mdclass:SessionParameter xmlns:mdclass="http://g5.1c.ru/v8/dt/metadata/mdclass" uuid="66844df5-823b-40f1-ab8a-b07c1cb7462f">
+  <name>ПараметрСеанса1</name>
+  <type>
+    <types>Boolean</types>
+  </type>
+</mdclass:SessionParameter>

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mdclass:ChartOfCalculationTypes xmlns:mdclass="http://g5.1c.ru/v8/dt/metadata/mdclass" uuid="1755c534-9ccd-49c4-9f8b-2aa066424aaa">
+  <producedTypes>
+    <objectType typeId="26c012b3-cf45-4c9e-a25e-4fb9ac8d4293" valueTypeId="fae50475-9e35-48b2-9d82-1540105d58dc"/>
+    <refType typeId="dc453d53-ad97-4041-be9a-d8266be7ed82" valueTypeId="4473172a-60b7-43f5-b7f5-a1ab4f680147"/>
+    <selectionType typeId="271e009f-577f-4c98-b8f9-bed11d625627" valueTypeId="697c501c-df67-4417-bcd3-8cd2c82e25f5"/>
+    <listType typeId="ac5c93ed-608e-477d-947e-26e6a8dbd79d" valueTypeId="4fd4d529-1564-4463-9bf1-69df125cd03f"/>
+    <managerType typeId="1bdaf58f-0d81-4465-bdc2-d83ef5816cf7" valueTypeId="7d00a2f0-0585-411f-84ef-22605ffaed97"/>
+    <displacingCalculationTypesType typeId="d3020c35-f954-4ea7-8043-8a4d9ade11f2" valueTypeId="3aa6d49c-02f1-4e04-a078-0189d9718385"/>
+    <displacingCalculationTypesRowType typeId="bc92f867-701f-44e2-8e6e-d57be0c85cc7" valueTypeId="7b407093-e2c1-455c-8e92-2bf03e00081e"/>
+    <baseCalculationTypesType typeId="3d5e15b4-3f67-4632-9b49-1f2ce9e09744" valueTypeId="cd9d1561-f5ea-4fe9-bd77-fa66425344aa"/>
+    <baseCalculationTypesRowType typeId="3bc40e78-b54a-474e-8ee3-257da2fbc087" valueTypeId="934b70de-f262-445e-b340-783558029bc7"/>
+    <leadingCalculationTypesType typeId="fe9f9cc8-842c-4eab-97cc-2adce4b0958c" valueTypeId="58e0f2a4-8bfe-410f-928a-113176bfde05"/>
+    <leadingCalculationTypesRowType typeId="57ef95a9-6dad-4ace-bb67-ecbc4b672ba7" valueTypeId="b652e1ff-75a2-4a02-a1c3-86448f47e836"/>
+  </producedTypes>
+  <name>ПланВидовРасчета1</name>
+  <useStandardCommands>true</useStandardCommands>
+  <inputByString>ChartOfCalculationTypes.ПланВидовРасчета1.StandardAttribute.Description</inputByString>
+  <inputByString>ChartOfCalculationTypes.ПланВидовРасчета1.StandardAttribute.Code</inputByString>
+  <fullTextSearchOnInputByString>DontUse</fullTextSearchOnInputByString>
+  <createOnInput>DontUse</createOnInput>
+  <dataLockControlMode>Managed</dataLockControlMode>
+  <fullTextSearch>Use</fullTextSearch>
+  <codeLength>9</codeLength>
+  <descriptionLength>40</descriptionLength>
+  <codeType>String</codeType>
+  <codeAllowedLength>Variable</codeAllowedLength>
+  <defaultPresentation>AsDescription</defaultPresentation>
+  <editType>InDialog</editType>
+  <choiceMode>BothWays</choiceMode>
+  <defaultObjectForm>ChartOfCalculationTypes.ПланВидовРасчета1.Form.ФормаВидаРасчета</defaultObjectForm>
+  <forms uuid="074ec017-25bd-4bc4-b701-330282691754">
+    <name>ФормаВидаРасчета</name>
+    <synonym>
+      <key>ru</key>
+      <value>Форма вида расчета</value>
+    </synonym>
+    <usePurposes>PersonalComputer</usePurposes>
+    <usePurposes>MobileDevice</usePurposes>
+  </forms>
+</mdclass:ChartOfCalculationTypes>

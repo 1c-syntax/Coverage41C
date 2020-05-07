@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mdclass:ChartOfAccounts xmlns:mdclass="http://g5.1c.ru/v8/dt/metadata/mdclass" uuid="2766f353-abd2-4e7f-9a95-53f05c83f5d4">
+  <producedTypes>
+    <objectType typeId="57a247df-0936-49bb-8176-aab962e6a0d3" valueTypeId="40b405e1-6efc-49ea-9ebc-1bbaa606e44c"/>
+    <refType typeId="8d09ca85-51cb-4390-86af-0d3c3ee6439f" valueTypeId="560bfdfb-5652-4c21-9d55-8e97deac61bd"/>
+    <selectionType typeId="f0b37152-25f0-465b-be4e-f73c8285eaf4" valueTypeId="1410d31f-a1da-4f4f-98f3-ae4ecf753122"/>
+    <listType typeId="92e228df-2ca8-425a-ae7a-a5eef9f69ca8" valueTypeId="053ea37b-96b1-42e5-8789-d03de6684bc9"/>
+    <managerType typeId="2d6079fc-59e3-433d-8515-c4c0071133af" valueTypeId="12e68ae6-ab57-4e62-adfb-cdfade0bd005"/>
+    <extDimensionTypes typeId="347b1e71-d3f5-49b4-a1f4-50d6b169a860" valueTypeId="1ebea82f-2ff0-49b0-a3e7-e79470fa3e9f"/>
+    <extDimensionTypesRow typeId="b5cd7089-1a89-4618-892e-c813ef30d7e6" valueTypeId="538fcb80-915b-41c7-9b3d-b3584c1dd574"/>
+  </producedTypes>
+  <name>ПланСчетов1</name>
+  <useStandardCommands>true</useStandardCommands>
+  <inputByString>ChartOfAccounts.ПланСчетов1.StandardAttribute.Description</inputByString>
+  <inputByString>ChartOfAccounts.ПланСчетов1.StandardAttribute.Code</inputByString>
+  <fullTextSearchOnInputByString>DontUse</fullTextSearchOnInputByString>
+  <createOnInput>DontUse</createOnInput>
+  <dataLockControlMode>Managed</dataLockControlMode>
+  <fullTextSearch>Use</fullTextSearch>
+  <codeLength>9</codeLength>
+  <descriptionLength>25</descriptionLength>
+  <checkUnique>true</checkUnique>
+  <editType>InDialog</editType>
+  <choiceMode>BothWays</choiceMode>
+  <defaultObjectForm>ChartOfAccounts.ПланСчетов1.Form.ФормаСчета</defaultObjectForm>
+  <forms uuid="b9a2eb3b-ba5a-4968-87db-e5e9d0f7172e">
+    <name>ФормаСчета</name>
+    <synonym>
+      <key>ru</key>
+      <value>Форма счета</value>
+    </synonym>
+    <usePurposes>PersonalComputer</usePurposes>
+    <usePurposes>MobileDevice</usePurposes>
+  </forms>
+</mdclass:ChartOfAccounts>

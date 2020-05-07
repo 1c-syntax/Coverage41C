@@ -4,57 +4,26 @@
 Сценарий использования:
 
 0) Устанавливаем EDT (для работы программы нужны как минимум его библиотеки ```com._1c.g5.v8.dt.debug.core_*.jar```, ```com._1c.g5.v8.dt.debug.model_*.jar```). Если держать EDT на данной машине затруднительно, из можно скопировать в любую папку, установить параметр окружения EDT_LOCATION в данную папку и удалить EDT.
-1) Скачиваем последнюю версию со страницы https://github.com/proDOOMman/Coverage41C/releases или устанавливаем через ```choco install Coverage41C```
+1) Скачиваем последнюю версию со страницы https://github.com/proDOOMman/Coverage41C/releases
 2) Включаем http-отладку на сервере 1С-Предприятия потём добавления к флагу -debug флага -http (или добавляем флаги ```/debug -http -attach /debuggerURL «адрес отладчика»``` в строку запуска файловой базы, см. https://its.1c.ru/db/v837doc#bookmark:adm:TI000000495)
 3) Проверяем что dbgs.exe (https://its.1c.ru/db/edtdoc/content/197/hdoc/_top/dbgs) запустился и работает. Для этого в браузере открываем его, адрес по умолчанию http://127.0.0.1:1550/. В случае успеха выдолжны увидеть сообщение "... it works!".
 4) Выгружаем исходники конфигурации или расширения в файлы.
-5) Запускаем анализ покрытия командой ```Coverage41C -i <ИмяИнформационнойБазыВКластере> -P <ПутьКПроекту> -s <ПутьКИсходникамОтносительноКорняПроекта> -o <ИмяВыходногоФайлаПокрытия> -e <ИмяРасширения>```. Для файловой базы нужно указать адрес отладчика и предопределённое имя информационной базы ```-i DefAlias -u http://127.0.0.1:<Порт>```.
-6) (Опционально, полезно для конвейера) Проверяем статус программы командой ```Coverage41C -i <ИмяИнформационнойБазыВКластере> -a check```.
+5) Запускаем анализ покрытия командой ```Coverage41C start -i <ИмяИнформационнойБазыВКластере> -P <ПутьКПроекту> -s <ПутьКИсходникамОтносительноКорняПроекта> -o <ИмяВыходногоФайлаПокрытия> -e <ИмяРасширения>```. Для файловой базы нужно указать адрес отладчика и предопределённое имя информационной базы ```-i DefAlias -u http://127.0.0.1:<Порт>```.
+6) (Опционально, полезно для конвейера) Проверяем статус программы командой ```Coverage41C check -i <ИмяИнформационнойБазыВКластере>```.
 7) Выполняем тесты
-8) Останавливаем программу нажатием Ctrl+C в окне терминала или командой ```Coverage41C -a stop -i <ИмяИнформационнойБазыВКластере> -u http://127.0.0.1:<Порт>```. Также возможна запись файла покрытия без остановки замеров командой ```-a dump```.
+8) Останавливаем программу нажатием Ctrl+C в окне терминала или командой ```Coverage41C stop -i <ИмяИнформационнойБазыВКластере> -u http://127.0.0.1:<Порт>```. Также возможна запись файла покрытия без остановки замеров командой ```dump```.
 9) Полученный файл в формате genericCoverage.xml загружаем в SonarQube.
 
 ```cmd
-Usage: Coverage41C [-hV] [-p] [--verbose] [-a=<commandAction>]
-                   [-c=<inputRawXmlFile>] [-e=<extensionName>]
-                   -i=<infobaseAlias> [-o=<outputFile>] [-P=<projectDirName>]
-                   [-p:env=<passwordEnv>] [-r=<removeSupport>]
-                   [-s=<srcDirName>] [-t=<pingTimeout>] [-u=<debugServerUrl>]
-                   [-u:file=<debugServerUrlFileName>]
-                   [-x=<externalDataProcessorUrl>] [-n=<debugAreaNames>]...
+Usage: Coverage41C [-hV] [COMMAND]
 Make measures from 1C:Enterprise and save them to genericCoverage.xml file
-  -a, --action=<commandAction>
-                           Action: start, stop, dump, clean, check, convert.
-                             Default - start
-  -i, --infobase=<infobaseAlias>
-                           InfoBase name. For file infobase use 'DefAlias' name
-  -e, --extensionName=<extensionName>
-                           Extension name
-  -x, --externalDataProcessor=<externalDataProcessorUrl>
-                           External data processor (or external report) url
-  -s, --srcDir=<srcDirName>
-                           Directory with sources exported to xml
-  -P, --projectDir=<projectDirName>
-                           Directory with project
-  -o, --out=<outputFile>   Output file name
-  -c, --convertFile=<inputRawXmlFile>
-                           Input file name with RAW xml coverage data
-  -u, --debugger=<debugServerUrl>
-                           Debugger url. Default - http://127.0.0.1:1550/
-      -u:file, --debugger:file=<debugServerUrlFileName>
-                           Debugger url file name
-  -p, --password           Dbgs password
-      -p:env, --password:env=<passwordEnv>
-                           Password environment variable name
-  -n, --areanames=<debugAreaNames>
-                           Debug area names (not for general use!)
-  -t, --timeout=<pingTimeout>
-                           Ping timeout. Default - 1000
-  -r, --removeSupport=<removeSupport>
-                           Remove support values: NOT_EDITABLE,
-                             EDITABLE_SUPPORT_ENABLED, NOT_SUPPORTED, NONE.
-                             Default - NONE
-      --verbose            If you need more logs. Default - false
-  -h, --help               Show this help message and exit.
-  -V, --version            Print version information and exit.
+  -h, --help      Show this help message and exit.
+  -V, --version   Print version information and exit.
+Commands:
+  start    Start measure and save coverage data to file
+  stop     Stop main application and save coverage to file
+  check    Check is main application ready
+  clean    Clear coverage data in main application
+  dump     Save coverage data to file
+  convert  Convert results from internal uuid-based format
 ```

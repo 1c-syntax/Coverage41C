@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mdclass:EventSubscription xmlns:mdclass="http://g5.1c.ru/v8/dt/metadata/mdclass" uuid="4da21a7b-3d07-4e6d-b91f-7e1c8ddcffcd">
+  <name>ПодпискаНаСобытие1</name>
+  <source>
+    <types>CatalogObject.Справочник1</types>
+  </source>
+  <event>BeforeWrite</event>
+  <handler>CommonModule.ПростойОбщийМодуль.ПодпискаНаСобытие1ПередЗаписью</handler>
+</mdclass:EventSubscription>

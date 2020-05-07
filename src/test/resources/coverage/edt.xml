@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<coverage version="1">
+    <file path="src/test/resources/edt/pc/src/InformationRegisters/РегистрСведений1/ManagerModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/DocumentJournals/ЖурналДокументов1/Forms/ФормаСписка/Module.bsl">
+        <lineToCover covered="true" lineNumber="4"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/Documents/Документ1/ObjectModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/AccumulationRegisters/РегистрНакопления1/ManagerModule.bsl">
+        <lineToCover covered="false" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/ChartsOfCharacteristicTypes/ПланВидовХарактеристик1/ObjectModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/ChartsOfAccounts/ПланСчетов1/Forms/ФормаСчета/Module.bsl">
+        <lineToCover covered="true" lineNumber="4"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/Catalogs/Справочник1/ObjectModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/Documents/Документ1/Forms/ФормаДокумента/Module.bsl">
+        <lineToCover covered="true" lineNumber="4"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/FilterCriteria/КритерийОтбора1/ManagerModule.bsl">
+        <lineToCover covered="false" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/Catalogs/Справочник1/Forms/ФормаСписка/Module.bsl">
+        <lineToCover covered="true" lineNumber="4"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/CommonCommands/ОбщаяКоманда1/CommandModule.bsl">
+        <lineToCover covered="true" lineNumber="5"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/HTTPServices/HTTPСервис1/Module.bsl">
+        <lineToCover covered="false" lineNumber="5"/>
+        <lineToCover covered="false" lineNumber="4"/>
+        <lineToCover covered="false" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/AccumulationRegisters/РегистрНакопления1/RecordSetModule.bsl">
+        <lineToCover covered="false" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/CalculationRegisters/РегистрРасчета1/RecordSetModule.bsl">
+        <lineToCover covered="false" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/Reports/Отчет1/ManagerModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/ChartsOfAccounts/ПланСчетов1/ManagerModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/InformationRegisters/РегистрСведений1/Forms/ФормаЗаписи/Module.bsl">
+        <lineToCover covered="true" lineNumber="4"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/Documents/Документ1/ManagerModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/CalculationRegisters/РегистрРасчета1/ManagerModule.bsl">
+        <lineToCover covered="false" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/ExchangePlans/ПланОбмена1/ManagerModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/CalculationRegisters/РегистрРасчета1/Forms/ФормаСписка/Module.bsl">
+        <lineToCover covered="false" lineNumber="4"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/ChartsOfCharacteristicTypes/ПланВидовХарактеристик1/Forms/ФормаЭлемента/Module.bsl">
+        <lineToCover covered="true" lineNumber="4"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/Configuration/ManagedApplicationModule.bsl">
+        <lineToCover covered="true" lineNumber="4"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/CommonModules/ОбщийМодульПовтИспВызов/Module.bsl">
+        <lineToCover covered="true" lineNumber="2"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/DataProcessors/Обработка1/ManagerModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/ChartsOfCalculationTypes/ПланВидовРасчета1/ObjectModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/CommonModules/ГлобальныйОбщийМодуль/Module.bsl">
+        <lineToCover covered="true" lineNumber="2"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/ChartsOfCalculationTypes/ПланВидовРасчета1/ManagerModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/CommonModules/ОбщийМодульПолныеПрава/Module.bsl">
+        <lineToCover covered="true" lineNumber="2"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/Configuration/ExternalConnectionModule.bsl">
+        <lineToCover covered="false" lineNumber="4"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/BusinessProcesses/БизнесПроцесс1/Forms/ФормаБизнесПроцесса/Module.bsl">
+        <lineToCover covered="true" lineNumber="4"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/Catalogs/Справочник1/Forms/ФормаЭлемента/Module.bsl">
+        <lineToCover covered="true" lineNumber="4"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/AccumulationRegisters/РегистрНакопления1/Forms/ФормаСписка/Module.bsl">
+        <lineToCover covered="false" lineNumber="4"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/SettingsStorages/ХранилищеНастроек1/ManagerModule.bsl">
+        <lineToCover covered="false" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/AccountingRegisters/РегистрБухгалтерии1/ManagerModule.bsl">
+        <lineToCover covered="false" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/AccountingRegisters/РегистрБухгалтерии1/RecordSetModule.bsl">
+        <lineToCover covered="false" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/Reports/Отчет1/ObjectModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/CommonModules/ОбщийМодульВызовСервера/Module.bsl">
+        <lineToCover covered="true" lineNumber="2"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/ChartsOfAccounts/ПланСчетов1/ObjectModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/Tasks/Задача1/ManagerModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/ChartsOfCharacteristicTypes/ПланВидовХарактеристик1/ManagerModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/DataProcessors/Обработка1/ObjectModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/CommonModules/ПростойОбщийМодуль/Module.bsl">
+        <lineToCover covered="true" lineNumber="12"/>
+        <lineToCover covered="true" lineNumber="8"/>
+        <lineToCover covered="true" lineNumber="7"/>
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/Tasks/Задача1/Forms/ФормаЗадачи/Module.bsl">
+        <lineToCover covered="true" lineNumber="4"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/BusinessProcesses/БизнесПроцесс1/ManagerModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/InformationRegisters/РегистрСведений1/RecordSetModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/Tasks/Задача1/ObjectModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/ExchangePlans/ПланОбмена1/ObjectModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/AccountingRegisters/РегистрБухгалтерии1/Forms/ФормаСписка/Module.bsl">
+        <lineToCover covered="false" lineNumber="4"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/Documents/Документ1/Forms/ФормаСписка/Module.bsl">
+        <lineToCover covered="true" lineNumber="4"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/CommonModules/ОбщийМодульПовтИспСеанс/Module.bsl">
+        <lineToCover covered="true" lineNumber="2"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/WebServices/WebСервис1/Module.bsl">
+        <lineToCover covered="false" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/DataProcessors/Обработка1/Forms/Форма/Module.bsl">
+        <lineToCover covered="true" lineNumber="29"/>
+        <lineToCover covered="true" lineNumber="28"/>
+        <lineToCover covered="true" lineNumber="27"/>
+        <lineToCover covered="true" lineNumber="22"/>
+        <lineToCover covered="true" lineNumber="21"/>
+        <lineToCover covered="true" lineNumber="20"/>
+        <lineToCover covered="true" lineNumber="19"/>
+        <lineToCover covered="true" lineNumber="18"/>
+        <lineToCover covered="true" lineNumber="13"/>
+        <lineToCover covered="true" lineNumber="12"/>
+        <lineToCover covered="true" lineNumber="11"/>
+        <lineToCover covered="true" lineNumber="6"/>
+        <lineToCover covered="true" lineNumber="5"/>
+        <lineToCover covered="true" lineNumber="4"/>
+        <lineToCover covered="true" lineNumber="35"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/ChartsOfCalculationTypes/ПланВидовРасчета1/Forms/ФормаВидаРасчета/Module.bsl">
+        <lineToCover covered="true" lineNumber="4"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/Constants/Константа1/ValueManagerModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/BusinessProcesses/БизнесПроцесс1/ObjectModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/Enums/Перечисление1/ManagerModule.bsl">
+        <lineToCover covered="false" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/Catalogs/Справочник1/ManagerModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/DocumentJournals/ЖурналДокументов1/ManagerModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="src/test/resources/edt/pc/src/Configuration/SessionModule.bsl">
+        <lineToCover covered="true" lineNumber="6"/>
+        <lineToCover covered="true" lineNumber="4"/>
+    </file>
+</coverage>
