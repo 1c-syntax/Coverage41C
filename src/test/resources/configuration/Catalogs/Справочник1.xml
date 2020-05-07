@@ -309,7 +309,6 @@
 					<ToolTip/>
 					<Picture/>
 					<Shortcut/>
-					<OnMainServerUnavalableBehavior>Auto</OnMainServerUnavalableBehavior>
 				</Properties>
 			</Command>
 		</ChildObjects>

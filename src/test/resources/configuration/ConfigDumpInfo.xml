@@ -87,7 +87,7 @@
 		<Metadata name="CommonModule.ПростойОбщийМодуль.Module" id="1be4af7e-334e-49fa-a9f9-d80c737ff954.0" configVersion="b1f1854f1dfac24eb642b7e091c5840900000000"/>
 		<Metadata name="CommonPicture.ОбщаяКартинка1" id="db84513d-2535-494b-843e-6d8931cb2f82" configVersion="d40ff32ba796a849a23fad26c5dc023300000000"/>
 		<Metadata name="CommonTemplate.Макет" id="799e0ae7-f5ea-4b50-8853-e2c58ef5d9cd" configVersion="36b93cdf45202e48b3876fa0fc394f9600000000"/>
-		<Metadata name="Configuration.Конфигурация" id="46c7c1d0-b04d-4295-9b04-ae3207c18d29" configVersion="00bcc47a12129e4eb611b27d7727d4fe00000000"/>
+		<Metadata name="Configuration.Конфигурация" id="46c7c1d0-b04d-4295-9b04-ae3207c18d29" configVersion="ae8eacbfb4c19d4aa3fe1212ded5d7db00000000"/>
 		<Metadata name="Configuration.Конфигурация.ExternalConnectionModule" id="6b9cfff9-b36e-4dc0-947d-9ae7d8eafbff.5" configVersion="e48124ad82839d459a36a52f7b8d828200000000"/>
 		<Metadata name="Configuration.Конфигурация.HomePageWorkArea" id="6b9cfff9-b36e-4dc0-947d-9ae7d8eafbff.8" configVersion="eb292d0b2e425640862a34b4df6a505c00000000"/>
 		<Metadata name="Configuration.Конфигурация.ManagedApplicationModule" id="6b9cfff9-b36e-4dc0-947d-9ae7d8eafbff.6" configVersion="02924804238d3d4a88d31f83d355de4b00000000"/>

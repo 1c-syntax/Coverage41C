@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mdclass:CalculationRegister xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:core="http://g5.1c.ru/v8/dt/mcore" xmlns:mdclass="http://g5.1c.ru/v8/dt/metadata/mdclass" uuid="90587c7d-b950-4476-ac14-426e4a83d9c4">
+  <producedTypes>
+    <selectionType typeId="68a12904-a55f-4b4d-b598-4af81a5a0f34" valueTypeId="e44ed52f-2016-40c3-aa59-c284d31f93ac"/>
+    <listType typeId="75d26702-fd6d-4eb2-b371-f46e31aba11c" valueTypeId="c09dfeff-f73f-48e0-a5a0-793d29bea0e1"/>
+    <managerType typeId="88e31c57-5a51-4362-aa0d-27c57e930be9" valueTypeId="61dfeea1-7736-404d-b9c3-51ddd913308d"/>
+    <recordSetType typeId="3169deea-0ccf-4302-8fe1-243a2c9a6c2e" valueTypeId="2b36fb78-d0f5-4778-a80e-d98cd9f39b0f"/>
+    <recordKeyType typeId="d598fab8-c358-4569-88a5-bbce2e6f4448" valueTypeId="3a83454d-02c6-4feb-b2ac-91bf2d2cf316"/>
+    <recordType typeId="cf98c2b0-3630-444f-84e0-b75a0b19e2dc" valueTypeId="75b424e2-a689-4503-9edc-269126c9bb8d"/>
+    <recalcsType typeId="7f27d3bd-4973-472f-a0a6-f7994d2f6c02" valueTypeId="a041d5ad-a924-433a-a64f-9c4c75575021"/>
+  </producedTypes>
+  <name>РегистрРасчета1</name>
+  <useStandardCommands>true</useStandardCommands>
+  <defaultListForm>CalculationRegister.РегистрРасчета1.Form.ФормаСписка</defaultListForm>
+  <periodicity>Month</periodicity>
+  <chartOfCalculationTypes>ChartOfCalculationTypes.ПланВидовРасчета1</chartOfCalculationTypes>
+  <dataLockControlMode>Managed</dataLockControlMode>
+  <resources uuid="86f41061-e298-4da5-8d28-489a349d55fc">
+    <name>Ресурс1</name>
+    <type>
+      <types>Number</types>
+      <numberQualifiers>
+        <precision>10</precision>
+      </numberQualifiers>
+    </type>
+    <minValue xsi:type="core:UndefinedValue"/>
+    <maxValue xsi:type="core:UndefinedValue"/>
+    <fullTextSearch>Use</fullTextSearch>
+  </resources>
+  <dimensions uuid="f3e7cca5-4902-4ad5-96c7-db8336f52c6e">
+    <name>Измерение1</name>
+    <type>
+      <types>String</types>
+      <stringQualifiers>
+        <length>10</length>
+      </stringQualifiers>
+    </type>
+    <minValue xsi:type="core:UndefinedValue"/>
+    <maxValue xsi:type="core:UndefinedValue"/>
+    <fullTextSearch>Use</fullTextSearch>
+  </dimensions>
+  <forms uuid="ccb50988-1274-49b8-a2df-e0e254189782">
+    <name>ФормаСписка</name>
+    <synonym>
+      <key>ru</key>
+      <value>Форма списка</value>
+    </synonym>
+    <usePurposes>PersonalComputer</usePurposes>
+    <usePurposes>MobileDevice</usePurposes>
+  </forms>
+</mdclass:CalculationRegister>

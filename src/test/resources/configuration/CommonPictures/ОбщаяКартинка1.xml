@@ -5,8 +5,6 @@
 			<Name>ОбщаяКартинка1</Name>
 			<Synonym/>
 			<Comment/>
-			<AvailabilityForChoice>false</AvailabilityForChoice>
-			<AvailabilityForAppearance>false</AvailabilityForAppearance>
 		</Properties>
 	</CommonPicture>
 </MetaDataObject>

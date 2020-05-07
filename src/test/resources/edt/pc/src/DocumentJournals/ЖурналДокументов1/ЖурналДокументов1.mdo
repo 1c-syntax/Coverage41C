@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mdclass:DocumentJournal xmlns:mdclass="http://g5.1c.ru/v8/dt/metadata/mdclass" uuid="c6743657-4787-40de-9a45-2493c630f626">
+  <producedTypes>
+    <selectionType typeId="13f2699b-a248-4173-ba82-6d51e324de18" valueTypeId="ec84bd0c-70c2-465d-aae3-e19a8edefa4e"/>
+    <listType typeId="9946dba3-c6f0-4eda-9334-45b4dfbfe484" valueTypeId="9e7fa336-87fe-4da6-b3ba-8b4cadd4bb15"/>
+    <managerType typeId="9081ac6f-d856-449e-8e35-879c003c687b" valueTypeId="e951d77c-eead-4a45-b62f-e3ea9033bd33"/>
+  </producedTypes>
+  <name>ЖурналДокументов1</name>
+  <defaultForm>DocumentJournal.ЖурналДокументов1.Form.ФормаСписка</defaultForm>
+  <useStandardCommands>true</useStandardCommands>
+  <registeredDocuments>Document.Документ1</registeredDocuments>
+  <forms uuid="dfbd30f7-5419-4df8-9ce8-b6de7427fcb4">
+    <name>ФормаСписка</name>
+    <synonym>
+      <key>ru</key>
+      <value>Форма списка</value>
+    </synonym>
+    <usePurposes>PersonalComputer</usePurposes>
+    <usePurposes>MobileDevice</usePurposes>
+  </forms>
+</mdclass:DocumentJournal>

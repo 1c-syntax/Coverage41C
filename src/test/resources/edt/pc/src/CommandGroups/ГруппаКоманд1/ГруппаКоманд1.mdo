@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mdclass:CommandGroup xmlns:mdclass="http://g5.1c.ru/v8/dt/metadata/mdclass" uuid="9bd3b0b1-b276-4b0e-9811-44a41ebb0c7c">
+  <name>ГруппаКоманд1</name>
+  <representation>Auto</representation>
+</mdclass:CommandGroup>

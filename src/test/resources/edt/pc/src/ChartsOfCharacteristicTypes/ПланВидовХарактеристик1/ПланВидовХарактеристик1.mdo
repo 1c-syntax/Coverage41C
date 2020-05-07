@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mdclass:ChartOfCharacteristicTypes xmlns:mdclass="http://g5.1c.ru/v8/dt/metadata/mdclass" uuid="f53a24c3-f1dc-43b7-8dcf-eeb8c0b7f452">
+  <producedTypes>
+    <objectType typeId="a888f719-ee29-4cfe-829b-7d338191ee47" valueTypeId="d29b3a5f-a1d4-4054-8c43-a86d96d48045"/>
+    <refType typeId="0f8cef84-e977-438e-9c12-d447f9e630b7" valueTypeId="3363bfc6-71e5-4ca6-bf9e-118eb1fdf3d7"/>
+    <selectionType typeId="36249330-abd7-45e9-af58-6b59234a4488" valueTypeId="08a7ea67-e86f-49bc-b30a-f0878a9b6fa1"/>
+    <listType typeId="d57339ec-c092-41f9-9571-7645174d1ce8" valueTypeId="690ac3e8-4045-460c-964c-5531acd69f60"/>
+    <managerType typeId="7628ad23-e406-4161-a855-d6f34622ab02" valueTypeId="df24f15c-d914-4a0e-8363-c16333735e65"/>
+    <containerType typeId="53d57c8e-02dd-4366-b0f9-854f0ed0ea61" valueTypeId="eb1e8106-cd51-42d5-92bd-82734d7b7440"/>
+  </producedTypes>
+  <name>ПланВидовХарактеристик1</name>
+  <useStandardCommands>true</useStandardCommands>
+  <inputByString>ChartOfCharacteristicTypes.ПланВидовХарактеристик1.StandardAttribute.Description</inputByString>
+  <inputByString>ChartOfCharacteristicTypes.ПланВидовХарактеристик1.StandardAttribute.Code</inputByString>
+  <fullTextSearchOnInputByString>DontUse</fullTextSearchOnInputByString>
+  <createOnInput>DontUse</createOnInput>
+  <dataLockControlMode>Managed</dataLockControlMode>
+  <fullTextSearch>Use</fullTextSearch>
+  <type>
+    <types>String</types>
+    <stringQualifiers>
+      <length>10</length>
+    </stringQualifiers>
+  </type>
+  <foldersOnTop>true</foldersOnTop>
+  <codeLength>9</codeLength>
+  <codeAllowedLength>Variable</codeAllowedLength>
+  <descriptionLength>25</descriptionLength>
+  <checkUnique>true</checkUnique>
+  <autonumbering>true</autonumbering>
+  <defaultPresentation>AsDescription</defaultPresentation>
+  <editType>InDialog</editType>
+  <choiceMode>BothWays</choiceMode>
+  <defaultObjectForm>ChartOfCharacteristicTypes.ПланВидовХарактеристик1.Form.ФормаЭлемента</defaultObjectForm>
+  <forms uuid="bf77dcee-cb92-4ba9-9e5d-cd7bd0511a8b">
+    <name>ФормаЭлемента</name>
+    <synonym>
+      <key>ru</key>
+      <value>Форма элемента</value>
+    </synonym>
+    <usePurposes>PersonalComputer</usePurposes>
+    <usePurposes>MobileDevice</usePurposes>
+  </forms>
+</mdclass:ChartOfCharacteristicTypes>

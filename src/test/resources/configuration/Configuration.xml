@@ -32,7 +32,7 @@
 			<Synonym/>
 			<Comment/>
 			<NamePrefix/>
-			<ConfigurationExtensionCompatibilityMode>Version8_3_16</ConfigurationExtensionCompatibilityMode>
+			<ConfigurationExtensionCompatibilityMode>Version8_3_15</ConfigurationExtensionCompatibilityMode>
 			<DefaultRunMode>ManagedApplication</DefaultRunMode>
 			<UsePurposes>
 				<v8:Value xsi:type="app:ApplicationUsePurpose">PlatformApplication</v8:Value>
@@ -150,16 +150,7 @@
 					<app:permission>AudioAndVibrationPlayback</app:permission>
 					<app:use>false</app:use>
 				</app:permission>
-				<app:permission>
-					<app:permission>InstallPackages</app:permission>
-					<app:use>false</app:use>
-				</app:permission>
-				<app:permission>
-					<app:permission>AllowOSBackup</app:permission>
-					<app:use>true</app:use>
-				</app:permission>
 			</RequiredMobileApplicationPermissions>
-			<StandaloneConfigurationRestrictionRoles/>
 			<MainClientApplicationWindowMode>Normal</MainClientApplicationWindowMode>
 			<DefaultInterface/>
 			<DefaultStyle/>
@@ -174,7 +165,7 @@
 			<ModalityUseMode>DontUse</ModalityUseMode>
 			<SynchronousPlatformExtensionAndAddInCallUseMode>DontUse</SynchronousPlatformExtensionAndAddInCallUseMode>
 			<InterfaceCompatibilityMode>Taxi</InterfaceCompatibilityMode>
-			<CompatibilityMode>Version8_3_16</CompatibilityMode>
+			<CompatibilityMode>Version8_3_15</CompatibilityMode>
 			<DefaultConstantsForm/>
 		</Properties>
 		<ChildObjects>

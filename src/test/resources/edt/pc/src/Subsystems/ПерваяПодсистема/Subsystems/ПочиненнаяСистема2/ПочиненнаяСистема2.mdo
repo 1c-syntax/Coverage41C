@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mdclass:Subsystem xmlns:mdclass="http://g5.1c.ru/v8/dt/metadata/mdclass" uuid="c2e12fa5-e679-4932-8c37-db175f268b3d">
+  <name>ПочиненнаяСистема2</name>
+  <synonym>
+    <key>ru</key>
+    <value>Починенная система2</value>
+  </synonym>
+  <includeHelpInContents>true</includeHelpInContents>
+  <includeInCommandInterface>true</includeInCommandInterface>
+  <content>ChartOfAccounts.ПланСчетов1</content>
+  <content>BusinessProcess.БизнесПроцесс1</content>
+  <parentSubsystem>Subsystem.ПерваяПодсистема</parentSubsystem>
+</mdclass:Subsystem>

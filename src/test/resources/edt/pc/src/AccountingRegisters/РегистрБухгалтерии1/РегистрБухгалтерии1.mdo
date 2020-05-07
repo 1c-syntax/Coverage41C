@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mdclass:AccountingRegister xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:core="http://g5.1c.ru/v8/dt/mcore" xmlns:mdclass="http://g5.1c.ru/v8/dt/metadata/mdclass" uuid="e5930f2f-15d9-48a1-ac69-379ad990b02a">
+  <producedTypes>
+    <selectionType typeId="19c9961b-30ac-47ac-b941-e906baf0d32f" valueTypeId="89ecc56d-2c67-4a07-aaee-2cdb00e3db4b"/>
+    <listType typeId="62afb9f9-2bb8-46fd-b637-bb5d6e43a471" valueTypeId="63fa626f-d24c-4a9f-8f3f-db7197013122"/>
+    <managerType typeId="83d47f84-dca3-4d8e-adff-d50165a63724" valueTypeId="6ce4bffe-fcd8-4630-a313-f6bfd49e5e47"/>
+    <recordSetType typeId="5eb2ba83-6f9b-4353-a932-c4b503aadc68" valueTypeId="ae4ef7fd-e676-415d-80db-276c24342974"/>
+    <recordKeyType typeId="f765ef7c-2217-4c05-b330-ae620a0bd838" valueTypeId="43c6c39d-32a8-47a6-a752-fc7f2ff4dc39"/>
+    <recordType typeId="d833a3aa-844d-4d3b-b7ce-90cb3c3b2f10" valueTypeId="2f137f49-d7b8-4bbc-9250-1536bea10663"/>
+    <extDimensionsType typeId="ffdf5693-64ea-4b78-a2b0-1388e855a2c8" valueTypeId="7aefad2d-43a5-4d24-8c4a-13833e75f651"/>
+  </producedTypes>
+  <name>РегистрБухгалтерии1</name>
+  <useStandardCommands>true</useStandardCommands>
+  <chartOfAccounts>ChartOfAccounts.ПланСчетов1</chartOfAccounts>
+  <defaultListForm>AccountingRegister.РегистрБухгалтерии1.Form.ФормаСписка</defaultListForm>
+  <dataLockControlMode>Managed</dataLockControlMode>
+  <enableTotalsSplitting>true</enableTotalsSplitting>
+  <dimensions uuid="902c08a9-e457-436a-b0fb-b996f0d9bb00">
+    <name>Измерение1</name>
+    <type>
+      <types>String</types>
+      <stringQualifiers>
+        <length>10</length>
+      </stringQualifiers>
+    </type>
+    <minValue xsi:type="core:UndefinedValue"/>
+    <maxValue xsi:type="core:UndefinedValue"/>
+    <fullTextSearch>Use</fullTextSearch>
+    <balance>true</balance>
+  </dimensions>
+  <resources uuid="e88df8bd-bf97-41a4-88fc-09c84a51824b">
+    <name>Ресурс1</name>
+    <type>
+      <types>Number</types>
+      <numberQualifiers>
+        <precision>10</precision>
+      </numberQualifiers>
+    </type>
+    <minValue xsi:type="core:UndefinedValue"/>
+    <maxValue xsi:type="core:UndefinedValue"/>
+    <fullTextSearch>Use</fullTextSearch>
+    <balance>true</balance>
+  </resources>
+  <forms uuid="c5274498-e1c2-4113-a354-a8731848cb58">
+    <name>ФормаСписка</name>
+    <synonym>
+      <key>ru</key>
+      <value>Форма списка</value>
+    </synonym>
+    <usePurposes>PersonalComputer</usePurposes>
+    <usePurposes>MobileDevice</usePurposes>
+  </forms>
+</mdclass:AccountingRegister>

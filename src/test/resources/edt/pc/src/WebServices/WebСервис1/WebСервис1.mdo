@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mdclass:WebService xmlns:mdclass="http://g5.1c.ru/v8/dt/metadata/mdclass" uuid="d7f9b06b-0799-486e-adff-c45a2d5b8101">
+  <name>WebСервис1</name>
+  <namespace>http://test.test</namespace>
+  <descriptorFileName>ws1.1cws</descriptorFileName>
+  <reuseSessions>AutoUse</reuseSessions>
+  <sessionMaxAge>20</sessionMaxAge>
+  <operations uuid="ce7b0484-745b-449a-a3bd-346441305947">
+    <name>Операция1</name>
+    <xdtoReturningValueType>
+      <name>string</name>
+      <nsUri>http://www.w3.org/2001/XMLSchema</nsUri>
+    </xdtoReturningValueType>
+    <procedureName>Операция1</procedureName>
+    <dataLockControlMode>Managed</dataLockControlMode>
+  </operations>
+</mdclass:WebService>

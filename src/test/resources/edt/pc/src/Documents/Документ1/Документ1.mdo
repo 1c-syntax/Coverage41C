@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mdclass:Document xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:core="http://g5.1c.ru/v8/dt/mcore" xmlns:mdclass="http://g5.1c.ru/v8/dt/metadata/mdclass" uuid="ce4fb46b-4af7-493e-9fcb-76ad8c4f8acd">
+  <producedTypes>
+    <objectType typeId="63746ee9-4d4a-4464-87e6-9c1e88758eb1" valueTypeId="665c5fd1-7f1e-457a-b7b1-9d8d7022bdbe"/>
+    <refType typeId="6dfc3e29-ce07-4790-9fe3-460c151ac50e" valueTypeId="5b0cf386-5c0c-411f-a23d-58cb3fd83af6"/>
+    <selectionType typeId="448fe6ba-ee84-43b0-89e5-569e66503154" valueTypeId="0ba2af94-7b0f-421e-98cc-581430b64961"/>
+    <listType typeId="3b18f66c-9911-488c-97cc-686cd7710f97" valueTypeId="84a773bf-4341-4a0c-a9b5-22b6c3e3d1f1"/>
+    <managerType typeId="6431bc70-e84b-4299-bf86-85de4b3e16e4" valueTypeId="fe3998f9-8a73-406b-bdc6-667c1280a711"/>
+  </producedTypes>
+  <name>Документ1</name>
+  <useStandardCommands>true</useStandardCommands>
+  <inputByString>Document.Документ1.StandardAttribute.Number</inputByString>
+  <fullTextSearchOnInputByString>DontUse</fullTextSearchOnInputByString>
+  <createOnInput>Use</createOnInput>
+  <dataLockControlMode>Managed</dataLockControlMode>
+  <fullTextSearch>Use</fullTextSearch>
+  <numberType>String</numberType>
+  <numberLength>9</numberLength>
+  <numberAllowedLength>Variable</numberAllowedLength>
+  <checkUnique>true</checkUnique>
+  <autonumbering>true</autonumbering>
+  <defaultObjectForm>Document.Документ1.Form.ФормаДокумента</defaultObjectForm>
+  <defaultListForm>Document.Документ1.Form.ФормаСписка</defaultListForm>
+  <defaultChoiceForm>Document.Документ1.Form.ФормаВыбора</defaultChoiceForm>
+  <registerRecords>AccumulationRegister.РегистрНакопления1</registerRecords>
+  <registerRecords>CalculationRegister.РегистрРасчета1</registerRecords>
+  <registerRecords>InformationRegister.РегистрСведений2</registerRecords>
+  <registerRecords>AccountingRegister.РегистрБухгалтерии1</registerRecords>
+  <postInPrivilegedMode>true</postInPrivilegedMode>
+  <unpostInPrivilegedMode>true</unpostInPrivilegedMode>
+  <attributes uuid="681aaa11-422a-41a6-bd93-28b2ad83f595">
+    <name>Реквизит1</name>
+    <type>
+      <types>String</types>
+      <stringQualifiers>
+        <length>10</length>
+      </stringQualifiers>
+    </type>
+    <minValue xsi:type="core:UndefinedValue"/>
+    <maxValue xsi:type="core:UndefinedValue"/>
+    <fillValue xsi:type="core:StringValue">
+      <value></value>
+    </fillValue>
+    <fullTextSearch>Use</fullTextSearch>
+    <dataHistory>Use</dataHistory>
+  </attributes>
+  <attributes uuid="bdbbb8f0-84af-4a72-80c4-21f7436bbe99">
+    <name>Реквизит2</name>
+    <type>
+      <types>Number</types>
+      <numberQualifiers>
+        <precision>10</precision>
+      </numberQualifiers>
+    </type>
+    <minValue xsi:type="core:UndefinedValue"/>
+    <maxValue xsi:type="core:UndefinedValue"/>
+    <fillValue xsi:type="core:UndefinedValue"/>
+    <fullTextSearch>Use</fullTextSearch>
+    <dataHistory>Use</dataHistory>
+  </attributes>
+  <attributes uuid="f9b6dbc4-79c1-4985-bfd2-87cb8c9fb01c">
+    <name>Реквизит3</name>
+    <type>
+      <types>Date</types>
+      <dateQualifiers>
+        <dateFractions>Date</dateFractions>
+      </dateQualifiers>
+    </type>
+    <minValue xsi:type="core:UndefinedValue"/>
+    <maxValue xsi:type="core:UndefinedValue"/>
+    <fillValue xsi:type="core:UndefinedValue"/>
+    <fullTextSearch>Use</fullTextSearch>
+    <dataHistory>Use</dataHistory>
+  </attributes>
+  <forms uuid="875c9efc-f2ae-4773-bac2-3556424557c3">
+    <name>ФормаДокумента</name>
+    <synonym>
+      <key>ru</key>
+      <value>Форма документа</value>
+    </synonym>
+    <usePurposes>PersonalComputer</usePurposes>
+    <usePurposes>MobileDevice</usePurposes>
+  </forms>
+  <forms uuid="c7c49315-4318-459c-9a6b-8b293ef3e772">
+    <name>ФормаСписка</name>
+    <synonym>
+      <key>ru</key>
+      <value>Форма списка</value>
+    </synonym>
+    <usePurposes>PersonalComputer</usePurposes>
+    <usePurposes>MobileDevice</usePurposes>
+  </forms>
+  <forms uuid="9b76b5be-bacf-4d63-b745-4024668740d2">
+    <name>ФормаВыбора</name>
+    <synonym>
+      <key>ru</key>
+      <value>Форма выбора</value>
+    </synonym>
+    <usePurposes>PersonalComputer</usePurposes>
+    <usePurposes>MobileDevice</usePurposes>
+  </forms>
+  <tabularSections uuid="508fe2d9-44b0-4b34-a349-2b0bcae6adc4">
+    <producedTypes>
+      <objectType typeId="59f15ed6-bece-4c1c-913e-25551b6ee952" valueTypeId="8df744e6-815a-4a5d-8d44-36ea4fbf6527"/>
+      <rowType typeId="4b2a515a-00cc-4efd-8292-9ff226bf5fa2" valueTypeId="dc7cda73-42c4-4124-9aec-e4044bc26f21"/>
+    </producedTypes>
+    <name>ТабличнаяЧасть1</name>
+    <attributes uuid="55f8b5cd-5f29-4034-9cb0-000180f11754">
+      <name>Реквизит1</name>
+      <type>
+        <types>CatalogRef.Справочник1</types>
+      </type>
+      <minValue xsi:type="core:UndefinedValue"/>
+      <maxValue xsi:type="core:UndefinedValue"/>
+      <dataHistory>Use</dataHistory>
+      <fullTextSearch>Use</fullTextSearch>
+    </attributes>
+    <attributes uuid="22b9ca2e-c861-4f47-8377-cc364b9ebf5d">
+      <name>Реквизит2</name>
+      <type>
+        <types>Number</types>
+        <numberQualifiers>
+          <precision>10</precision>
+        </numberQualifiers>
+      </type>
+      <minValue xsi:type="core:UndefinedValue"/>
+      <maxValue xsi:type="core:UndefinedValue"/>
+      <dataHistory>Use</dataHistory>
+      <fullTextSearch>Use</fullTextSearch>
+    </attributes>
+  </tabularSections>
+</mdclass:Document>
