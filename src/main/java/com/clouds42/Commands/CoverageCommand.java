@@ -104,6 +104,10 @@ public class CoverageCommand implements Callable<Integer> {
                         Utils.dumpCoverageFile(coverageData, metadataOptions, outputOptions);
                         out.println(PipeMessages.OK_RESULT);
                         return true;
+                    } else if (PipeMessages.STATS_COMMAND.equals(line)) {
+                        Utils.printCoverageStats(coverageData, metadataOptions);
+                        out.println(PipeMessages.OK_RESULT);
+                        return true;
                     } else if (PipeMessages.CLEAN_COMMAND.equals(line)) {
                         coverageData.forEach((uri, bigDecimalBooleanMap) -> {
                             for (var key : bigDecimalBooleanMap.keySet()) {
@@ -186,7 +190,7 @@ public class CoverageCommand implements Callable<Integer> {
 
         rawMode = metadataOptions.isRawMode();
 
-        Map<String, URI> uriListByKey = Utils.readMetadata(metadataOptions, filterOptions, coverageData);
+        Map<String, URI> uriListByKey = Utils.readMetadata(metadataOptions, coverageData);
 
         boolean firstRun = true;
 

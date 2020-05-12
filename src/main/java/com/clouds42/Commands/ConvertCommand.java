@@ -43,9 +43,6 @@ public class ConvertCommand implements Callable<Integer> {
     private MetadataOptions metadataOptions;
 
     @Mixin
-    private FilterOptions filterOptions;
-
-    @Mixin
     private LoggingOptions loggingOptions;
 
     @Override
@@ -53,7 +50,7 @@ public class ConvertCommand implements Callable<Integer> {
 
         Map<URI, Map<BigDecimal, Boolean>> coverageData = new HashMap<URI,Map<BigDecimal, Boolean>>();
 
-        Map<String, URI> uriListByKey = Utils.readMetadata(metadataOptions, filterOptions, coverageData);
+        Map<String, URI> uriListByKey = Utils.readMetadata(metadataOptions, coverageData);
 
         FileInputStream fileIS = new FileInputStream(convertOptions.getInputRawXmlFile());
         DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();

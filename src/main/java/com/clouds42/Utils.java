@@ -1,7 +1,6 @@
 package com.clouds42;
 
 import com.clouds42.CommandLineOptions.ConnectionOptions;
-import com.clouds42.CommandLineOptions.FilterOptions;
 import com.clouds42.CommandLineOptions.MetadataOptions;
 import com.clouds42.CommandLineOptions.OutputOptions;
 import com.github._1c_syntax.bsl.parser.BSLParser;
@@ -14,6 +13,8 @@ import com.github._1c_syntax.mdclasses.mdo.SettingsStorage;
 import com.github._1c_syntax.mdclasses.metadata.Configuration;
 import com.github._1c_syntax.mdclasses.metadata.additional.ModuleType;
 import com.github._1c_syntax.mdclasses.metadata.additional.SupportVariant;
+import de.vandermeer.asciitable.AsciiTable;
+import de.vandermeer.asciitable.CWC_LongestLine;
 import org.antlr.v4.runtime.tree.TerminalNodeImpl;
 import org.antlr.v4.runtime.tree.Tree;
 import org.antlr.v4.runtime.tree.Trees;
@@ -150,7 +151,6 @@ public class Utils {
     }
 
     public static Map<String, URI> readMetadata(MetadataOptions metadataOptions,
-                                                FilterOptions filterOptions,
                                                 Map<URI, Map<BigDecimal, Boolean>> coverageData) throws Exception {
 
         boolean rawMode = false;
@@ -346,6 +346,40 @@ public class Utils {
         } catch (Exception e) {
             logger.error(e.getLocalizedMessage());
         }
+    }
+
+    public static void printCoverageStats(Map<URI, Map<BigDecimal, Boolean>> coverageData,
+                                          MetadataOptions metadataOptions) {
+        List<Object[]> dataList = new LinkedList<>();
+        URI projectUri = Path.of(metadataOptions.getProjectDirName()).toUri();
+        coverageData.forEach((uri, bigDecimalsMap) -> {
+            if (bigDecimalsMap.isEmpty()) {
+                return;
+            }
+            String path = projectUri.relativize(uri).getPath();
+            long linesToCover = bigDecimalsMap.size();
+            long coveredLinesCount = bigDecimalsMap.values().stream().filter(aBoolean -> aBoolean.booleanValue()).count();
+            Double coverage = Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100.;
+            Object[] dataRow = {
+                    path,
+                    linesToCover,
+                    coveredLinesCount,
+                    coverage};
+            dataList.add(dataRow);
+        });
+        Collections.sort(dataList, Comparator.comparing(objects -> ((Double) objects[3])));
+        AsciiTable at = new AsciiTable();
+        at.addRule();
+        at.addRow("Path", "Lines to cover", "Covered lines", "Coverage, %");
+        at.addRule();
+        dataList.forEach(objects -> {
+            at.addRow(objects);
+            at.addRule();
+        });
+        CWC_LongestLine cwc = new CWC_LongestLine();
+        at.getRenderer().setCWC(cwc);
+        String rend = at.render();
+        System.out.println(rend);
     }
 
     public static String getPipeName(ConnectionOptions connectionOptions) throws IOException {
