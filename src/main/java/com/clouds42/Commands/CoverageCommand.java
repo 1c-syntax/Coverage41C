@@ -3,7 +3,6 @@ package com.clouds42.Commands;
 import com._1c.g5.v8.dt.debug.core.runtime.client.RuntimeDebugClientException;
 import com._1c.g5.v8.dt.debug.model.base.data.BSLModuleIdInternal;
 import com._1c.g5.v8.dt.debug.model.base.data.DebugTargetId;
-import com._1c.g5.v8.dt.debug.model.base.data.DebugTargetType;
 import com._1c.g5.v8.dt.debug.model.dbgui.commands.DBGUIExtCmdInfoBase;
 import com._1c.g5.v8.dt.debug.model.dbgui.commands.DBGUIExtCmds;
 import com._1c.g5.v8.dt.debug.model.dbgui.commands.impl.DBGUIExtCmdInfoMeasureImpl;
@@ -294,10 +293,9 @@ public class CoverageCommand implements Callable<Integer> {
                 try {
                     client.connect(debuggerOptions.getPassword());
                     client.initSettings(false);
-                    List<DebugTargetType> debugTargetTypes = new LinkedList<DebugTargetType>();
-                    debugTargetTypes.addAll(DebugTargetType.VALUES);
-                    debugTargetTypes.remove(DebugTargetType.UNKNOWN);
-                    client.setAutoconnectDebugTargets(debuggerOptions.getDebugAreaNames(), debugTargetTypes);
+                    client.setAutoconnectDebugTargets(
+                            debuggerOptions.getDebugAreaNames(),
+                            debuggerOptions.getAutoconnectTargets());
 
                     List<DebugTargetId> debugTargets;
                     if (debuggerOptions.getDebugAreaNames().isEmpty()) {
