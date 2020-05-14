@@ -327,6 +327,7 @@ public class CoverageCommand implements Callable<Integer> {
             }
             Thread.sleep(debuggerOptions.getPingTimeout());
             if (opid > 0 && !Utils.isProcessStillAlive(opid)) {
+                logger.info("Owner process stopped: " + opid);
                 stopExecution.set(true);
                 gracefulShutdown(null);
             }
