@@ -23,6 +23,7 @@ import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
+import picocli.CommandLine.Option;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -65,6 +66,9 @@ public class CoverageCommand implements Callable<Integer> {
 
     @Mixin
     private LoggingOptions loggingOptions;
+
+    @Option(names = {"--opid"}, description = "Owner process PID", defaultValue = "-1")
+    Integer opid;
 
     private RuntimeDebugHttpClient client;
 
@@ -322,6 +326,10 @@ public class CoverageCommand implements Callable<Integer> {
                 }
             }
             Thread.sleep(debuggerOptions.getPingTimeout());
+            if (opid > 0 && !Utils.isProcessStillAlive(opid)) {
+                stopExecution.set(true);
+                gracefulShutdown(null);
+            }
         }
 
         logger.info("Disconnecting from dbgs...");

@@ -35,10 +35,7 @@ import javax.xml.transform.stream.StreamResult;
 import javax.xml.xpath.XPath;
 import javax.xml.xpath.XPathConstants;
 import javax.xml.xpath.XPathFactory;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.IOException;
+import java.io.*;
 import java.lang.invoke.MethodHandles;
 import java.math.BigDecimal;
 import java.net.URI;
@@ -397,5 +394,43 @@ public class Utils {
             pipeName = sock.toString();
         }
         return pipeName;
+    }
+
+    public static boolean isProcessStillAlive(Integer pid) {
+        String OS = System.getProperty("os.name").toLowerCase();
+        String command = null;
+        if (OS.indexOf("win") >= 0) {
+            logger.debug("Check alive Windows mode. Pid: [{}]", pid);
+            command = "cmd /c tasklist /FI \"PID eq " + pid + "\"";
+        } else if (OS.indexOf("nix") >= 0 || OS.indexOf("nux") >= 0) {
+            logger.debug("Check alive Linux/Unix mode. Pid: [{}]", pid);
+            command = "ps -p " + pid;
+        } else {
+            logger.warn("Unsuported OS: Check alive for Pid: [{}] return false", pid);
+            return false;
+        }
+        return isProcessIdRunning(String.valueOf(pid), command);
+    }
+
+    private static boolean isProcessIdRunning(String pid, String command) {
+        logger.debug("Command [{}]",command );
+        try {
+            Runtime rt = Runtime.getRuntime();
+            Process pr = rt.exec(command);
+
+            InputStreamReader isReader = new InputStreamReader(pr.getInputStream());
+            BufferedReader bReader = new BufferedReader(isReader);
+            String strLine = null;
+            while ((strLine= bReader.readLine()) != null) {
+                if (strLine.contains(" " + pid + " ")) {
+                    return true;
+                }
+            }
+
+            return false;
+        } catch (Exception ex) {
+            logger.warn("Got exception using system command [{}].", command, ex);
+            return true;
+        }
     }
 }
