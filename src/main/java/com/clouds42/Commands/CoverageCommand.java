@@ -294,35 +294,41 @@ public class CoverageCommand implements Callable<Integer> {
                 }
             } catch (RuntimeDebugClientException e) {
                 logger.info(e.getLocalizedMessage());
-                try {
-                    client.connect(debuggerOptions.getPassword());
-                    client.initSettings(false);
-                    client.setAutoconnectDebugTargets(
-                            debuggerOptions.getDebugAreaNames(),
-                            debuggerOptions.getAutoconnectTargets());
+                if (systemStarted) {
+                    logger.info("Can't send ping to dbgs. Coverage analyzing finished");
+                    stopExecution.set(true);
+                    gracefulShutdown(null);
+                } else {
+                    try {
+                        client.connect(debuggerOptions.getPassword());
+                        client.initSettings(false);
+                        client.setAutoconnectDebugTargets(
+                                debuggerOptions.getDebugAreaNames(),
+                                debuggerOptions.getAutoconnectTargets());
 
-                    List<DebugTargetId> debugTargets;
-                    if (debuggerOptions.getDebugAreaNames().isEmpty()) {
-                        debugTargets = client.getRuntimeDebugTargets(null);
-                    } else {
-                        debugTargets = new LinkedList<DebugTargetId>();
-                        debuggerOptions.getDebugAreaNames().forEach(areaName -> {
-                            try {
-                                debugTargets.addAll(client.getRuntimeDebugTargets(areaName));
-                            } catch (RuntimeDebugClientException ex) {
-                                logger.error(ex.getLocalizedMessage());
-                            }
-                        });
+                        List<DebugTargetId> debugTargets;
+                        if (debuggerOptions.getDebugAreaNames().isEmpty()) {
+                            debugTargets = client.getRuntimeDebugTargets(null);
+                        } else {
+                            debugTargets = new LinkedList<DebugTargetId>();
+                            debuggerOptions.getDebugAreaNames().forEach(areaName -> {
+                                try {
+                                    debugTargets.addAll(client.getRuntimeDebugTargets(areaName));
+                                } catch (RuntimeDebugClientException ex) {
+                                    logger.error(ex.getLocalizedMessage());
+                                }
+                            });
+                        }
+                        connectAllTargets(debugTargets);
+
+                        client.toggleProfiling(null);
+                        client.toggleProfiling(measureUuid);
+
+                        systemStarted = true;
+                    } catch (RuntimeDebugClientException e1) {
+                        logger.error(e1.getLocalizedMessage());
+                        return CommandLine.ExitCode.SOFTWARE;
                     }
-                    connectAllTargets(debugTargets);
-
-                    client.toggleProfiling(null);
-                    client.toggleProfiling(measureUuid);
-
-                    systemStarted = true;
-                } catch (RuntimeDebugClientException e1) {
-                    logger.error(e1.getLocalizedMessage());
-                    return CommandLine.ExitCode.SOFTWARE;
                 }
             }
             Thread.sleep(debuggerOptions.getPingTimeout());
