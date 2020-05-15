@@ -1,7 +1,6 @@
 package com.clouds42;
 
 import com.clouds42.CommandLineOptions.ConnectionOptions;
-import com.clouds42.CommandLineOptions.FilterOptions;
 import com.clouds42.CommandLineOptions.MetadataOptions;
 import com.clouds42.CommandLineOptions.OutputOptions;
 import com.github._1c_syntax.bsl.parser.BSLParser;
@@ -14,6 +13,8 @@ import com.github._1c_syntax.mdclasses.mdo.SettingsStorage;
 import com.github._1c_syntax.mdclasses.metadata.Configuration;
 import com.github._1c_syntax.mdclasses.metadata.additional.ModuleType;
 import com.github._1c_syntax.mdclasses.metadata.additional.SupportVariant;
+import de.vandermeer.asciitable.AsciiTable;
+import de.vandermeer.asciitable.CWC_LongestLine;
 import org.antlr.v4.runtime.tree.TerminalNodeImpl;
 import org.antlr.v4.runtime.tree.Tree;
 import org.antlr.v4.runtime.tree.Trees;
@@ -34,10 +35,7 @@ import javax.xml.transform.stream.StreamResult;
 import javax.xml.xpath.XPath;
 import javax.xml.xpath.XPathConstants;
 import javax.xml.xpath.XPathFactory;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.IOException;
+import java.io.*;
 import java.lang.invoke.MethodHandles;
 import java.math.BigDecimal;
 import java.net.URI;
@@ -150,7 +148,6 @@ public class Utils {
     }
 
     public static Map<String, URI> readMetadata(MetadataOptions metadataOptions,
-                                                FilterOptions filterOptions,
                                                 Map<URI, Map<BigDecimal, Boolean>> coverageData) throws Exception {
 
         boolean rawMode = false;
@@ -348,6 +345,40 @@ public class Utils {
         }
     }
 
+    public static void printCoverageStats(Map<URI, Map<BigDecimal, Boolean>> coverageData,
+                                          MetadataOptions metadataOptions) {
+        List<Object[]> dataList = new LinkedList<>();
+        URI projectUri = Path.of(metadataOptions.getProjectDirName()).toUri();
+        coverageData.forEach((uri, bigDecimalsMap) -> {
+            if (bigDecimalsMap.isEmpty()) {
+                return;
+            }
+            String path = projectUri.relativize(uri).getPath();
+            long linesToCover = bigDecimalsMap.size();
+            long coveredLinesCount = bigDecimalsMap.values().stream().filter(aBoolean -> aBoolean.booleanValue()).count();
+            Double coverage = Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100.;
+            Object[] dataRow = {
+                    path,
+                    linesToCover,
+                    coveredLinesCount,
+                    coverage};
+            dataList.add(dataRow);
+        });
+        Collections.sort(dataList, Comparator.comparing(objects -> ((Double) objects[3])));
+        AsciiTable at = new AsciiTable();
+        at.addRule();
+        at.addRow("Path", "Lines to cover", "Covered lines", "Coverage, %");
+        at.addRule();
+        dataList.forEach(objects -> {
+            at.addRow(objects);
+            at.addRule();
+        });
+        CWC_LongestLine cwc = new CWC_LongestLine();
+        at.getRenderer().setCWC(cwc);
+        String rend = at.render();
+        System.out.println(rend);
+    }
+
     public static String getPipeName(ConnectionOptions connectionOptions) throws IOException {
         boolean isWindows = System.getProperty ("os.name").toLowerCase().contains("win");
 
@@ -363,5 +394,43 @@ public class Utils {
             pipeName = sock.toString();
         }
         return pipeName;
+    }
+
+    public static boolean isProcessStillAlive(Integer pid) {
+        String OS = System.getProperty("os.name").toLowerCase();
+        String command = null;
+        if (OS.indexOf("win") >= 0) {
+            logger.debug("Check alive Windows mode. Pid: [{}]", pid);
+            command = "cmd /c tasklist /FI \"PID eq " + pid + "\"";
+        } else if (OS.indexOf("nix") >= 0 || OS.indexOf("nux") >= 0) {
+            logger.debug("Check alive Linux/Unix mode. Pid: [{}]", pid);
+            command = "ps -p " + pid;
+        } else {
+            logger.warn("Unsuported OS: Check alive for Pid: [{}] return false", pid);
+            return false;
+        }
+        return isProcessIdRunning(String.valueOf(pid), command);
+    }
+
+    private static boolean isProcessIdRunning(String pid, String command) {
+        logger.debug("Command [{}]",command );
+        try {
+            Runtime rt = Runtime.getRuntime();
+            Process pr = rt.exec(command);
+
+            InputStreamReader isReader = new InputStreamReader(pr.getInputStream());
+            BufferedReader bReader = new BufferedReader(isReader);
+            String strLine = null;
+            while ((strLine= bReader.readLine()) != null) {
+                if (strLine.contains(" " + pid + " ")) {
+                    return true;
+                }
+            }
+
+            return false;
+        } catch (Exception ex) {
+            logger.warn("Got exception using system command [{}].", command, ex);
+            return true;
+        }
     }
 }

@@ -49,7 +49,7 @@ public class SendMessageCommand implements Callable<Integer> {
         pipeOut.println(commandText);
         logger.info("Command send finished: " + commandText);
         String result = "";
-        for(int i = 0; i < 60; i++) {
+        for(int i = 0; i < 10; i++) {
             try {
                 result = pipeIn.readLine();
                 break;

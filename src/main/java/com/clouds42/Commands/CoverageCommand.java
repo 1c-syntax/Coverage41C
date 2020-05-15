@@ -3,7 +3,6 @@ package com.clouds42.Commands;
 import com._1c.g5.v8.dt.debug.core.runtime.client.RuntimeDebugClientException;
 import com._1c.g5.v8.dt.debug.model.base.data.BSLModuleIdInternal;
 import com._1c.g5.v8.dt.debug.model.base.data.DebugTargetId;
-import com._1c.g5.v8.dt.debug.model.base.data.DebugTargetType;
 import com._1c.g5.v8.dt.debug.model.dbgui.commands.DBGUIExtCmdInfoBase;
 import com._1c.g5.v8.dt.debug.model.dbgui.commands.DBGUIExtCmds;
 import com._1c.g5.v8.dt.debug.model.dbgui.commands.impl.DBGUIExtCmdInfoMeasureImpl;
@@ -24,6 +23,7 @@ import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
+import picocli.CommandLine.Option;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -67,6 +67,9 @@ public class CoverageCommand implements Callable<Integer> {
     @Mixin
     private LoggingOptions loggingOptions;
 
+    @Option(names = {"--opid"}, description = "Owner process PID", defaultValue = "-1")
+    Integer opid;
+
     private RuntimeDebugHttpClient client;
 
     private Map<URI, Map<BigDecimal, Boolean>> coverageData = new HashMap<URI,Map<BigDecimal, Boolean>> () {
@@ -102,6 +105,10 @@ public class CoverageCommand implements Callable<Integer> {
                     logger.info("Get command: " + line);
                     if (PipeMessages.DUMP_COMMAND.equals(line)) {
                         Utils.dumpCoverageFile(coverageData, metadataOptions, outputOptions);
+                        out.println(PipeMessages.OK_RESULT);
+                        return true;
+                    } else if (PipeMessages.STATS_COMMAND.equals(line)) {
+                        Utils.printCoverageStats(coverageData, metadataOptions);
                         out.println(PipeMessages.OK_RESULT);
                         return true;
                     } else if (PipeMessages.CLEAN_COMMAND.equals(line)) {
@@ -186,7 +193,7 @@ public class CoverageCommand implements Callable<Integer> {
 
         rawMode = metadataOptions.isRawMode();
 
-        Map<String, URI> uriListByKey = Utils.readMetadata(metadataOptions, filterOptions, coverageData);
+        Map<String, URI> uriListByKey = Utils.readMetadata(metadataOptions, coverageData);
 
         boolean firstRun = true;
 
@@ -287,39 +294,47 @@ public class CoverageCommand implements Callable<Integer> {
                 }
             } catch (RuntimeDebugClientException e) {
                 logger.info(e.getLocalizedMessage());
-                try {
-                    client.connect(debuggerOptions.getPassword());
-                    client.initSettings(false);
-                    List<DebugTargetType> debugTargetTypes = new LinkedList<DebugTargetType>();
-                    debugTargetTypes.addAll(DebugTargetType.VALUES);
-                    debugTargetTypes.remove(DebugTargetType.UNKNOWN);
-                    client.setAutoconnectDebugTargets(debuggerOptions.getDebugAreaNames(), debugTargetTypes);
+                if (systemStarted) {
+                    logger.info("Can't send ping to dbgs. Coverage analyzing finished");
+                    gracefulShutdown(null);
+                } else {
+                    try {
+                        client.connect(debuggerOptions.getPassword());
+                        client.initSettings(false);
+                        client.setAutoconnectDebugTargets(
+                                debuggerOptions.getDebugAreaNames(),
+                                debuggerOptions.getAutoconnectTargets());
 
-                    List<DebugTargetId> debugTargets;
-                    if (debuggerOptions.getDebugAreaNames().isEmpty()) {
-                        debugTargets = client.getRuntimeDebugTargets(null);
-                    } else {
-                        debugTargets = new LinkedList<DebugTargetId>();
-                        debuggerOptions.getDebugAreaNames().forEach(areaName -> {
-                            try {
-                                debugTargets.addAll(client.getRuntimeDebugTargets(areaName));
-                            } catch (RuntimeDebugClientException ex) {
-                                logger.error(ex.getLocalizedMessage());
-                            }
-                        });
+                        List<DebugTargetId> debugTargets;
+                        if (debuggerOptions.getDebugAreaNames().isEmpty()) {
+                            debugTargets = client.getRuntimeDebugTargets(null);
+                        } else {
+                            debugTargets = new LinkedList<DebugTargetId>();
+                            debuggerOptions.getDebugAreaNames().forEach(areaName -> {
+                                try {
+                                    debugTargets.addAll(client.getRuntimeDebugTargets(areaName));
+                                } catch (RuntimeDebugClientException ex) {
+                                    logger.error(ex.getLocalizedMessage());
+                                }
+                            });
+                        }
+                        connectAllTargets(debugTargets);
+
+                        client.toggleProfiling(null);
+                        client.toggleProfiling(measureUuid);
+
+                        systemStarted = true;
+                    } catch (RuntimeDebugClientException e1) {
+                        logger.error(e1.getLocalizedMessage());
+                        return CommandLine.ExitCode.SOFTWARE;
                     }
-                    connectAllTargets(debugTargets);
-
-                    client.toggleProfiling(null);
-                    client.toggleProfiling(measureUuid);
-
-                    systemStarted = true;
-                } catch (RuntimeDebugClientException e1) {
-                    logger.error(e1.getLocalizedMessage());
-                    return CommandLine.ExitCode.SOFTWARE;
                 }
             }
             Thread.sleep(debuggerOptions.getPingTimeout());
+            if (opid > 0 && !Utils.isProcessStillAlive(opid)) {
+                logger.info("Owner process stopped: " + opid);
+                gracefulShutdown(null);
+            }
         }
 
         logger.info("Disconnecting from dbgs...");

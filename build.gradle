@@ -6,7 +6,7 @@ plugins {
 }
 
 group 'com.clouds42'
-version '2.0-SNAPSHOT'
+version '2.1-SNAPSHOT'
 
 sourceCompatibility = 11
 
@@ -53,6 +53,8 @@ dependencies {
     compile group: 'org.eclipse.jetty', name: 'jetty-client', version: '9.4.27.v20200227'
 
     compile group: 'com.google.guava', name: 'guava', version: '28.2-jre'
+
+    compile group: 'de.vandermeer', name:'asciitable', version: '0.3.2'
 
     implementation 'com.github.1c-syntax:mdclasses:42fcc53f34b08a7a748528c9dd53ae1a2e04bb40' // TODO: change to release
 
