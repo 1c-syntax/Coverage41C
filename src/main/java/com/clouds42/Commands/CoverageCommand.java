@@ -296,7 +296,6 @@ public class CoverageCommand implements Callable<Integer> {
                 logger.info(e.getLocalizedMessage());
                 if (systemStarted) {
                     logger.info("Can't send ping to dbgs. Coverage analyzing finished");
-                    stopExecution.set(true);
                     gracefulShutdown(null);
                 } else {
                     try {
@@ -334,7 +333,6 @@ public class CoverageCommand implements Callable<Integer> {
             Thread.sleep(debuggerOptions.getPingTimeout());
             if (opid > 0 && !Utils.isProcessStillAlive(opid)) {
                 logger.info("Owner process stopped: " + opid);
-                stopExecution.set(true);
                 gracefulShutdown(null);
             }
         }
