@@ -6,7 +6,7 @@ plugins {
 }
 
 group 'com.clouds42'
-version '2.1-SNAPSHOT'
+version '2.2-SNAPSHOT'
 
 sourceCompatibility = 11
 
@@ -116,5 +116,5 @@ githubRelease {
     repo "Coverage41C"
     targetCommitish "master"
     releaseAssets.from(distZip.archiveFile)
-    dryRun true
+    dryRun false
 }
