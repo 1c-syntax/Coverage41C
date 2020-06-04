@@ -1,6 +1,7 @@
 package com.clouds42.Commands;
 
 import com._1c.g5.v8.dt.debug.core.runtime.client.RuntimeDebugClientException;
+import com._1c.g5.v8.dt.debug.model.base.data.AttachDebugUIResult;
 import com._1c.g5.v8.dt.debug.model.base.data.BSLModuleIdInternal;
 import com._1c.g5.v8.dt.debug.model.base.data.DebugTargetId;
 import com._1c.g5.v8.dt.debug.model.dbgui.commands.DBGUIExtCmdInfoBase;
@@ -295,11 +296,14 @@ public class CoverageCommand implements Callable<Integer> {
             } catch (RuntimeDebugClientException e) {
                 logger.info(e.getLocalizedMessage());
                 if (systemStarted) {
-                    logger.info("Can't send ping to dbgs. Coverage analyzing finished");
+                    logger.info("Can't send ping to debug server. Coverage analyzing finished");
                     gracefulShutdown(null);
                 } else {
                     try {
-                        client.connect(debuggerOptions.getPassword());
+                        AttachDebugUIResult connectionResult = client.connect(debuggerOptions.getPassword());
+                        if (connectionResult != AttachDebugUIResult.REGISTERED) {
+                            throw new RuntimeDebugClientException("Can't connect to debug server. Connection result: " + connectionResult);
+                        }
                         client.initSettings(false);
                         client.setAutoconnectDebugTargets(
                                 debuggerOptions.getDebugAreaNames(),
