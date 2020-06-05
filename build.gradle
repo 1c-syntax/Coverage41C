@@ -46,7 +46,7 @@ dependencies {
 
     compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.common', version: '2.18.0'
     compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.ecore.xmi', version: '2.16.0'
-    compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.ecore.xcore', version: '1.4.0'
+    compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.ecore.xcore', version: '1.13.0'
 
     compile group: 'org.eclipse.platform', name: 'org.eclipse.osgi', version: '3.15.200'
 
