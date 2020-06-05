@@ -101,6 +101,10 @@ public class Utils {
                                      Map<URI, Map<BigDecimal, Boolean>> coverageData) {
         String mdObjUuid = mdObj.getUuid();
         Map<URI, ModuleType> modulesByType = mdObj.getModulesByType();
+        if (modulesByType == null) {
+            logger.info("Found empty modules in metadata object: " + mdObj.getName());
+            return;
+        }
         modulesByType.forEach((uri, moduleType) -> {
             uriListByKey.put(getUriKey(mdObjUuid, moduleType, mdObj), uri);
 

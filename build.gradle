@@ -6,7 +6,7 @@ plugins {
 }
 
 group 'com.clouds42'
-version '2.1-SNAPSHOT'
+version '2.2-SNAPSHOT'
 
 sourceCompatibility = 11
 
@@ -36,8 +36,8 @@ dependencies {
     }
     println 'EDT location: ' + edtLocation
 
-    compile group: 'info.picocli', name: 'picocli', version: '4.2.0'
-    annotationProcessor 'info.picocli:picocli-codegen:4.2.0'
+    compile group: 'info.picocli', name: 'picocli', version: '4.3.2'
+    annotationProcessor 'info.picocli:picocli-codegen:4.3.2'
 
     compile group: 'org.slf4j', name: 'slf4j-api', version: '2.0.0-alpha1'
     compile group: 'org.slf4j', name: 'slf4j-simple', version: '2.0.0-alpha1'
@@ -52,13 +52,13 @@ dependencies {
 
     compile group: 'org.eclipse.jetty', name: 'jetty-client', version: '9.4.27.v20200227'
 
-    compile group: 'com.google.guava', name: 'guava', version: '28.2-jre'
+    compile group: 'com.google.guava', name: 'guava', version: '29.0-jre'
 
     compile group: 'de.vandermeer', name:'asciitable', version: '0.3.2'
 
-    implementation 'com.github.1c-syntax:mdclasses:42fcc53f34b08a7a748528c9dd53ae1a2e04bb40' // TODO: change to release
+    implementation 'com.github.1c-syntax:mdclasses:0.5.0'
 
-    implementation('com.github.1c-syntax:bsl-parser:0.13.0') {
+    implementation('com.github.1c-syntax:bsl-parser:0.14.1') {
         exclude group: "com.tunnelvisionlabs", module: "antlr4-annotations"
         exclude group: "com.ibm.icu", module: "*"
         exclude group: "org.antlr", module: "ST4"
@@ -74,8 +74,8 @@ dependencies {
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.6.2'
     testCompile 'org.xmlunit:xmlunit-core:2.6.4'
     testCompile 'org.xmlunit:xmlunit-matchers:2.6.4'
-    testCompile 'com.fasterxml.jackson.core:jackson-core:2.9.6'
-    testCompile 'com.fasterxml.jackson.core:jackson-databind:2.9.6'
+    testCompile 'com.fasterxml.jackson.core:jackson-core:2.11.0'
+    testCompile 'com.fasterxml.jackson.core:jackson-databind:2.11.0'
 }
 
 tasks.withType(JavaCompile) {
@@ -116,5 +116,5 @@ githubRelease {
     repo "Coverage41C"
     targetCommitish "master"
     releaseAssets.from(distZip.archiveFile)
-    dryRun true
+    dryRun false
 }
