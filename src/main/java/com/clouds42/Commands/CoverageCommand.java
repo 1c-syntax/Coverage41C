@@ -302,7 +302,13 @@ public class CoverageCommand implements Callable<Integer> {
                     try {
                         AttachDebugUIResult connectionResult = client.connect(debuggerOptions.getPassword());
                         if (connectionResult != AttachDebugUIResult.REGISTERED) {
-                            throw new RuntimeDebugClientException("Can't connect to debug server. Connection result: " + connectionResult);
+                            if (connectionResult == AttachDebugUIResult.IB_IN_DEBUG) {
+                                throw new RuntimeDebugClientException("Can't connect to debug server. IB is in debug. Close configurator or EDT first");
+                            } else if (connectionResult == AttachDebugUIResult.CREDENTIALS_REQUIRED) {
+                                throw new RuntimeDebugClientException("Can't connect to debug server. Use -p option to set correct password");
+                            } else {
+                                throw new RuntimeDebugClientException("Can't connect to debug server. Connection result: " + connectionResult);
+                            }
                         }
                         client.initSettings(false);
                         client.setAutoconnectDebugTargets(
