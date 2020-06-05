@@ -42,7 +42,7 @@ dependencies {
     compile group: 'org.slf4j', name: 'slf4j-api', version: '2.0.0-alpha1'
     compile group: 'org.slf4j', name: 'slf4j-simple', version: '2.0.0-alpha1'
 
-    compile group: 'org.scala-sbt.ipcsocket', name: 'ipcsocket', version: '1.0.0'
+    compile group: 'org.scala-sbt.ipcsocket', name: 'ipcsocket', version: '1.0.1'
 
     compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.common', version: '2.18.0'
     compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.ecore.xmi', version: '2.16.0'
