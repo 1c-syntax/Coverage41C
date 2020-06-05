@@ -36,8 +36,8 @@ dependencies {
     }
     println 'EDT location: ' + edtLocation
 
-    compile group: 'info.picocli', name: 'picocli', version: '4.2.0'
-    annotationProcessor 'info.picocli:picocli-codegen:4.2.0'
+    compile group: 'info.picocli', name: 'picocli', version: '4.3.2'
+    annotationProcessor 'info.picocli:picocli-codegen:4.3.2'
 
     compile group: 'org.slf4j', name: 'slf4j-api', version: '2.0.0-alpha1'
     compile group: 'org.slf4j', name: 'slf4j-simple', version: '2.0.0-alpha1'
@@ -52,7 +52,7 @@ dependencies {
 
     compile group: 'org.eclipse.jetty', name: 'jetty-client', version: '9.4.27.v20200227'
 
-    compile group: 'com.google.guava', name: 'guava', version: '28.2-jre'
+    compile group: 'com.google.guava', name: 'guava', version: '29.0-jre'
 
     compile group: 'de.vandermeer', name:'asciitable', version: '0.3.2'
 
@@ -74,8 +74,8 @@ dependencies {
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.6.2'
     testCompile 'org.xmlunit:xmlunit-core:2.6.4'
     testCompile 'org.xmlunit:xmlunit-matchers:2.6.4'
-    testCompile 'com.fasterxml.jackson.core:jackson-core:2.9.6'
-    testCompile 'com.fasterxml.jackson.core:jackson-databind:2.9.6'
+    testCompile 'com.fasterxml.jackson.core:jackson-core:2.11.0'
+    testCompile 'com.fasterxml.jackson.core:jackson-databind:2.11.0'
 }
 
 tasks.withType(JavaCompile) {
