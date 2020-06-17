@@ -48,7 +48,7 @@ dependencies {
     compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.ecore.xmi', version: '2.16.0'
     compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.ecore.xcore', version: '1.4.0'
 
-    compile group: 'org.eclipse.platform', name: 'org.eclipse.osgi', version: '3.15.200'
+    compile group: 'org.eclipse.platform', name: 'org.eclipse.osgi', version: '3.15.300'
 
     compile group: 'org.eclipse.jetty', name: 'jetty-client', version: '9.4.27.v20200227'
 
