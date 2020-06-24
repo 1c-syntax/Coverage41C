@@ -39,6 +39,7 @@ import java.io.*;
 import java.lang.invoke.MethodHandles;
 import java.math.BigDecimal;
 import java.net.URI;
+import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -370,7 +371,7 @@ public class Utils {
             if (outputOptions.getOutputFile() == null) {
                 outputStream = new OutputStreamWriter(System.out);
             } else {
-                outputStream = new OutputStreamWriter(new FileOutputStream(outputOptions.getOutputFile()));
+                outputStream = new OutputStreamWriter(new FileOutputStream(outputOptions.getOutputFile()), Charset.forName("UTF-8"));
             }
             PrintWriter writer = new PrintWriter(outputStream);
 
