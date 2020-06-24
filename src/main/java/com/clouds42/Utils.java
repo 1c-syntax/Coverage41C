@@ -299,6 +299,18 @@ public class Utils {
     public static void dumpCoverageFile(Map<URI, Map<BigDecimal, Boolean>> coverageData,
                                         MetadataOptions metadataOptions,
                                         OutputOptions outputOptions) {
+        if (outputOptions.getOutputFormat() == OutputOptions.OutputFormat.GENERIC_COVERAGE) {
+            dumpGenericCoverageFile(coverageData, metadataOptions, outputOptions);
+        } else if (outputOptions.getOutputFormat() == OutputOptions.OutputFormat.LCOV) {
+            dumpLcovFile(coverageData, metadataOptions, outputOptions);
+        } else {
+            logger.info("Unknown format");
+        }
+    }
+
+    private static void dumpGenericCoverageFile(Map<URI, Map<BigDecimal, Boolean>> coverageData,
+                                        MetadataOptions metadataOptions,
+                                        OutputOptions outputOptions) {
         DocumentBuilderFactory icFactory = DocumentBuilderFactory.newInstance();
         DocumentBuilder icBuilder;
         try {
@@ -344,6 +356,52 @@ public class Utils {
                 outputStream = new StreamResult(new FileOutputStream(outputOptions.getOutputFile()));
             }
             transformer.transform(source, outputStream);
+        } catch (Exception e) {
+            logger.error(e.getLocalizedMessage());
+        }
+    }
+
+    private static void dumpLcovFile(Map<URI, Map<BigDecimal, Boolean>> coverageData,
+                                        MetadataOptions metadataOptions,
+                                        OutputOptions outputOptions) {
+
+        try {
+            OutputStreamWriter outputStream;
+            if (outputOptions.getOutputFile() == null) {
+                outputStream = new OutputStreamWriter(System.out);
+            } else {
+                outputStream = new OutputStreamWriter(new FileOutputStream(outputOptions.getOutputFile()));
+            }
+            PrintWriter writer = new PrintWriter(outputStream);
+
+            URI projectUri = Path.of(metadataOptions.getProjectDirName()).toUri();
+
+            coverageData.forEach((uri, bigDecimalsMap) -> {
+                if (bigDecimalsMap.isEmpty()) {
+                    return;
+                }
+                writer.println("TN:");
+                writer.printf("SF:%s\n", projectUri.relativize(uri).getPath());
+                bigDecimalsMap.forEach((bigDecimal, bool) -> {
+                    writer.printf("DA:%s,%d\n", bigDecimal.toString(), bool?1:0);
+                });
+                writer.printf("LH:%d\n", bigDecimalsMap.values().stream().filter(aBoolean -> aBoolean.booleanValue()).count());
+                writer.printf("LF:%d\n", bigDecimalsMap.size());
+                writer.println("end_of_record");
+            });
+            long linesToCover = 0;
+            long coveredLinesCount = 0;
+            for (Map<BigDecimal, Boolean> bigDecimalMap : coverageData.values()) {
+                linesToCover += bigDecimalMap.size();
+                coveredLinesCount += bigDecimalMap.values().stream().filter(aBoolean -> aBoolean.booleanValue()).count();
+            }
+            logger.info("Lines to cover: " + linesToCover);
+            logger.info("Covered lines: " + coveredLinesCount);
+            if (linesToCover > 0) {
+                logger.info("Coverage: " + Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100. + "%");
+            }
+
+            writer.close();
         } catch (Exception e) {
             logger.error(e.getLocalizedMessage());
         }
