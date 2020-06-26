@@ -205,10 +205,8 @@ public class Utils {
                 String documentRootTagName = xmlDocument.getDocumentElement().getTagName();
                 if (documentRootTagName.equals("MetaDataObject")) {
                     // CONFIGURATOR
-                    String nameExpression = "/MetaDataObject/ExternalDataProcessor/Properties/Name/text()";
                     String uuidExpression = "/MetaDataObject/ExternalDataProcessor/@uuid";
-                    String externalDataProcessorName = (String) xPath.compile(nameExpression).evaluate(xmlDocument,
-                            XPathConstants.STRING);
+                    String externalDataProcessorName = com.google.common.io.Files.getNameWithoutExtension(rootPath.toString());
                     String externalDataProcessorUuid = (String) xPath.compile(uuidExpression).evaluate(xmlDocument,
                             XPathConstants.STRING);
                     uriListByKey.put(getUriKey(externalDataProcessorUuid, ModuleType.ObjectModule, null),
