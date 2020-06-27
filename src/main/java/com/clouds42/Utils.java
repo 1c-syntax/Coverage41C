@@ -147,9 +147,10 @@ public class Utils {
 
     private static boolean mustCovered(Tree node) {
         return (node instanceof BSLParser.StatementContext
-                && !((BSLParser.StatementContext)node).children.stream().anyMatch(parseTree -> parseTree instanceof BSLParser.PreprocessorContext)
-                && !((BSLParser.StatementContext)node).children.stream().anyMatch(parseTree -> parseTree instanceof BSLParser.CompoundStatementContext
-                    && ((BSLParser.CompoundStatementContext) parseTree).children.stream().anyMatch(
+                && !((BSLParser.StatementContext)node).children.stream().anyMatch(parseTree ->
+                    parseTree instanceof BSLParser.PreprocessorContext
+                    || parseTree instanceof BSLParser.CompoundStatementContext
+                        && ((BSLParser.CompoundStatementContext) parseTree).children.stream().anyMatch(
                             parseTree1 -> parseTree1 instanceof BSLParser.TryStatementContext)))
                 || node instanceof BSLParser.GlobalMethodCallContext
                 || node instanceof BSLParser.Var_nameContext;
