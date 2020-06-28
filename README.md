@@ -10,39 +10,40 @@ https://42clouds.com/ru-ru/techdocs/raschyot-pokrytiya-koda-1C-testami.html
 2) Включаем http-отладку 
 * клиент-серверный сценарий: 
     
-     путём добавления к флагу -debug флага -http в строку запуска службы агента сервера
+     путём добавления к флагу -debug флага -http в строке запуска службы агента сервера
+
 * файловый сценарий: 
     
-     нужно отдельно дебаг сервер запускать, к которому уже будет коннектится снималка покрытия и собственно клиент файловой базы (запущенный с флагами ```/debug -http -attach /debuggerURL «адрес отладчика»``` или через меню "Настройка->Параметры->Сервер отладки" в самом клиенте), см. https://its.1c.ru/db/v837doc#bookmark:adm:TI000000495 
+     путём ручного зарпуска дебаг сервера dbgs.exe (например так: ```dbgs.exe --addr=127.0.0.1 --port=1550```), к которому будет подключаться Coverage41C и клиент файловой базы (запущенный с флагами ```/debug -http -attach /debuggerURL «адрес отладчика»``` или через меню "Настройка->Параметры->Сервер отладки" в самом клиенте), см. https://its.1c.ru/db/v837doc#bookmark:adm:TI000000495 
     
-     *Примечание: если включить протокол отладки http через конфигуратор Сервис -> Параметры -> Отладка, то к серверу отладки уже будет подключено другое приложение - конфигуратор. И Coverage41C не сможет подключиться. Закрой его и запусти сервер отладки из командной строки, например вот так: ```dbgs.exe --addr=127.0.0.1 --port=1550```*
+     *Примечание: если включить протокол отладки http через конфигуратор Сервис -> Параметры -> Отладка, то Coverage41C не сможет подключиться к серверу отладки, т.к. одновременно к информационной базе может быть подключен только один интерфей отладки.*
 
 3) Проверяем что сервер отладки dbgs.exe (https://its.1c.ru/db/edtdoc/content/197/hdoc/_top/dbgs) запустился и работает. Для этого в браузере открываем его, адрес по умолчанию http://127.0.0.1:1550/. В случае успеха выдолжны увидеть сообщение "... it works!".
-4) Выгружаем исходники конфигурации или расширения в файлы (если у вас нет проекта EDT)
+4) Выгружаем исходники конфигурации, расширения или внешней обработки в файлы (если у вас проекта EDT, то этот шаг пропускаем - он и так хранится в файлах)
 5) Запускаем анализ покрытия командой ```Coverage41C start -i <ИмяИнформационнойБазыВКластере> -P <ПутьКПроекту> -s <ПутьКИсходникам> -o <ИмяВыходногоФайлаПокрытия> -e <ИмяРасширения>```. Для файловой базы нужно указать адрес отладчика и предопределённое имя информационной базы ```Coverage41C start -i DefAlias -u http://127.0.0.1:<Порт> -P <ПутьКПроектуEDT>``` или ```Coverage41C start -i DefAlias -u http://127.0.0.1:<Порт> -s <ПутьКИсходникам>```
 6) (Опционально, полезно для конвейера) Проверяем статус программы командой ```Coverage41C check -i <ИмяИнформационнойБазыВКластере>``` или ```Coverage41C check -i DefAlias -u http://127.0.0.1:1550``` для файловой.
 7) Выполняем тесты
 8) Останавливаем программу нажатием Ctrl+C в окне терминала или командой ```Coverage41C stop -i <ИмяИнформационнойБазыВКластере> -u http://127.0.0.1:<Порт>```. Также возможна запись файла покрытия без остановки замеров командой ```dump```.
-9) Полученный файл в формате genericCoverage.xml загружаем в SonarQube.
+9) Полученный файл в формате genericCoverage.xml загружаем в SonarQube (файл формата LCov можно просмотреть в VSCode, ReportTool, genhtml и многих других программах).
 
 Если команде start передавался путь к исходникам, то convert не нужен.
  
 Примеры запуска на файловой базе для проекта EDT:
 ```cmd
-Coverage41C start -i DefAlias -u http://127.0.0.1:1550 -P C:\git\notify-manager\main\ -o debuglog.xml
+Coverage41C start -i DefAlias -u http://127.0.0.1:1550 -P C:\path\to\sources\ -o genericCoverage.xml
 ```
 При завершении работы создаётся файл покрытия вида:
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <coverage version="1">
     <file path="CommonCommands/СменитьПароль/Ext/CommandModule.bsl">
-        <lineToCover covered="false" lineNumber="13"/>
+        <lineToCover covered="true" lineNumber="13"/>
         <lineToCover covered="false" lineNumber="9"/>
     </file>
     <file path="Catalogs/ОбработчикиСобытийRMQ/Forms/ФормаСписка/Ext/Form/Module.bsl">
         <lineToCover covered="false" lineNumber="11"/>
-        <lineToCover covered="false" lineNumber="5"/>
-        <lineToCover covered="false" lineNumber="4"/>
+        <lineToCover covered="true" lineNumber="5"/>
+        <lineToCover covered="true" lineNumber="4"/>
 ```
 
 Справка из командной строки:
@@ -62,7 +63,7 @@ Commands:
 ```
 Так же доступна справка по каждой из команд:
 ```cmd
-C:\git\cc\Coverage41C-2.2-SNAPSHOT\bin>Coverage41C start -h
+>Coverage41C start -h
 Usage: Coverage41C start [-hV] [-p] [--verbose] [-e=<extensionName>]
                          [-i=<infobaseAlias>] [-o=<outputFile>] [--opid=<opid>]
                          [-P=<projectDirName>] [-p:env=<passwordEnv>]
