@@ -48,7 +48,7 @@ public class ConvertCommand implements Callable<Integer> {
     @Override
     public Integer call() throws Exception {
 
-        Map<URI, Map<BigDecimal, Boolean>> coverageData = new HashMap<URI,Map<BigDecimal, Boolean>>();
+        Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<URI,Map<BigDecimal, Integer>>();
 
         Map<String, URI> uriListByKey = Utils.readMetadata(metadataOptions, coverageData);
 
@@ -68,7 +68,7 @@ public class ConvertCommand implements Callable<Integer> {
                 logger.error("Can't find file key: " + fileKey);
                 continue;
             }
-            Map<BigDecimal, Boolean> coverMap = coverageData.get(fileUri);
+            Map<BigDecimal, Integer> coverMap = coverageData.get(fileUri);
             if (!coverMap.isEmpty()) {
                 NodeList lineNoNodeList = fileNode.getChildNodes();
                 for (int lineNoNodeNumber = 0; lineNoNodeNumber < lineNoNodeList.getLength(); lineNoNodeNumber++) {
@@ -92,7 +92,7 @@ public class ConvertCommand implements Callable<Integer> {
                             }
                         }
                     } else {
-                        coverMap.put(lineNo, true);
+                        coverMap.put(lineNo, 1);
                     }
                 }
             }

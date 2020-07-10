@@ -39,6 +39,7 @@ import java.io.*;
 import java.lang.invoke.MethodHandles;
 import java.math.BigDecimal;
 import java.net.URI;
+import java.nio.charset.Charset;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -98,7 +99,7 @@ public class Utils {
 
     private static void addAllModulesToList(Configuration conf, MetadataOptions metadataOptions,
                                      Map<String, URI> uriListByKey, MDObjectBase mdObj,
-                                     Map<URI, Map<BigDecimal, Boolean>> coverageData) {
+                                     Map<URI, Map<BigDecimal, Integer>> coverageData) {
         String mdObjUuid = mdObj.getUuid();
         Map<URI, ModuleType> modulesByType = mdObj.getModulesByType();
         if (modulesByType == null) {
@@ -123,7 +124,7 @@ public class Utils {
         });
     }
 
-    private static void addCoverageData(Map<URI, Map<BigDecimal, Boolean>> coverageData, URI uri) {
+    private static void addCoverageData(Map<URI, Map<BigDecimal, Integer>> coverageData, URI uri) {
         Tokenizer tokenizer = null;
         try {
             tokenizer = new Tokenizer(Files.readString(Path.of(uri)));
@@ -137,22 +138,26 @@ public class Utils {
                 .filter(Utils::mustCovered)
                 .mapToInt(node -> ((BSLParserRuleContext) node).getStart().getLine())
                 .distinct().toArray();
-        Map<BigDecimal, Boolean> coverMap = new HashMap<>();
+        Map<BigDecimal, Integer> coverMap = new HashMap<>();
         for(int lineNumber : linesToCover) {
-            coverMap.put(new BigDecimal(lineNumber), false);
+            coverMap.put(new BigDecimal(lineNumber), 0);
         }
         coverageData.put(uri, coverMap);
     }
 
     private static boolean mustCovered(Tree node) {
-        // the same as in BSL LS
-        return node instanceof BSLParser.StatementContext
+        return (node instanceof BSLParser.StatementContext
+                && !((BSLParser.StatementContext)node).children.stream().anyMatch(parseTree ->
+                    parseTree instanceof BSLParser.PreprocessorContext
+                    || parseTree instanceof BSLParser.CompoundStatementContext
+                        && ((BSLParser.CompoundStatementContext) parseTree).children.stream().anyMatch(
+                            parseTree1 -> parseTree1 instanceof BSLParser.TryStatementContext)))
                 || node instanceof BSLParser.GlobalMethodCallContext
                 || node instanceof BSLParser.Var_nameContext;
     }
 
     public static Map<String, URI> readMetadata(MetadataOptions metadataOptions,
-                                                Map<URI, Map<BigDecimal, Boolean>> coverageData) throws Exception {
+                                                Map<URI, Map<BigDecimal, Integer>> coverageData) throws Exception {
 
         boolean rawMode = false;
         if (metadataOptions.isRawMode()) {
@@ -204,10 +209,8 @@ public class Utils {
                 String documentRootTagName = xmlDocument.getDocumentElement().getTagName();
                 if (documentRootTagName.equals("MetaDataObject")) {
                     // CONFIGURATOR
-                    String nameExpression = "/MetaDataObject/ExternalDataProcessor/Properties/Name/text()";
                     String uuidExpression = "/MetaDataObject/ExternalDataProcessor/@uuid";
-                    String externalDataProcessorName = (String) xPath.compile(nameExpression).evaluate(xmlDocument,
-                            XPathConstants.STRING);
+                    String externalDataProcessorName = com.google.common.io.Files.getNameWithoutExtension(rootPath.toString());
                     String externalDataProcessorUuid = (String) xPath.compile(uuidExpression).evaluate(xmlDocument,
                             XPathConstants.STRING);
                     uriListByKey.put(getUriKey(externalDataProcessorUuid, ModuleType.ObjectModule, null),
@@ -296,7 +299,19 @@ public class Utils {
         return uriListByKey;
     }
 
-    public static void dumpCoverageFile(Map<URI, Map<BigDecimal, Boolean>> coverageData,
+    public static void dumpCoverageFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
+                                        MetadataOptions metadataOptions,
+                                        OutputOptions outputOptions) {
+        if (outputOptions.getOutputFormat() == OutputOptions.OutputFormat.GENERIC_COVERAGE) {
+            dumpGenericCoverageFile(coverageData, metadataOptions, outputOptions);
+        } else if (outputOptions.getOutputFormat() == OutputOptions.OutputFormat.LCOV) {
+            dumpLcovFile(coverageData, metadataOptions, outputOptions);
+        } else {
+            logger.info("Unknown format");
+        }
+    }
+
+    private static void dumpGenericCoverageFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
                                         MetadataOptions metadataOptions,
                                         OutputOptions outputOptions) {
         DocumentBuilderFactory icFactory = DocumentBuilderFactory.newInstance();
@@ -315,9 +330,9 @@ public class Utils {
                 }
                 Element fileElement = doc.createElement("file");
                 fileElement.setAttribute("path", projectUri.relativize(uri).getPath());
-                bigDecimalsMap.forEach((bigDecimal, bool) -> {
+                bigDecimalsMap.forEach((bigDecimal, integer) -> {
                     Element lineElement = doc.createElement("lineToCover");
-                    lineElement.setAttribute("covered", Boolean.toString(bool));
+                    lineElement.setAttribute("covered", Boolean.toString(integer > 0));
                     lineElement.setAttribute("lineNumber", bigDecimal.toString());
                     fileElement.appendChild(lineElement);
                 });
@@ -325,9 +340,9 @@ public class Utils {
             });
             long linesToCover = 0;
             long coveredLinesCount = 0;
-            for (Map<BigDecimal, Boolean> bigDecimalMap : coverageData.values()) {
+            for (Map<BigDecimal, Integer> bigDecimalMap : coverageData.values()) {
                 linesToCover += bigDecimalMap.size();
-                coveredLinesCount += bigDecimalMap.values().stream().filter(aBoolean -> aBoolean.booleanValue()).count();
+                coveredLinesCount += bigDecimalMap.values().stream().filter(aInteger -> aInteger > 0).count();
             }
             logger.info("Lines to cover: " + linesToCover);
             logger.info("Covered lines: " + coveredLinesCount);
@@ -349,7 +364,53 @@ public class Utils {
         }
     }
 
-    public static void printCoverageStats(Map<URI, Map<BigDecimal, Boolean>> coverageData,
+    private static void dumpLcovFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
+                                        MetadataOptions metadataOptions,
+                                        OutputOptions outputOptions) {
+
+        try {
+            OutputStreamWriter outputStream;
+            if (outputOptions.getOutputFile() == null) {
+                outputStream = new OutputStreamWriter(System.out);
+            } else {
+                outputStream = new OutputStreamWriter(new FileOutputStream(outputOptions.getOutputFile()), Charset.forName("UTF-8"));
+            }
+            PrintWriter writer = new PrintWriter(outputStream);
+
+            URI projectUri = Path.of(metadataOptions.getProjectDirName()).toUri();
+
+            coverageData.forEach((uri, bigDecimalsMap) -> {
+                if (bigDecimalsMap.isEmpty()) {
+                    return;
+                }
+                writer.println("TN:");
+                writer.printf("SF:%s\n", projectUri.relativize(uri).getPath());
+                bigDecimalsMap.forEach((bigDecimal, integer) -> {
+                    writer.printf("DA:%s,%d\n", bigDecimal.toString(), integer);
+                });
+                writer.printf("LH:%d\n", bigDecimalsMap.values().stream().filter(aInteger -> aInteger > 0).count());
+                writer.printf("LF:%d\n", bigDecimalsMap.size());
+                writer.println("end_of_record");
+            });
+            long linesToCover = 0;
+            long coveredLinesCount = 0;
+            for (Map<BigDecimal, Integer> bigDecimalMap : coverageData.values()) {
+                linesToCover += bigDecimalMap.size();
+                coveredLinesCount += bigDecimalMap.values().stream().filter(aInteger -> aInteger > 0).count();
+            }
+            logger.info("Lines to cover: " + linesToCover);
+            logger.info("Covered lines: " + coveredLinesCount);
+            if (linesToCover > 0) {
+                logger.info("Coverage: " + Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100. + "%");
+            }
+
+            writer.close();
+        } catch (Exception e) {
+            logger.error(e.getLocalizedMessage());
+        }
+    }
+
+    public static void printCoverageStats(Map<URI, Map<BigDecimal, Integer>> coverageData,
                                           MetadataOptions metadataOptions) {
         List<Object[]> dataList = new LinkedList<>();
         URI projectUri = Path.of(metadataOptions.getProjectDirName()).toUri();
@@ -359,7 +420,7 @@ public class Utils {
             }
             String path = projectUri.relativize(uri).getPath();
             long linesToCover = bigDecimalsMap.size();
-            long coveredLinesCount = bigDecimalsMap.values().stream().filter(aBoolean -> aBoolean.booleanValue()).count();
+            long coveredLinesCount = bigDecimalsMap.values().stream().filter(aInteger -> aInteger > 0).count();
             Double coverage = Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100.;
             Object[] dataRow = {
                     path,

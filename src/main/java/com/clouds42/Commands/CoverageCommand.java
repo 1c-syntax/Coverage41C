@@ -73,12 +73,12 @@ public class CoverageCommand implements Callable<Integer> {
 
     private RuntimeDebugHttpClient client;
 
-    private Map<URI, Map<BigDecimal, Boolean>> coverageData = new HashMap<URI,Map<BigDecimal, Boolean>> () {
+    private Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<URI,Map<BigDecimal, Integer>> () {
         @Override
-        public Map<BigDecimal, Boolean> get(Object key) {
-            Map<BigDecimal, Boolean> map = super.get(key);
+        public Map<BigDecimal, Integer> get(Object key) {
+            Map<BigDecimal, Integer> map = super.get(key);
             if (map == null) {
-                map = new HashMap<BigDecimal, Boolean>();
+                map = new HashMap<BigDecimal, Integer>();
                 put((URI)key, map);
             }
             return map;
@@ -113,9 +113,9 @@ public class CoverageCommand implements Callable<Integer> {
                         out.println(PipeMessages.OK_RESULT);
                         return true;
                     } else if (PipeMessages.CLEAN_COMMAND.equals(line)) {
-                        coverageData.forEach((uri, bigDecimalBooleanMap) -> {
-                            for (var key : bigDecimalBooleanMap.keySet()) {
-                                bigDecimalBooleanMap.put(key, false);
+                        coverageData.forEach((uri, bigDecimalIntegerMap) -> {
+                            for (var key : bigDecimalIntegerMap.keySet()) {
+                                bigDecimalIntegerMap.put(key, 0);
                             }
                         });
                         out.println(PipeMessages.OK_RESULT);
@@ -261,7 +261,7 @@ public class CoverageCommand implements Callable<Integer> {
                                         EList<PerformanceInfoLine> lineInfoList = moduleInfo.getLineInfo();
                                         lineInfoList.forEach(lineInfo -> {
                                             BigDecimal lineNo = lineInfo.getLineNo();
-                                            Map<BigDecimal, Boolean> coverMap = coverageData.get(uri);
+                                            Map<BigDecimal, Integer> coverMap = coverageData.get(uri);
                                             if (!coverMap.isEmpty() || rawMode) {
                                                 if (!rawMode && !coverMap.containsKey(lineNo)) {
                                                     if (loggingOptions.isVerbose()) {
@@ -275,7 +275,9 @@ public class CoverageCommand implements Callable<Integer> {
                                                         }
                                                     }
                                                 } else {
-                                                    coverMap.put(lineNo, true);
+                                                    coverMap.put(lineNo,
+                                                            coverMap.getOrDefault(lineNo, 0)
+                                                                    + lineInfo.getFrequency().intValue());
                                                 }
                                             }
                                         });
