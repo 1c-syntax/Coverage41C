@@ -6,7 +6,7 @@ plugins {
 }
 
 group 'com.clouds42'
-version '2.3-SNAPSHOT'
+version '2.3'
 
 sourceCompatibility = 11
 
