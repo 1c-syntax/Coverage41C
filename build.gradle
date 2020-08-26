@@ -37,7 +37,7 @@ dependencies {
     println 'EDT location: ' + edtLocation
 
     compile group: 'info.picocli', name: 'picocli', version: '4.3.2'
-    annotationProcessor 'info.picocli:picocli-codegen:4.3.2'
+    annotationProcessor 'info.picocli:picocli-codegen:4.5.1'
 
     compile group: 'org.slf4j', name: 'slf4j-api', version: '2.0.0-alpha1'
     compile group: 'org.slf4j', name: 'slf4j-simple', version: '2.0.0-alpha1'
