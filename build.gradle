@@ -44,7 +44,7 @@ dependencies {
 
     compile group: 'org.scala-sbt.ipcsocket', name: 'ipcsocket', version: '1.0.0'
 
-    compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.common', version: '2.18.0'
+    compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.common', version: '2.20.0'
     compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.ecore.xmi', version: '2.16.0'
     compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.ecore.xcore', version: '1.4.0'
 
