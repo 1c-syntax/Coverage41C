@@ -2,9 +2,7 @@ package com.clouds42;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestInstance;
+import org.junit.jupiter.api.*;
 
 import java.io.File;
 import java.io.IOException;
@@ -23,6 +21,7 @@ class CoverageTest {
     final boolean isWindows = System.getProperty ("os.name").toLowerCase().contains("win");
 
     final File dtPath = new File("src/test/resources/dt/1Cv8.dt");
+    final File dtWithExtensionPath = new File("src/test/resources/dt/1Cv8_WithExt.dt");
     final File vbParamsFile = new File("src/test/resources/bdd/VBParams.json");
     final File sourceDir = new File("src/test/resources/configuration");
 
@@ -44,7 +43,7 @@ class CoverageTest {
     URL dbgsUrl;
 
     @BeforeAll
-    public void prepareIb() throws IOException, InterruptedException {
+    public void prepareEnv() throws IOException, InterruptedException {
 
         if (isWindows) {
             vrunnerExecutable += ".bat";
@@ -82,12 +81,19 @@ class CoverageTest {
         Process startDbgsProcess = startDbgsProcessBuilder.inheritIO().start();
         assertEquals(0, startDbgsProcess.waitFor());
 
+    }
+
+    @BeforeEach
+    public void prepareIb(TestInfo info) throws IOException, InterruptedException  {
+
+        boolean withExtension = info.getTags().contains("WithExtension");
+
         ProcessBuilder vrunnerInitDevProcessBuilder = new ProcessBuilder();
         vrunnerInitDevProcessBuilder.command(vrunnerExecutable, "init-dev",
                 "--db-user", ibUser,
                 "--db-pwd", ibPassword,
                 "--src", sourceDir.getAbsolutePath(),
-                "--dt", dtPath.getAbsolutePath(),
+                "--dt", withExtension ? dtWithExtensionPath.getAbsolutePath() : dtPath.getAbsolutePath(),
                 "--v8version", v8version);
         Process vrunnerInitDevProcess = vrunnerInitDevProcessBuilder.inheritIO().start();
         assertEquals(0, vrunnerInitDevProcess.waitFor());
@@ -95,14 +101,14 @@ class CoverageTest {
 
     @Test
     void testConfigurator() throws InterruptedException, ExecutionException, IOException {
-        File configurationSourceDir = new File("src/test/resources/configuration");
+        File[] configurationSourceDir = new File[] {new File("src/test/resources/configuration")};
         String expectedXmlFileName = "src/test/resources/coverage/configuration.xml";
         testCoverage(configurationSourceDir, expectedXmlFileName);
     }
 
     @Test
     void testEDT() throws InterruptedException, ExecutionException, IOException {
-        File edtSourceDir = new File("src/test/resources/edt/pc");
+        File[] edtSourceDir = new File[] {new File("src/test/resources/edt/pc")};
         String expectedEdtXmlFileName = "src/test/resources/coverage/edt.xml";
         testCoverage(edtSourceDir, expectedEdtXmlFileName);
     }
@@ -113,9 +119,29 @@ class CoverageTest {
         testCoverage(null, expectedIntXmlFileName);
     }
 
+    @Test
+    @Tag("WithExtension")
+    void testConfiguratorAndExtension() throws InterruptedException, ExecutionException, IOException {
+        File[] configurationSourceDir = new File[]{
+                new File("src/test/resources/configuration"),
+                new File("src/test/resources/configuration_extension")
+        };
+        String expectedXmlFileName = "src/test/resources/coverage/configurationWithExtension.xml";
+        testCoverage(configurationSourceDir, expectedXmlFileName, ".*");
+    }
+
     void testCoverage(
-            File sourceDir,
+            File sourceDir[],
             String expectedXmlFileName) throws IOException, InterruptedException, ExecutionException {
+
+        testCoverage(sourceDir, expectedXmlFileName, "");
+
+    }
+
+    void testCoverage(
+            File sourceDir[],
+            String expectedXmlFileName,
+            String extensionName) throws IOException, InterruptedException, ExecutionException {
 
         CompletableFuture<Integer> mainAppThread = CompletableFuture.supplyAsync(() -> {
             String[] argsArray = {
@@ -126,11 +152,22 @@ class CoverageTest {
             List<String> mainAppArguments = new LinkedList<>();
             mainAppArguments.addAll(Arrays.asList(argsArray));
             if (sourceDir != null) {
-                String[] additionalArgsArray = {
-                        "-P", new File(".").getAbsolutePath(),
-                        "-s", sourceDir.getPath()};
-                mainAppArguments.addAll(Arrays.asList(additionalArgsArray));
+
+                mainAppArguments.add("-P");
+                mainAppArguments.add(new File(".").getAbsolutePath());
+                Arrays.stream(sourceDir)
+                        .map(File::getPath)
+                        .forEach(path -> {
+                            mainAppArguments.add("-s");
+                            mainAppArguments.add(path);
+                        });
             }
+
+            if (!extensionName.isEmpty()) {
+                mainAppArguments.add("-e");
+                mainAppArguments.add(extensionName);
+            }
+
             String[] fullArgsArray = mainAppArguments.toArray(new String[mainAppArguments.size()]);
             int mainAppReturnCode = Coverage41C.getCommandLine().execute(fullArgsArray);
             return mainAppReturnCode;

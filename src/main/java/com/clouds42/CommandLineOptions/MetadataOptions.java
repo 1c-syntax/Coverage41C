@@ -12,7 +12,7 @@ public class MetadataOptions {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     @Option(names = {"-s", "--srcDir"}, description = "Directory with sources exported to xml", defaultValue = "")
-    private String srcDirName;
+    private String[] srcDirNames;
 
     @Option(names = {"-P", "--projectDir"}, description = "Directory with project", defaultValue = "")
     private String projectDirName;
@@ -21,21 +21,19 @@ public class MetadataOptions {
     private SupportVariant removeSupport;
 
     private void updatePaths() {
-        if (projectDirName.isEmpty() && !srcDirName.isEmpty()) {
+        if (projectDirName.isEmpty() && srcDirNames.length > 0) {
             // for backward compatibility
-            projectDirName = srcDirName;
-            srcDirName = "";
+            projectDirName = srcDirNames[0];
+            srcDirNames = new String[]{""};
         }
     }
 
-    public String getSrcDirName() {
+    public String[] getSrcDirNames() {
         updatePaths();
-        return srcDirName;
+        return srcDirNames;
     }
 
-    public void setSrcDirName(String srcDirName) {
-        this.srcDirName = srcDirName;
-    }
+    public void setSrcDirNames(String[] srcDirNames) { this.srcDirNames = srcDirNames; }
 
     public String getProjectDirName() {
         updatePaths();
@@ -55,7 +53,7 @@ public class MetadataOptions {
     }
 
     public boolean isRawMode() {
-        return getSrcDirName().isEmpty()
+        return getSrcDirNames().length == 0
                 && getProjectDirName().isEmpty();
     }
 }

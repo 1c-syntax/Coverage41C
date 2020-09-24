@@ -170,130 +170,135 @@ public class Utils {
         if (!rawMode) {
             logger.info("Reading configuration sources...");
 
-            Path rootPath = Path.of(metadataOptions.getProjectDirName())
-                    .resolve(metadataOptions.getSrcDirName());
+            for (String srcDirName:metadataOptions.getSrcDirNames()) {
 
-            if (Files.isDirectory(rootPath)) {
+                Path rootPath = Path.of(metadataOptions.getProjectDirName())
+                        .resolve(srcDirName);
 
-                Configuration conf = Configuration.create(rootPath);
+                logger.info("Reading {}...", rootPath);
 
-                Set<MDObjectBase> configurationChildren = conf.getChildren();
-                for (MDObjectBase mdObj : configurationChildren) {
+                if (Files.isDirectory(rootPath)) {
 
-                    addAllModulesToList(conf, metadataOptions, uriListByKey, mdObj, coverageData);
+                    Configuration conf = Configuration.create(rootPath);
 
-                    List<Command> commandsList = mdObj.getCommands();
-                    if (commandsList != null) {
-                        commandsList.forEach(cmd -> {
-                            addAllModulesToList(conf, metadataOptions, uriListByKey, cmd, coverageData);
-                        });
-                    }
+                    Set<MDObjectBase> configurationChildren = conf.getChildren();
+                    for (MDObjectBase mdObj : configurationChildren) {
 
-                    List<Form> formsList = mdObj.getForms();
-                    if (formsList != null) {
-                        formsList.forEach(form -> {
-                            addAllModulesToList(conf, metadataOptions, uriListByKey, form, coverageData);
-                        });
-                    }
-                }
+                        addAllModulesToList(conf, metadataOptions, uriListByKey, mdObj, coverageData);
 
-            } else {
-
-                File externalDataprocessorRootXmlFile = rootPath.toFile();
-
-                XPath xPath = XPathFactory.newInstance().newXPath();
-                FileInputStream fileIS = new FileInputStream(externalDataprocessorRootXmlFile);
-                DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
-                DocumentBuilder builder = builderFactory.newDocumentBuilder();
-                Document xmlDocument = builder.parse(fileIS);
-                String documentRootTagName = xmlDocument.getDocumentElement().getTagName();
-                if (documentRootTagName.equals("MetaDataObject")) {
-                    // CONFIGURATOR
-                    String uuidExpression = "/MetaDataObject/ExternalDataProcessor/@uuid";
-                    String externalDataProcessorName = com.google.common.io.Files.getNameWithoutExtension(rootPath.toString());
-                    String externalDataProcessorUuid = (String) xPath.compile(uuidExpression).evaluate(xmlDocument,
-                            XPathConstants.STRING);
-                    uriListByKey.put(getUriKey(externalDataProcessorUuid, ModuleType.ObjectModule, null),
-                            Paths.get(externalDataprocessorRootXmlFile.getParent(),
-                                    externalDataProcessorName, "Ext", "ObjectModule.bsl").toUri());
-
-                    var externalDataProcessorPath = Paths.get(
-                            externalDataprocessorRootXmlFile.getParent(),
-                            externalDataProcessorName, "Forms");
-                    try (Stream<Path> walk = Files.list(externalDataProcessorPath)) {
-
-                        List<String> result = walk.map(x -> x.toString())
-                                .filter(f -> f.endsWith(".xml")).collect(Collectors.toList());
-
-                        XPath formXPath = XPathFactory.newInstance().newXPath();
-                        String formUuidExpression = "/MetaDataObject/Form/@uuid";
-                        String formNameExpression = "/MetaDataObject/Form/Properties/Name/text()";
-
-                        result.forEach(formXmlFileName -> {
-                            try {
-                                FileInputStream formFileIS = new FileInputStream(formXmlFileName);
-                                Document formXmlDocument = builder.parse(formFileIS);
-                                String formUuid = (String) formXPath.compile(formUuidExpression).evaluate(formXmlDocument,
-                                        XPathConstants.STRING);
-                                String formName = (String) formXPath.compile(formNameExpression).evaluate(formXmlDocument,
-                                        XPathConstants.STRING);
-                                uriListByKey.put(getUriKey(formUuid, ModuleType.FormModule, null),
-                                        Paths.get(externalDataProcessorPath.toString(),
-                                                formName, "Ext", "Form", "Module.bsl").toUri());
-                            } catch (Exception e) {
-                                logger.error("Can't read form xml: " + e.getLocalizedMessage());
-                            }
-                        });
-
-
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                } else if (documentRootTagName.equals("mdclass:ExternalDataProcessor")) {
-                    // EDT
-                    var externalDataProcessorPath = Paths.get(
-                            externalDataprocessorRootXmlFile.getParent(),
-                            "Forms");
-                    String uuidExpression = "/ExternalDataProcessor/@uuid";
-                    String externalDataProcessorUuid = (String) xPath.compile(uuidExpression).evaluate(xmlDocument,
-                            XPathConstants.STRING);
-                    uriListByKey.put(getUriKey(externalDataProcessorUuid, ModuleType.ObjectModule, null),
-                            Paths.get(externalDataprocessorRootXmlFile.getParent(),
-                                    "ObjectModule.bsl").toUri());
-                    String formUuidExpression = "/ExternalDataProcessor/forms";
-                    NodeList externalDataProcessorFormsNodeList = (NodeList) xPath.compile(formUuidExpression).evaluate(xmlDocument,
-                            XPathConstants.NODESET);
-                    for (int nodeNumber = 0; nodeNumber < externalDataProcessorFormsNodeList.getLength(); nodeNumber++) {
-                        Node externalDataProcessorFormsNode = externalDataProcessorFormsNodeList.item(nodeNumber);
-                        String formUuid = externalDataProcessorFormsNode.getAttributes().getNamedItem("uuid").getTextContent();
-                        String formName = "";
-                        NodeList childNodes = externalDataProcessorFormsNode.getChildNodes();
-                        for (int childNodeNumber = 0; childNodeNumber < childNodes.getLength(); childNodeNumber++) {
-                            Node childNode = childNodes.item(childNodeNumber);
-                            if (childNode.getNodeName().equals("name")) {
-                                formName = childNode.getTextContent();
-                                break;
-                            }
+                        List<Command> commandsList = mdObj.getCommands();
+                        if (commandsList != null) {
+                            commandsList.forEach(cmd -> {
+                                addAllModulesToList(conf, metadataOptions, uriListByKey, cmd, coverageData);
+                            });
                         }
-                        if (formName.isEmpty()) {
-                            logger.error("Can't find form name: " + formUuid);
-                            continue;
+
+                        List<Form> formsList = mdObj.getForms();
+                        if (formsList != null) {
+                            formsList.forEach(form -> {
+                                addAllModulesToList(conf, metadataOptions, uriListByKey, form, coverageData);
+                            });
                         }
-                        uriListByKey.put(getUriKey(formUuid, ModuleType.FormModule, null),
-                                Paths.get(externalDataProcessorPath.toString(),
-                                        formName, "Module.bsl").toUri());
                     }
+
                 } else {
-                    throw new Exception("Unknown source format");
+
+                    File externalDataprocessorRootXmlFile = rootPath.toFile();
+
+                    XPath xPath = XPathFactory.newInstance().newXPath();
+                    FileInputStream fileIS = new FileInputStream(externalDataprocessorRootXmlFile);
+                    DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
+                    DocumentBuilder builder = builderFactory.newDocumentBuilder();
+                    Document xmlDocument = builder.parse(fileIS);
+                    String documentRootTagName = xmlDocument.getDocumentElement().getTagName();
+                    if (documentRootTagName.equals("MetaDataObject")) {
+                        // CONFIGURATOR
+                        String uuidExpression = "/MetaDataObject/ExternalDataProcessor/@uuid";
+                        String externalDataProcessorName = com.google.common.io.Files.getNameWithoutExtension(rootPath.toString());
+                        String externalDataProcessorUuid = (String) xPath.compile(uuidExpression).evaluate(xmlDocument,
+                                XPathConstants.STRING);
+                        uriListByKey.put(getUriKey(externalDataProcessorUuid, ModuleType.ObjectModule, null),
+                                Paths.get(externalDataprocessorRootXmlFile.getParent(),
+                                        externalDataProcessorName, "Ext", "ObjectModule.bsl").toUri());
+
+                        var externalDataProcessorPath = Paths.get(
+                                externalDataprocessorRootXmlFile.getParent(),
+                                externalDataProcessorName, "Forms");
+                        try (Stream<Path> walk = Files.list(externalDataProcessorPath)) {
+
+                            List<String> result = walk.map(x -> x.toString())
+                                    .filter(f -> f.endsWith(".xml")).collect(Collectors.toList());
+
+                            XPath formXPath = XPathFactory.newInstance().newXPath();
+                            String formUuidExpression = "/MetaDataObject/Form/@uuid";
+                            String formNameExpression = "/MetaDataObject/Form/Properties/Name/text()";
+
+                            result.forEach(formXmlFileName -> {
+                                try {
+                                    FileInputStream formFileIS = new FileInputStream(formXmlFileName);
+                                    Document formXmlDocument = builder.parse(formFileIS);
+                                    String formUuid = (String) formXPath.compile(formUuidExpression).evaluate(formXmlDocument,
+                                            XPathConstants.STRING);
+                                    String formName = (String) formXPath.compile(formNameExpression).evaluate(formXmlDocument,
+                                            XPathConstants.STRING);
+                                    uriListByKey.put(getUriKey(formUuid, ModuleType.FormModule, null),
+                                            Paths.get(externalDataProcessorPath.toString(),
+                                                    formName, "Ext", "Form", "Module.bsl").toUri());
+                                } catch (Exception e) {
+                                    logger.error("Can't read form xml: " + e.getLocalizedMessage());
+                                }
+                            });
+
+
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    } else if (documentRootTagName.equals("mdclass:ExternalDataProcessor")) {
+                        // EDT
+                        var externalDataProcessorPath = Paths.get(
+                                externalDataprocessorRootXmlFile.getParent(),
+                                "Forms");
+                        String uuidExpression = "/ExternalDataProcessor/@uuid";
+                        String externalDataProcessorUuid = (String) xPath.compile(uuidExpression).evaluate(xmlDocument,
+                                XPathConstants.STRING);
+                        uriListByKey.put(getUriKey(externalDataProcessorUuid, ModuleType.ObjectModule, null),
+                                Paths.get(externalDataprocessorRootXmlFile.getParent(),
+                                        "ObjectModule.bsl").toUri());
+                        String formUuidExpression = "/ExternalDataProcessor/forms";
+                        NodeList externalDataProcessorFormsNodeList = (NodeList) xPath.compile(formUuidExpression).evaluate(xmlDocument,
+                                XPathConstants.NODESET);
+                        for (int nodeNumber = 0; nodeNumber < externalDataProcessorFormsNodeList.getLength(); nodeNumber++) {
+                            Node externalDataProcessorFormsNode = externalDataProcessorFormsNodeList.item(nodeNumber);
+                            String formUuid = externalDataProcessorFormsNode.getAttributes().getNamedItem("uuid").getTextContent();
+                            String formName = "";
+                            NodeList childNodes = externalDataProcessorFormsNode.getChildNodes();
+                            for (int childNodeNumber = 0; childNodeNumber < childNodes.getLength(); childNodeNumber++) {
+                                Node childNode = childNodes.item(childNodeNumber);
+                                if (childNode.getNodeName().equals("name")) {
+                                    formName = childNode.getTextContent();
+                                    break;
+                                }
+                            }
+                            if (formName.isEmpty()) {
+                                logger.error("Can't find form name: " + formUuid);
+                                continue;
+                            }
+                            uriListByKey.put(getUriKey(formUuid, ModuleType.FormModule, null),
+                                    Paths.get(externalDataProcessorPath.toString(),
+                                            formName, "Module.bsl").toUri());
+                        }
+                    } else {
+                        throw new Exception("Unknown source format");
+                    }
+
+                    uriListByKey.forEach((s, uri) -> {
+                        addCoverageData(coverageData, uri);
+                    });
+
                 }
 
-                uriListByKey.forEach((s, uri) -> {
-                    addCoverageData(coverageData, uri);
-                });
-
+                logger.info("Configuration sources reading DONE");
             }
-
-            logger.info("Configuration sources reading DONE");
         }
 
         return uriListByKey;

@@ -1,0 +1,12 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<ConfigDumpInfo xmlns="http://v8.1c.ru/8.3/xcf/dumpinfo" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" format="Hierarchical" version="2.11">
+	<ConfigVersions>
+		<Metadata name="CommonModule.ext_ПростойОбщийМодуль" id="5fa4e2b6-fa47-41d8-a71c-f7fab3f4e507" configVersion="6ffb885fc836aa5662ed6be40ac9146e5314e3a1"/>
+		<Metadata name="CommonModule.ext_ПростойОбщийМодуль.Module" id="5fa4e2b6-fa47-41d8-a71c-f7fab3f4e507.0" configVersion="377d24a5a382f29747ad8d759d974a20f2ea96fb"/>
+		<Metadata name="CommonModule.ПростойОбщийМодуль" id="314d6d5c-9af8-439e-8eba-7eeb81f0782d" configVersion="e0bface32675eb1ec4a773ee2ccb8029bf935eaf"/>
+		<Metadata name="CommonModule.ПростойОбщийМодуль.Module" id="314d6d5c-9af8-439e-8eba-7eeb81f0782d.0" configVersion="76b164434e7ec1684ef2730b1ff2fa7a6c9da480"/>
+		<Metadata name="Configuration.Extension" id="46591b3d-daad-4212-ab81-01ce33535353" configVersion="e7312398b503b6b7e3f76d1182493d370e089c4d"/>
+		<Metadata name="Language.Русский" id="2b549d86-cb67-42ee-96c3-e3d735112f90" configVersion="05a0892737e0bdd7c951d6bf005d38a956f23bc8"/>
+		<Metadata name="Role.ext_ОсновнаяРоль" id="bc8115b0-33c2-4e81-8b2d-5b206951c561" configVersion="78d464ae3de93994e290be16a542c4c374ef20e1"/>
+	</ConfigVersions>
+</ConfigDumpInfo>
