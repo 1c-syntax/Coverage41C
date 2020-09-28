@@ -1,0 +1,73 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.11">
+	<Configuration uuid="46591b3d-daad-4212-ab81-01ce33535353">
+		<InternalInfo>
+			<xr:ContainedObject>
+				<xr:ClassId>9cd510cd-abfc-11d4-9434-004095e12fc7</xr:ClassId>
+				<xr:ObjectId>0dcca032-32aa-4825-9f76-8fdf68acf761</xr:ObjectId>
+			</xr:ContainedObject>
+			<xr:ContainedObject>
+				<xr:ClassId>9fcd25a0-4822-11d4-9414-008048da11f9</xr:ClassId>
+				<xr:ObjectId>73789dac-6eb7-4ca0-955b-7a8b1023d699</xr:ObjectId>
+			</xr:ContainedObject>
+			<xr:ContainedObject>
+				<xr:ClassId>e3687481-0a87-462c-a166-9f34594f9bba</xr:ClassId>
+				<xr:ObjectId>aaecbd6a-3d17-46aa-931d-e8520c9f1aeb</xr:ObjectId>
+			</xr:ContainedObject>
+			<xr:ContainedObject>
+				<xr:ClassId>9de14907-ec23-4a07-96f0-85521cb6b53b</xr:ClassId>
+				<xr:ObjectId>7c01885d-83e2-45b1-8cea-f95ae41b8fa5</xr:ObjectId>
+			</xr:ContainedObject>
+			<xr:ContainedObject>
+				<xr:ClassId>51f2d5d8-ea4d-4064-8892-82951750031e</xr:ClassId>
+				<xr:ObjectId>e28c24e9-a385-47c1-82ac-bfade45ba796</xr:ObjectId>
+			</xr:ContainedObject>
+			<xr:ContainedObject>
+				<xr:ClassId>e68182ea-4237-4383-967f-90c1e3370bc7</xr:ClassId>
+				<xr:ObjectId>675c410e-2abe-4469-b2f3-60f6cbf9939b</xr:ObjectId>
+			</xr:ContainedObject>
+			<xr:ContainedObject>
+				<xr:ClassId>fb282519-d103-4dd3-bc12-cb271d631dfc</xr:ClassId>
+				<xr:ObjectId>6a8c2a63-0d60-45ed-a588-8fabc192df14</xr:ObjectId>
+			</xr:ContainedObject>
+		</InternalInfo>
+		<Properties>
+			<Name>Extension</Name>
+			<Synonym>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Extension</v8:content>
+				</v8:item>
+			</Synonym>
+			<Comment/>
+			<ConfigurationExtensionPurpose>Customization</ConfigurationExtensionPurpose>
+			<ObjectBelonging>Adopted</ObjectBelonging>
+			<KeepMappingToExtendedConfigurationObjectsByIDs>true</KeepMappingToExtendedConfigurationObjectsByIDs>
+			<NamePrefix>ext_</NamePrefix>
+			<ConfigurationExtensionCompatibilityMode>Version8_3_15</ConfigurationExtensionCompatibilityMode>
+			<DefaultRunMode>ManagedApplication</DefaultRunMode>
+			<UsePurposes>
+				<v8:Value xsi:type="app:ApplicationUsePurpose">PlatformApplication</v8:Value>
+			</UsePurposes>
+			<ScriptVariant>Russian</ScriptVariant>
+			<DefaultRoles>
+				<xr:Item xsi:type="xr:MDObjectRef">Role.ext_ОсновнаяРоль</xr:Item>
+			</DefaultRoles>
+			<Vendor/>
+			<Version/>
+			<DefaultLanguage>Language.Русский</DefaultLanguage>
+			<BriefInformation/>
+			<DetailedInformation/>
+			<Copyright/>
+			<VendorInformationAddress/>
+			<ConfigurationInformationAddress/>
+			<InterfaceCompatibilityMode>Taxi</InterfaceCompatibilityMode>
+		</Properties>
+		<ChildObjects>
+			<Language>Русский</Language>
+			<Role>ext_ОсновнаяРоль</Role>
+			<CommonModule>ПростойОбщийМодуль</CommonModule>
+			<CommonModule>ext_ПростойОбщийМодуль</CommonModule>
+		</ChildObjects>
+	</Configuration>
+</MetaDataObject>
