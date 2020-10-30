@@ -18,7 +18,7 @@ import java.lang.invoke.MethodHandles;
 import java.net.Socket;
 import java.util.concurrent.Callable;
 
-public class SendMessageCommand implements Callable<Integer> {
+public class SendMessageCommand extends BaseCommand implements Callable<Integer> {
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -50,20 +50,28 @@ public class SendMessageCommand implements Callable<Integer> {
         logger.info("Command send finished: " + commandText);
         String result = "";
         for(int i = 0; i < 10; i++) {
+            logger.info("Try: " + i);
             try {
                 result = pipeIn.readLine();
                 break;
             } catch(IOException e) {
                 logger.info("Can't read answer from main app...");
-                Thread.sleep(1000);
+                Thread.sleep(10);
             }
         }
         if (result.equals(PipeMessages.OK_RESULT)) {
             logger.info("Command success: " + commandText);
+            client.close();
             return CommandLine.ExitCode.OK;
         } else {
             logger.info("Command failed: " + commandText);
+            client.close();
             return CommandLine.ExitCode.SOFTWARE;
         }
+    }
+
+    @Override
+    public ConnectionOptions getConnectionOptions() {
+        return connectionOptions;
     }
 }

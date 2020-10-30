@@ -14,11 +14,10 @@ import com._1c.g5.v8.dt.debug.model.measure.PerformanceInfoModule;
 import com._1c.g5.v8.dt.internal.debug.core.runtime.client.RuntimeDebugHttpClient;
 import com._1c.g5.v8.dt.internal.debug.core.runtime.client.RuntimeDebugModelXmlSerializer;
 import com.clouds42.CommandLineOptions.*;
+import com.clouds42.MyRuntimeDebugModelXmlSerializer;
 import com.clouds42.PipeMessages;
 import com.clouds42.Utils;
 import org.eclipse.emf.common.util.EList;
-import org.scalasbt.ipcsocket.UnixDomainServerSocket;
-import org.scalasbt.ipcsocket.Win32NamedPipeServerSocket;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
@@ -32,7 +31,6 @@ import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.lang.invoke.MethodHandles;
 import java.math.BigDecimal;
-import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URI;
 import java.nio.file.Files;
@@ -46,7 +44,7 @@ import java.util.stream.Stream;
 @Command(name = PipeMessages.START_COMMAND, mixinStandardHelpOptions = true,
         description = "Start measure and save coverage data to file",
         sortOptions = false)
-public class CoverageCommand implements Callable<Integer> {
+public class CoverageCommand extends BaseCommand implements Callable<Integer> {
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -73,19 +71,18 @@ public class CoverageCommand implements Callable<Integer> {
 
     private RuntimeDebugHttpClient client;
 
-    private Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<URI,Map<BigDecimal, Integer>> () {
+    private Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<URI, Map<BigDecimal, Integer>>() {
         @Override
         public Map<BigDecimal, Integer> get(Object key) {
             Map<BigDecimal, Integer> map = super.get(key);
             if (map == null) {
                 map = new HashMap<BigDecimal, Integer>();
-                put((URI)key, map);
+                put((URI) key, map);
             }
             return map;
         }
     };
 
-    private ServerSocket serverSocket;
     private CompletableFuture<Boolean> commandListenServer;
 
     private AtomicBoolean stopExecution = new AtomicBoolean(false);
@@ -121,7 +118,7 @@ public class CoverageCommand implements Callable<Integer> {
                         out.println(PipeMessages.OK_RESULT);
                         return true;
                     } else if (PipeMessages.CHECK_COMMAND.equals(line)) {
-                        for (int i = 0; i<60; i++) {
+                        for (int i = 0; i < 60; i++) {
                             if (systemStarted) {
                                 out.println(PipeMessages.OK_RESULT);
                                 return true;
@@ -159,194 +156,45 @@ public class CoverageCommand implements Callable<Integer> {
     @Override
     public Integer call() throws Exception {
 
-        boolean isWindows = System.getProperty ("os.name").toLowerCase().contains("win");
+        Integer result = CommandLine.ExitCode.OK;
 
-        String pipeName = Utils.getPipeName(connectionOptions);
+        createCommandListner();
 
-        if (isWindows) {
-            serverSocket = new Win32NamedPipeServerSocket(pipeName);
-        } else {
-            serverSocket = new UnixDomainServerSocket(pipeName);
-        }
-
-        commandListenServer = CompletableFuture.supplyAsync(() -> {
-            AtomicBoolean stopListen = new AtomicBoolean(false);
-            while(!stopListen.get()) {
-                try {
-                    Socket clientSocket = serverSocket.accept();
-                    CompletableFuture.supplyAsync(() -> listenSocket(clientSocket)).thenAccept(aBoolean -> {
-                        if(aBoolean) {
-                            stopListen.set(false);
-                        }
-                    });
-                } catch (IOException e) {
-                    logger.info("Can't accept socket: " + e.getLocalizedMessage());
-                }
-            }
-            return true;
-        });
-
-        RuntimeDebugModelXmlSerializer serializer = new RuntimeDebugModelXmlSerializer();
+        RuntimeDebugModelXmlSerializer serializer = new MyRuntimeDebugModelXmlSerializer();
         client = new RuntimeDebugHttpClient(serializer);
 
-        UUID debugServerUuid = UUID.randomUUID();
         UUID measureUuid = UUID.randomUUID();
 
         rawMode = metadataOptions.isRawMode();
 
         Map<String, URI> uriListByKey = Utils.readMetadata(metadataOptions, coverageData);
 
-        boolean firstRun = true;
-
         try {
-            client.configure(
-                    connectionOptions.getDebugServerUrl(),
-                    debugServerUuid,
-                    connectionOptions.getInfobaseAlias());
+            startSystem(measureUuid);
         } catch (RuntimeDebugClientException e) {
+            logger.info("Connecting to dbgs failed");
             logger.error(e.getLocalizedMessage());
-            return CommandLine.ExitCode.SOFTWARE;
+            result = CommandLine.ExitCode.SOFTWARE;
+            return result;
         }
 
-        Runtime.getRuntime().addShutdownHook(new Thread()
-        {
-            public void run()
-            {
-                gracefulShutdown(null);
-            }
-        });
+        addShutdownHook();
 
         Set<String> externalDataProcessorsUriSet = new HashSet<String>();
 
-        while (!stopExecution.get()) {
-            try {
-                if (firstRun) {
-                    firstRun = false;
-                    throw new RuntimeDebugClientException("First run - connecting to dbgs");
-                }
-                List<? extends DBGUIExtCmdInfoBase> commandsList = client.ping();
-                if (commandsList.size() > 0) {
-                    logger.info("Ping result commands size: " + commandsList.size());
-                    commandsList.forEach(command -> {
-                        logger.info("Command: " + command.getCmdID().getName());
-                        if (command.getCmdID() == DBGUIExtCmds.MEASURE_RESULT_PROCESSING) {
-                            logger.info("Found MEASURE_RESULT_PROCESSING command");
-                            DBGUIExtCmdInfoMeasureImpl measureCommand = (DBGUIExtCmdInfoMeasureImpl) command;
-                            PerformanceInfoMain measure = measureCommand.getMeasure();
-                            EList<PerformanceInfoModule> moduleInfoList = measure.getModuleData();
-                            moduleInfoList.forEach(moduleInfo -> {
-                                BSLModuleIdInternal moduleId = moduleInfo.getModuleID();
-                                String moduleUrl = moduleId.getURL();
-                                if (loggingOptions.isVerbose() && !moduleUrl.isEmpty() && !externalDataProcessorsUriSet.contains(moduleUrl)) {
-                                    logger.info("Found external data processor: " + moduleUrl);
-                                    externalDataProcessorsUriSet.add(moduleUrl);
-                                }
-                                String moduleExtensionName = moduleId.getExtensionName();
-                                if (filterOptions.getExtensionName().equals(moduleExtensionName)
-                                        && filterOptions.getExternalDataProcessorUrl().equals(moduleUrl)) {
-                                    String objectId = moduleId.getObjectID();
-                                    String propertyId = moduleId.getPropertyID();
-                                    String key = Utils.getUriKey(objectId, propertyId);
-
-                                    URI uri;
-                                    if (!rawMode) {
-                                        uri = uriListByKey.get(key);
-                                    } else {
-                                        uri = URI.create("file:///" + key);
-                                    }
-                                    if (uri == null) {
-                                        logger.info("Couldn't find object id " + objectId
-                                                + ", property id " + propertyId + " in sources!");
-                                    } else {
-                                        EList<PerformanceInfoLine> lineInfoList = moduleInfo.getLineInfo();
-                                        lineInfoList.forEach(lineInfo -> {
-                                            BigDecimal lineNo = lineInfo.getLineNo();
-                                            Map<BigDecimal, Integer> coverMap = coverageData.get(uri);
-                                            if (!coverMap.isEmpty() || rawMode) {
-                                                if (!rawMode && !coverMap.containsKey(lineNo)) {
-                                                    if (loggingOptions.isVerbose()) {
-                                                        logger.info("Can't find line to cover " + lineNo + " in module " + uri);
-                                                        try {
-                                                            Stream<String> all_lines = Files.lines(Paths.get(uri));
-                                                            String specific_line_n = all_lines.skip(lineNo.longValue() - 1).findFirst().get();
-                                                            logger.info(">>> " + specific_line_n);
-                                                        } catch (Exception e) {
-                                                            logger.error(e.getLocalizedMessage());
-                                                        }
-                                                    }
-                                                } else {
-                                                    coverMap.put(lineNo,
-                                                            coverMap.getOrDefault(lineNo, 0)
-                                                                    + lineInfo.getFrequency().intValue());
-                                                }
-                                            }
-                                        });
-                                    }
-                                }
-                            });
-                        } else if (command.getCmdID() == DBGUIExtCmds.TARGET_STARTED) {
-                            DBGUIExtCmdInfoStartedImpl targetStartedCommand = (DBGUIExtCmdInfoStartedImpl) command;
-                            DebugTargetId targetId = targetStartedCommand.getTargetID();
-                            try {
-                                client.attachRuntimeDebugTargets(Arrays.asList(UUID.fromString(targetId.getId())));
-                            } catch (RuntimeDebugClientException e) {
-                                logger.error(e.getLocalizedMessage());
-                            }
-                        }
-                    });
-                }
-            } catch (RuntimeDebugClientException e) {
-                logger.info(e.getLocalizedMessage());
-                if (systemStarted) {
-                    logger.info("Can't send ping to debug server. Coverage analyzing finished");
-                    gracefulShutdown(null);
-                } else {
-                    try {
-                        AttachDebugUIResult connectionResult = client.connect(debuggerOptions.getPassword());
-                        if (connectionResult != AttachDebugUIResult.REGISTERED) {
-                            if (connectionResult == AttachDebugUIResult.IB_IN_DEBUG) {
-                                throw new RuntimeDebugClientException("Can't connect to debug server. IB is in debug. Close configurator or EDT first");
-                            } else if (connectionResult == AttachDebugUIResult.CREDENTIALS_REQUIRED) {
-                                throw new RuntimeDebugClientException("Can't connect to debug server. Use -p option to set correct password");
-                            } else {
-                                throw new RuntimeDebugClientException("Can't connect to debug server. Connection result: " + connectionResult);
-                            }
-                        }
-                        client.initSettings(false);
-                        client.setAutoconnectDebugTargets(
-                                debuggerOptions.getDebugAreaNames(),
-                                debuggerOptions.getAutoconnectTargets());
-
-                        List<DebugTargetId> debugTargets;
-                        if (debuggerOptions.getDebugAreaNames().isEmpty()) {
-                            debugTargets = client.getRuntimeDebugTargets(null);
-                        } else {
-                            debugTargets = new LinkedList<DebugTargetId>();
-                            debuggerOptions.getDebugAreaNames().forEach(areaName -> {
-                                try {
-                                    debugTargets.addAll(client.getRuntimeDebugTargets(areaName));
-                                } catch (RuntimeDebugClientException ex) {
-                                    logger.error(ex.getLocalizedMessage());
-                                }
-                            });
-                        }
-                        connectAllTargets(debugTargets);
-
-                        client.toggleProfiling(null);
-                        client.toggleProfiling(measureUuid);
-
-                        systemStarted = true;
-                    } catch (RuntimeDebugClientException e1) {
-                        logger.error(e1.getLocalizedMessage());
-                        return CommandLine.ExitCode.SOFTWARE;
-                    }
-                }
+        try {
+            mainLoop(uriListByKey, externalDataProcessorsUriSet);
+        } catch (RuntimeDebugClientException e) {
+            logger.error("Can't send ping to debug server. Coverage analyzing finished");
+            if(logger.isDebugEnabled()) {
+                logger.error(e.getLocalizedMessage());
             }
-            Thread.sleep(debuggerOptions.getPingTimeout());
-            if (opid > 0 && !Utils.isProcessStillAlive(opid)) {
-                logger.info("Owner process stopped: " + opid);
-                gracefulShutdown(null);
-            }
+            result = CommandLine.ExitCode.SOFTWARE;
+        }
+        Thread.sleep(debuggerOptions.getPingTimeout());
+        if (opid > 0 && !Utils.isProcessStillAlive(opid)) {
+            logger.info("Owner process stopped: " + opid);
+            gracefulShutdown(null);
         }
 
         logger.info("Disconnecting from dbgs...");
@@ -356,19 +204,177 @@ public class CoverageCommand implements Callable<Integer> {
         } catch (RuntimeDebugClientException e) {
             logger.error(e.getLocalizedMessage());
         }
-
-        if (serverSocket != null) {
-            serverSocket.close();
-            serverSocket = null;
-        }
+        closeSocket();
 
         logger.info("Main thread finished");
-        return CommandLine.ExitCode.OK;
+        return result;
+    }
+
+    private void addShutdownHook() {
+        Runtime.getRuntime().addShutdownHook(new Thread() {
+            public void run() {
+                try {
+                    gracefulShutdown(null);
+                } catch (IOException e) {
+                    logger.info("Socket closed.");
+                    e.printStackTrace();
+                }
+            }
+        });
+    }
+
+    private void targetStarted(DBGUIExtCmdInfoStartedImpl command) {
+        DebugTargetId targetId = command.getTargetID();
+        try {
+            client.attachRuntimeDebugTargets(Arrays.asList(UUID.fromString(targetId.getId())));
+        } catch (RuntimeDebugClientException e) {
+            logger.info("Command: " + command.getCmdID().getName() + " error!");
+            logger.error(e.getLocalizedMessage());
+        }
+    }
+
+    private void mainLoop(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet) throws RuntimeDebugClientException {
+        while (!stopExecution.get()) {
+            List<? extends DBGUIExtCmdInfoBase> commandsList = client.ping();
+            if (commandsList.size() > 0) {
+                logger.info("Ping result commands size: " + commandsList.size());
+                commandsList.forEach(command -> {
+                    logger.info("Command: " + command.getCmdID().getName());
+                    if (command.getCmdID() == DBGUIExtCmds.MEASURE_RESULT_PROCESSING) {
+                        meashureResultProcessing(uriListByKey, externalDataProcessorsUriSet, (DBGUIExtCmdInfoMeasureImpl) command);
+                    } else if (command.getCmdID() == DBGUIExtCmds.TARGET_STARTED) {
+                        targetStarted((DBGUIExtCmdInfoStartedImpl) command);
+                    }
+                });
+            }
+        }
+    }
+
+    private void meashureResultProcessing(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet, DBGUIExtCmdInfoMeasureImpl command) {
+        logger.info("Found MEASURE_RESULT_PROCESSING command");
+        DBGUIExtCmdInfoMeasureImpl measureCommand = command;
+        PerformanceInfoMain measure = measureCommand.getMeasure();
+        EList<PerformanceInfoModule> moduleInfoList = measure.getModuleData();
+        moduleInfoList.forEach(moduleInfo -> {
+            BSLModuleIdInternal moduleId = moduleInfo.getModuleID();
+            String moduleUrl = moduleId.getURL();
+            if (loggingOptions.isVerbose() && !moduleUrl.isEmpty() && !externalDataProcessorsUriSet.contains(moduleUrl)) {
+                logger.info("Found external data processor: " + moduleUrl);
+                externalDataProcessorsUriSet.add(moduleUrl);
+            }
+            String moduleExtensionName = moduleId.getExtensionName();
+            if (filterOptions.getExtensionName().equals(moduleExtensionName)
+                    && filterOptions.getExternalDataProcessorUrl().equals(moduleUrl)) {
+                String objectId = moduleId.getObjectID();
+                String propertyId = moduleId.getPropertyID();
+                String key = Utils.getUriKey(objectId, propertyId);
+
+                URI uri;
+                if (!rawMode) {
+                    uri = uriListByKey.get(key);
+                } else {
+                    uri = URI.create("file:///" + key);
+                }
+                if (uri == null) {
+                    logger.info("Couldn't find object id " + objectId
+                            + ", property id " + propertyId + " in sources!");
+                } else {
+                    EList<PerformanceInfoLine> lineInfoList = moduleInfo.getLineInfo();
+                    lineInfoList.forEach(lineInfo -> {
+                        BigDecimal lineNo = lineInfo.getLineNo();
+                        Map<BigDecimal, Integer> coverMap = coverageData.get(uri);
+                        if (!coverMap.isEmpty() || rawMode) {
+                            if (!rawMode && !coverMap.containsKey(lineNo)) {
+                                if (loggingOptions.isVerbose()) {
+                                    logger.info("Can't find line to cover " + lineNo + " in module " + uri);
+                                    try {
+                                        Stream<String> all_lines = Files.lines(Paths.get(uri));
+                                        String specific_line_n = all_lines.skip(lineNo.longValue() - 1).findFirst().get();
+                                        logger.info(">>> " + specific_line_n);
+                                    } catch (Exception e) {
+                                        logger.error(e.getLocalizedMessage());
+                                    }
+                                }
+                            } else {
+                                coverMap.put(lineNo,
+                                        coverMap.getOrDefault(lineNo, 0)
+                                                + lineInfo.getFrequency().intValue());
+                            }
+                        }
+                    });
+                }
+            }
+        });
+    }
+
+    private void createCommandListner() {
+        commandListenServer = CompletableFuture.supplyAsync(() -> {
+            AtomicBoolean stopListen = new AtomicBoolean(false);
+            while (!stopListen.get()) {
+                try {
+                    Socket clientSocket = getServerSocket(true).accept();
+                    CompletableFuture.supplyAsync(() -> listenSocket(clientSocket)).thenAccept(aBoolean -> {
+                        if (aBoolean) {
+                            stopListen.set(false);
+                        }
+                    });
+                } catch (IOException e) {
+                    logger.info("Can't accept socket: " + e.getLocalizedMessage());
+                }
+            }
+            return true;
+        });
     }
 
 
+    private void startSystem(UUID measureUuid) throws RuntimeDebugClientException {
+        UUID debugServerUuid = UUID.randomUUID();
+        client.configure(
+                connectionOptions.getDebugServerUrl(),
+                debugServerUuid,
+                connectionOptions.getInfobaseAlias());
+        logger.info("Connecting to debugger");
+        AttachDebugUIResult connectionResult = client.connect(debuggerOptions.getPassword());
+        if (connectionResult != AttachDebugUIResult.REGISTERED) {
+            if (connectionResult == AttachDebugUIResult.IB_IN_DEBUG) {
+                throw new RuntimeDebugClientException("Can't connect to debug server. IB is in debug. Close configurator or EDT first");
+            } else if (connectionResult == AttachDebugUIResult.CREDENTIALS_REQUIRED) {
+                throw new RuntimeDebugClientException("Can't connect to debug server. Use -p option to set correct password");
+            } else {
+                throw new RuntimeDebugClientException("Can't connect to debug server. Connection result: " + connectionResult);
+            }
+        }
+        logger.info("Setup settings");
+        client.initSettings(false);
+        client.setAutoconnectDebugTargets(
+                debuggerOptions.getDebugAreaNames(),
+                debuggerOptions.getAutoconnectTargets());
 
-    private void gracefulShutdown(PrintWriter serverPipeOut) {
+        logger.info("Setup targets");
+        List<DebugTargetId> debugTargets;
+        if (debuggerOptions.getDebugAreaNames().isEmpty()) {
+            debugTargets = client.getRuntimeDebugTargets(null);
+        } else {
+            debugTargets = new LinkedList<DebugTargetId>();
+            debuggerOptions.getDebugAreaNames().forEach(areaName -> {
+                try {
+                    debugTargets.addAll(client.getRuntimeDebugTargets(areaName));
+                } catch (RuntimeDebugClientException ex) {
+                    logger.error(ex.getLocalizedMessage());
+                }
+            });
+        }
+        connectAllTargets(debugTargets);
+
+        logger.info("Profiling ON");
+        client.toggleProfiling(null);
+        client.toggleProfiling(measureUuid);
+
+        systemStarted = true;
+
+    }
+
+    private void gracefulShutdown(PrintWriter serverPipeOut) throws IOException {
         if (stopExecution.get()) {
             return;
         }
@@ -382,7 +388,7 @@ public class CoverageCommand implements Callable<Integer> {
 
         Utils.dumpCoverageFile(coverageData, metadataOptions, outputOptions);
 
-        if (serverSocket != null) {
+        if (getServerSocket(false) != null) {
             if (serverPipeOut != null) {
                 serverPipeOut.println(PipeMessages.OK_RESULT);
             }
@@ -393,4 +399,8 @@ public class CoverageCommand implements Callable<Integer> {
         logger.info("Bye!");
     }
 
+    @Override
+    public ConnectionOptions getConnectionOptions() {
+        return connectionOptions;
+    }
 }

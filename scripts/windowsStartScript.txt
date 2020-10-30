@@ -91,8 +91,9 @@ if "%EDT_LOCATION%" == "" (
 )
 
 set EDT_CLASSPATH=
-for /f "tokens=*" %%F in ('dir /b /a:-d "%EDT_LOCATION%\\com._1c.g5.v8.dt.debug.core_*"') do call set EDT_CLASSPATH=!EDT_CLASSPATH!;%EDT_LOCATION%\\%%F
-for /f "tokens=*" %%F in ('dir /b /a:-d "%EDT_LOCATION%\\com._1c.g5.v8.dt.debug.model_*"') do call set EDT_CLASSPATH=!EDT_CLASSPATH!;%EDT_LOCATION%\\%%F
+for /f "tokens=*" %%F in ('dir /b /a:-d "%EDT_LOCATION%\\com._1c.g5.v8.dt.debug.core_*.jar"') do call set EDT_CLASSPATH=!EDT_CLASSPATH!;%EDT_LOCATION%\\%%F
+for /f "tokens=*" %%F in ('dir /b /a:-d "%EDT_LOCATION%\\com._1c.g5.v8.dt.debug.model_*.jar"') do call set EDT_CLASSPATH=!EDT_CLASSPATH!;%EDT_LOCATION%\\%%F
+for /f "tokens=*" %%F in ('dir /b /a:-d "%EDT_LOCATION%\\com._1c.g5.v8.dt.debug.profiling_*.jar"') do call set EDT_CLASSPATH=!EDT_CLASSPATH!;%EDT_LOCATION%\\%%F
 
 set CLASSPATH=$classpath%EDT_CLASSPATH%
 

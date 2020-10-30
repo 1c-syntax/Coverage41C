@@ -44,6 +44,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -362,6 +364,44 @@ public class Utils {
         } catch (Exception e) {
             logger.error(e.getLocalizedMessage());
         }
+    }
+    public static String normalizeXml(String xmlString) {
+        String result = "";
+        if(!xmlString.startsWith("<")) {
+            return result;
+        }
+        Pattern p = Pattern.compile("<\\w\\S*");
+        Matcher m = p.matcher(xmlString);
+        String replaceFromTag = "";
+        if(m.find()){
+            replaceFromTag = xmlString.substring(m.start() + 1, m.end());
+        }
+        if(replaceFromTag.isEmpty()) {
+            return result;
+        }
+        result = xmlString;
+        String tag = "</" + replaceFromTag + ">";
+        int indx = xmlString.indexOf(tag);
+        if(indx!=-1) {
+            result = result.substring(0, indx + tag.length());
+        }
+
+        indx = result.indexOf("/>");
+        if(indx!=-1) {
+            String candidate = result.substring(0,indx+2);
+            m = p.matcher(candidate);
+            String candidateTag = "";
+            while(m.find()) {
+                candidateTag = result.substring(m.start() + 1, m.end());
+            }
+
+            if(replaceFromTag.equalsIgnoreCase(candidateTag)) {
+                result = candidate;
+            }
+
+        }
+
+        return result;
     }
 
     private static void dumpLcovFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
