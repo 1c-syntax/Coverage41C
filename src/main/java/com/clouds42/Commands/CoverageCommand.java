@@ -25,26 +25,22 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.lang.invoke.MethodHandles;
 import java.math.BigDecimal;
-import java.net.Socket;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.Callable;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 
 @Command(name = PipeMessages.START_COMMAND, mixinStandardHelpOptions = true,
         description = "Start measure and save coverage data to file",
         sortOptions = false)
-public class CoverageCommand extends BaseCommand implements Callable<Integer> {
+public class CoverageCommand extends CoverServer implements Callable<Integer> {
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -71,72 +67,22 @@ public class CoverageCommand extends BaseCommand implements Callable<Integer> {
 
     private RuntimeDebugHttpClient client;
 
-    private Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<URI, Map<BigDecimal, Integer>>() {
+    private Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<>() {
         @Override
         public Map<BigDecimal, Integer> get(Object key) {
             Map<BigDecimal, Integer> map = super.get(key);
             if (map == null) {
-                map = new HashMap<BigDecimal, Integer>();
+                map = new HashMap<>();
                 put((URI) key, map);
             }
             return map;
         }
     };
 
-    private CompletableFuture<Boolean> commandListenServer;
 
     private AtomicBoolean stopExecution = new AtomicBoolean(false);
     private boolean rawMode = false;
     private boolean systemStarted = false;
-
-    private Boolean listenSocket(Socket clientSocket) {
-        try {
-            PrintWriter out =
-                    new PrintWriter(clientSocket.getOutputStream(), true);
-            BufferedReader in = new BufferedReader(
-                    new InputStreamReader(clientSocket.getInputStream()));
-            String line;
-            do {
-                line = in.readLine();
-                if (line != null) {
-                    line = line.trim().toLowerCase();
-                    logger.info("Get command: " + line);
-                    if (PipeMessages.DUMP_COMMAND.equals(line)) {
-                        Utils.dumpCoverageFile(coverageData, metadataOptions, outputOptions);
-                        out.println(PipeMessages.OK_RESULT);
-                        return true;
-                    } else if (PipeMessages.STATS_COMMAND.equals(line)) {
-                        Utils.printCoverageStats(coverageData, metadataOptions);
-                        out.println(PipeMessages.OK_RESULT);
-                        return true;
-                    } else if (PipeMessages.CLEAN_COMMAND.equals(line)) {
-                        coverageData.forEach((uri, bigDecimalIntegerMap) -> {
-                            for (var key : bigDecimalIntegerMap.keySet()) {
-                                bigDecimalIntegerMap.put(key, 0);
-                            }
-                        });
-                        out.println(PipeMessages.OK_RESULT);
-                        return true;
-                    } else if (PipeMessages.CHECK_COMMAND.equals(line)) {
-                        for (int i = 0; i < 60; i++) {
-                            if (systemStarted) {
-                                out.println(PipeMessages.OK_RESULT);
-                                return true;
-                            }
-                            Thread.sleep(1000);
-                        }
-                        out.println(PipeMessages.FAIL_RESULT);
-                        return true;
-                    }
-                }
-            } while (line == null || !line.equals(PipeMessages.EXIT_COMMAND));
-            gracefulShutdown(out);
-            return false;
-        } catch (IOException | InterruptedException e) {
-            logger.error(e.getLocalizedMessage());
-        }
-        return true;
-    }
 
     private void connectAllTargets(List<DebugTargetId> debugTargets) {
         logger.info("Current debug targets size: " + debugTargets.size());
@@ -146,7 +92,7 @@ public class CoverageCommand extends BaseCommand implements Callable<Integer> {
             String targetType = debugTarget.getTargetType().getName();
             logger.info("Id: " + id + ", seance id: " + seanceId + ", target type: " + targetType);
             try {
-                client.attachRuntimeDebugTargets(Arrays.asList(UUID.fromString(debugTarget.getId())));
+                client.attachRuntimeDebugTargets(Collections.singletonList(UUID.fromString(debugTarget.getId())));
             } catch (RuntimeDebugClientException e) {
                 logger.error(e.getLocalizedMessage());
             }
@@ -156,9 +102,9 @@ public class CoverageCommand extends BaseCommand implements Callable<Integer> {
     @Override
     public Integer call() throws Exception {
 
-        Integer result = CommandLine.ExitCode.OK;
+        int result = CommandLine.ExitCode.OK;
+        getServerSocket();
 
-        createCommandListner();
 
         RuntimeDebugModelXmlSerializer serializer = new MyRuntimeDebugModelXmlSerializer();
         client = new RuntimeDebugHttpClient(serializer);
@@ -180,7 +126,7 @@ public class CoverageCommand extends BaseCommand implements Callable<Integer> {
 
         addShutdownHook();
 
-        Set<String> externalDataProcessorsUriSet = new HashSet<String>();
+        Set<String> externalDataProcessorsUriSet = new HashSet<>();
 
         try {
             mainLoop(uriListByKey, externalDataProcessorsUriSet);
@@ -192,10 +138,17 @@ public class CoverageCommand extends BaseCommand implements Callable<Integer> {
             result = CommandLine.ExitCode.SOFTWARE;
         }
         Thread.sleep(debuggerOptions.getPingTimeout());
+
+        shutdown();
+        return result;
+    }
+
+    private void shutdown() throws IOException {
         if (opid > 0 && !Utils.isProcessStillAlive(opid)) {
             logger.info("Owner process stopped: " + opid);
-            gracefulShutdown(null);
         }
+
+        gracefulShutdown(null);
 
         logger.info("Disconnecting from dbgs...");
         try {
@@ -207,26 +160,24 @@ public class CoverageCommand extends BaseCommand implements Callable<Integer> {
         closeSocket();
 
         logger.info("Main thread finished");
-        return result;
+        stopExecution.set(true);
     }
 
     private void addShutdownHook() {
-        Runtime.getRuntime().addShutdownHook(new Thread() {
-            public void run() {
-                try {
-                    gracefulShutdown(null);
-                } catch (IOException e) {
-                    logger.info("Socket closed.");
-                    e.printStackTrace();
-                }
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            try {
+                shutdown();
+            } catch (IOException e) {
+                logger.info("Shutdown error.");
+                e.printStackTrace();
             }
-        });
+        }));
     }
 
     private void targetStarted(DBGUIExtCmdInfoStartedImpl command) {
         DebugTargetId targetId = command.getTargetID();
         try {
-            client.attachRuntimeDebugTargets(Arrays.asList(UUID.fromString(targetId.getId())));
+            client.attachRuntimeDebugTargets(Collections.singletonList(UUID.fromString(targetId.getId())));
         } catch (RuntimeDebugClientException e) {
             logger.info("Command: " + command.getCmdID().getName() + " error!");
             logger.error(e.getLocalizedMessage());
@@ -236,24 +187,21 @@ public class CoverageCommand extends BaseCommand implements Callable<Integer> {
     private void mainLoop(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet) throws RuntimeDebugClientException {
         while (!stopExecution.get()) {
             List<? extends DBGUIExtCmdInfoBase> commandsList = client.ping();
-            if (commandsList.size() > 0) {
-                logger.info("Ping result commands size: " + commandsList.size());
-                commandsList.forEach(command -> {
-                    logger.info("Command: " + command.getCmdID().getName());
-                    if (command.getCmdID() == DBGUIExtCmds.MEASURE_RESULT_PROCESSING) {
-                        meashureResultProcessing(uriListByKey, externalDataProcessorsUriSet, (DBGUIExtCmdInfoMeasureImpl) command);
-                    } else if (command.getCmdID() == DBGUIExtCmds.TARGET_STARTED) {
-                        targetStarted((DBGUIExtCmdInfoStartedImpl) command);
-                    }
-                });
-            }
+            logger.info("Ping result commands size: " + commandsList.size());
+            commandsList.forEach(command -> {
+                logger.info("Command: " + command.getCmdID().getName());
+                if (command.getCmdID() == DBGUIExtCmds.MEASURE_RESULT_PROCESSING) {
+                    measureResultProcessing(uriListByKey, externalDataProcessorsUriSet, (DBGUIExtCmdInfoMeasureImpl) command);
+                } else if (command.getCmdID() == DBGUIExtCmds.TARGET_STARTED) {
+                    targetStarted((DBGUIExtCmdInfoStartedImpl) command);
+                }
+            });
         }
     }
 
-    private void meashureResultProcessing(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet, DBGUIExtCmdInfoMeasureImpl command) {
+    private void measureResultProcessing(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet, DBGUIExtCmdInfoMeasureImpl command) {
         logger.info("Found MEASURE_RESULT_PROCESSING command");
-        DBGUIExtCmdInfoMeasureImpl measureCommand = command;
-        PerformanceInfoMain measure = measureCommand.getMeasure();
+        PerformanceInfoMain measure = command.getMeasure();
         EList<PerformanceInfoModule> moduleInfoList = measure.getModuleData();
         moduleInfoList.forEach(moduleInfo -> {
             BSLModuleIdInternal moduleId = moduleInfo.getModuleID();
@@ -307,33 +255,13 @@ public class CoverageCommand extends BaseCommand implements Callable<Integer> {
         });
     }
 
-    private void createCommandListner() {
-        commandListenServer = CompletableFuture.supplyAsync(() -> {
-            AtomicBoolean stopListen = new AtomicBoolean(false);
-            while (!stopListen.get()) {
-                try {
-                    Socket clientSocket = getServerSocket(true).accept();
-                    CompletableFuture.supplyAsync(() -> listenSocket(clientSocket)).thenAccept(aBoolean -> {
-                        if (aBoolean) {
-                            stopListen.set(false);
-                        }
-                    });
-                } catch (IOException e) {
-                    logger.info("Can't accept socket: " + e.getLocalizedMessage());
-                }
-            }
-            return true;
-        });
-    }
-
-
     private void startSystem(UUID measureUuid) throws RuntimeDebugClientException {
         UUID debugServerUuid = UUID.randomUUID();
         client.configure(
                 connectionOptions.getDebugServerUrl(),
                 debugServerUuid,
                 connectionOptions.getInfobaseAlias());
-        logger.info("Connecting to debugger");
+        logger.info("Connecting to debugger...");
         AttachDebugUIResult connectionResult = client.connect(debuggerOptions.getPassword());
         if (connectionResult != AttachDebugUIResult.REGISTERED) {
             if (connectionResult == AttachDebugUIResult.IB_IN_DEBUG) {
@@ -344,18 +272,18 @@ public class CoverageCommand extends BaseCommand implements Callable<Integer> {
                 throw new RuntimeDebugClientException("Can't connect to debug server. Connection result: " + connectionResult);
             }
         }
-        logger.info("Setup settings");
+        logger.info("Setup settings...");
         client.initSettings(false);
         client.setAutoconnectDebugTargets(
                 debuggerOptions.getDebugAreaNames(),
                 debuggerOptions.getAutoconnectTargets());
 
-        logger.info("Setup targets");
+        logger.info("Setup targets...");
         List<DebugTargetId> debugTargets;
         if (debuggerOptions.getDebugAreaNames().isEmpty()) {
             debugTargets = client.getRuntimeDebugTargets(null);
         } else {
-            debugTargets = new LinkedList<DebugTargetId>();
+            debugTargets = new LinkedList<>();
             debuggerOptions.getDebugAreaNames().forEach(areaName -> {
                 try {
                     debugTargets.addAll(client.getRuntimeDebugTargets(areaName));
@@ -366,7 +294,7 @@ public class CoverageCommand extends BaseCommand implements Callable<Integer> {
         }
         connectAllTargets(debugTargets);
 
-        logger.info("Profiling ON");
+        logger.info("Enabling profiling...");
         client.toggleProfiling(null);
         client.toggleProfiling(measureUuid);
 
@@ -374,7 +302,7 @@ public class CoverageCommand extends BaseCommand implements Callable<Integer> {
 
     }
 
-    private void gracefulShutdown(PrintWriter serverPipeOut) throws IOException {
+    protected void gracefulShutdown(PrintWriter serverPipeOut) throws IOException {
         if (stopExecution.get()) {
             return;
         }
@@ -387,20 +315,34 @@ public class CoverageCommand extends BaseCommand implements Callable<Integer> {
         }
 
         Utils.dumpCoverageFile(coverageData, metadataOptions, outputOptions);
-
-        if (getServerSocket(false) != null) {
-            if (serverPipeOut != null) {
-                serverPipeOut.println(PipeMessages.OK_RESULT);
-            }
-        }
-
+        serverPipeOut.println(PipeMessages.OK_RESULT);
         stopExecution.set(true);
 
         logger.info("Bye!");
     }
 
     @Override
+    protected MetadataOptions getMetadataOptions() {
+        return metadataOptions;
+    }
+
+    @Override
+    protected Map<URI, Map<BigDecimal, Integer>> getCoverageData() {
+        return coverageData;
+    }
+
+    @Override
+    protected OutputOptions getOutputOptions() {
+        return outputOptions;
+    }
+
+    @Override
     public ConnectionOptions getConnectionOptions() {
         return connectionOptions;
+    }
+
+    @Override
+    protected boolean getSystemStarted() {
+        return systemStarted;
     }
 }
