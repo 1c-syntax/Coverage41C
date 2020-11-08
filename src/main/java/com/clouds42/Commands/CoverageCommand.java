@@ -11,9 +11,9 @@ import com._1c.g5.v8.dt.debug.model.dbgui.commands.impl.DBGUIExtCmdInfoStartedIm
 import com._1c.g5.v8.dt.debug.model.measure.PerformanceInfoLine;
 import com._1c.g5.v8.dt.debug.model.measure.PerformanceInfoMain;
 import com._1c.g5.v8.dt.debug.model.measure.PerformanceInfoModule;
-import com._1c.g5.v8.dt.internal.debug.core.runtime.client.RuntimeDebugHttpClient;
 import com._1c.g5.v8.dt.internal.debug.core.runtime.client.RuntimeDebugModelXmlSerializer;
 import com.clouds42.CommandLineOptions.*;
+import com.clouds42.DebugClient;
 import com.clouds42.MyRuntimeDebugModelXmlSerializer;
 import com.clouds42.PipeMessages;
 import com.clouds42.Utils;
@@ -65,9 +65,9 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     @Option(names = {"--opid"}, description = "Owner process PID", defaultValue = "-1")
     Integer opid;
 
-    private RuntimeDebugHttpClient client;
+    private DebugClient client;
 
-    private Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<>() {
+    private final Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<>() {
         @Override
         public Map<BigDecimal, Integer> get(Object key) {
             Map<BigDecimal, Integer> map = super.get(key);
@@ -80,7 +80,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     };
 
 
-    private AtomicBoolean stopExecution = new AtomicBoolean(false);
+    private final AtomicBoolean stopExecution = new AtomicBoolean(false);
     private boolean rawMode = false;
     private boolean systemStarted = false;
 
@@ -107,7 +107,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
 
 
         RuntimeDebugModelXmlSerializer serializer = new MyRuntimeDebugModelXmlSerializer();
-        client = new RuntimeDebugHttpClient(serializer);
+        client = new DebugClient(serializer);
 
         UUID measureUuid = UUID.randomUUID();
 
@@ -132,9 +132,8 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
             mainLoop(uriListByKey, externalDataProcessorsUriSet);
         } catch (RuntimeDebugClientException e) {
             logger.error("Can't send ping to debug server. Coverage analyzing finished");
-            if(logger.isDebugEnabled()) {
-                logger.error(e.getLocalizedMessage());
-            }
+            logger.error(e.getLocalizedMessage());
+            e.printStackTrace();
             result = CommandLine.ExitCode.SOFTWARE;
         }
         Thread.sleep(debuggerOptions.getPingTimeout());
@@ -237,8 +236,11 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                                     logger.info("Can't find line to cover " + lineNo + " in module " + uri);
                                     try {
                                         Stream<String> all_lines = Files.lines(Paths.get(uri));
-                                        String specific_line_n = all_lines.skip(lineNo.longValue() - 1).findFirst().get();
-                                        logger.info(">>> " + specific_line_n);
+                                        Optional<String> first = all_lines.skip(lineNo.longValue() - 1).findFirst();
+                                        if (first.isPresent()) {
+                                            String specific_line_n = first.get();
+                                            logger.info(">>> " + specific_line_n);
+                                        }
                                     } catch (Exception e) {
                                         logger.error(e.getLocalizedMessage());
                                     }
@@ -302,7 +304,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
 
     }
 
-    protected void gracefulShutdown(PrintWriter serverPipeOut) throws IOException {
+    protected void gracefulShutdown(PrintWriter serverPipeOut) {
         if (stopExecution.get()) {
             return;
         }
@@ -315,7 +317,9 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         }
 
         Utils.dumpCoverageFile(coverageData, metadataOptions, outputOptions);
-        serverPipeOut.println(PipeMessages.OK_RESULT);
+        if(serverPipeOut!=null) {
+            serverPipeOut.println(PipeMessages.OK_RESULT);
+        }
         stopExecution.set(true);
 
         logger.info("Bye!");

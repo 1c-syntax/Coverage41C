@@ -1,0 +1,185 @@
+package com.clouds42;
+
+import com._1c.g5.v8.dt.debug.core.runtime.client.RuntimeDebugClientException;
+import com._1c.g5.v8.dt.debug.model.virtual.Exception;
+import com._1c.g5.v8.dt.internal.debug.core.model.RuntimePresentationConverter;
+import com._1c.g5.v8.dt.internal.debug.core.runtime.client.RuntimeDebugModelXmlSerializer;
+import org.eclipse.emf.ecore.EObject;
+import org.eclipse.jetty.client.HttpClient;
+import org.eclipse.jetty.client.api.ContentResponse;
+import org.eclipse.jetty.client.api.Request;
+import org.eclipse.jetty.client.util.FutureResponseListener;
+import org.eclipse.jetty.client.util.StringContentProvider;
+import org.eclipse.jetty.http.*;
+import org.eclipse.jetty.util.ssl.SslContextFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.lang.invoke.MethodHandles;
+import java.lang.reflect.Field;
+import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URL;
+import java.nio.charset.Charset;
+import java.util.concurrent.ExecutionException;
+import java.util.zip.Inflater;
+import java.util.zip.InflaterInputStream;
+
+public abstract class AbstractDebugClient {
+    private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+    protected RuntimeDebugModelXmlSerializer serializer;
+
+    public AbstractDebugClient(RuntimeDebugModelXmlSerializer serializer) {
+        this.serializer = serializer;
+    }
+
+    protected HttpClient createHttpClient() {
+        return this.createHttpClient(60000L);
+    }
+
+    protected HttpClient createHttpClient(long idleTimeout) {
+        SslContextFactory.Client sslContextFactory = new SslContextFactory.Client();
+        sslContextFactory.setTrustAll(true);
+        HttpClient httpClient = new HttpClient(sslContextFactory);
+        HttpField agent = new HttpField("User-Agent", "1CV8");
+        httpClient.setFollowRedirects(true);
+        httpClient.setUserAgentField(agent);
+        httpClient.setIdleTimeout(idleTimeout);
+        return httpClient;
+    }
+
+    protected Request buildRequest(HttpClient httpClient, HttpMethod method, String componentUrl) {
+        return httpClient.newRequest(this.toUri(componentUrl)).method(method).header(HttpHeader.ACCEPT, "application/xml").header(HttpHeader.CONNECTION, HttpHeader.KEEP_ALIVE.asString()).header(HttpHeader.CONTENT_TYPE, "application/xml").header("1C-ApplicationName", "1C:Enterprise DT");
+    }
+
+    protected String getComponentUrl(String debugServerUrl, String suffix) {
+        StringBuilder componentUrl = new StringBuilder();
+        componentUrl.append(debugServerUrl);
+        if (debugServerUrl.charAt(debugServerUrl.length() - 1) != '/') {
+            componentUrl.append('/');
+        }
+
+        return componentUrl.append(suffix).toString();
+    }
+
+    protected <T extends EObject> T performRuntimeHttpRequest(Request request, Class<T> responseClass) throws RuntimeDebugClientException {
+        return this.performRuntimeHttpRequest(request, null, responseClass);
+    }
+
+    protected void performRuntimeHttpRequest(Request request, EObject requestContent) throws RuntimeDebugClientException {
+        this.performRuntimeHttpRequest(request, requestContent, null);
+    }
+
+    protected <T extends EObject> T performRuntimeHttpRequest(Request request, EObject requestContent, Class<T> responseClass) throws RuntimeDebugClientException {
+        try {
+            if (requestContent != null) {
+                try {
+                    String serializedRequest = this.serializer.serialize(requestContent);
+                    request.content(new StringContentProvider(serializedRequest));
+                } catch (IOException var11) {
+                    throw new RuntimeDebugClientException("Error occurred while processing request");
+                }
+            }
+
+            FutureResponseListener listener = new FutureResponseListener(request, 2147483647);
+            request.send(listener);
+            ContentResponse response = listener.get();
+            int status = response.getStatus();
+            if (HttpStatus.isSuccess(status)) {
+                if (responseClass != null && status != 204) {
+                    String type = response.getMediaType();
+                    if(!type.equalsIgnoreCase("application/xml")) {
+                        return null;
+                    }
+                    HttpFields headers = response.getHeaders();
+                    String charset = response.getEncoding();
+                    HttpField contentEncoding = headers.getField(HttpHeader.CONTENT_ENCODING);
+                    byte[] origContent = response.getContent();
+                    HttpField len = headers.getField(HttpHeader.CONTENT_LENGTH);
+                    int lenValue = len.getIntValue();
+                    if(contentEncoding!=null && "deflate".equalsIgnoreCase(contentEncoding.getValue())) {
+                        try(InputStream bis = new ByteArrayInputStream(origContent)) {
+                            try (InputStream in = new InflaterInputStream(bis, new Inflater(true))) {
+                                origContent = in.readAllBytes();
+                                lenValue = origContent.length;
+                            }
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                    int offset = 0;
+                    if(origContent[0] == (byte)-17
+                            && origContent[1] == (byte)-69
+                            && origContent[2] == (byte)-65) {
+                        offset = 3;
+                    }
+                    for (int i = offset; i<lenValue; i++ ) {
+                        if(origContent[i] == 0) {
+                            lenValue = i;
+                            break;
+                        }
+                    }
+                    byte[] content = new byte[lenValue - offset];
+                    System.arraycopy(origContent, offset, content,0, content.length);
+                    String contentString = new String(content, Charset.forName(charset))
+                            .replaceFirst("^([\\W]+)<","<");
+                    contentString = Utils.normalizeXml(contentString);
+                    try {
+                        return this.serializer.deserialize(contentString, responseClass);
+                    } catch (IOException e) {
+                        logger.error("Get stuff from server.");
+                        logger.info("Encoding: " + charset);
+                        logger.info("Content: " + contentString.substring(0,50));
+                        StringBuilder sb = new StringBuilder();
+                        sb.append("Headers:\n");
+                        for(HttpField f : headers) {
+                            sb.append(f.getName()).append(":").append(f.getValue()).append("\n");
+                        }
+                        logger.info(sb.toString());
+                        e.printStackTrace();
+                        throw new RuntimeDebugClientException(
+                                "Error occurred while processing response");
+                    }
+                } else {
+                    return null;
+                }
+            } else if (response.getContent() != null) {
+                String errorMessage = RuntimePresentationConverter.presentation(response.getContent());
+
+                try {
+                    Exception exception = this.serializer.deserialize(errorMessage, Exception.class, "exception", "Exception");
+                    throw new RuntimeDebugClientException("Unsuccessful response from 1C:Enterprise" + exception.getDescr());
+                } catch (IOException var10) {
+                    throw new RuntimeDebugClientException("Error occurred while processing response");
+                }
+            } else {
+                throw new RuntimeDebugClientException("Unsuccessful response from 1C:Enterprise status: " + response.getStatus() + " " + response.getReason());
+            }
+        } catch (ExecutionException | InterruptedException e) {
+            throw new RuntimeDebugClientException(e);
+        }
+    }
+
+    private URI toUri(String uriString) {
+        URI uri = URI.create(uriString);
+        if (uri.getHost() != null) {
+            return uri;
+        } else {
+            try {
+                URL url = new URL(uriString);
+                Field hostField = URI.class.getDeclaredField("host");
+                hostField.setAccessible(true);
+                hostField.set(uri, url.getHost());
+                Field portField = URI.class.getDeclaredField("port");
+                portField.setAccessible(true);
+                portField.set(uri, url.getPort());
+                return uri;
+            } catch (IllegalArgumentException | IllegalAccessException | NoSuchFieldException | SecurityException | MalformedURLException var6) {
+                throw new IllegalArgumentException(var6);
+            }
+        }
+    }
+}
