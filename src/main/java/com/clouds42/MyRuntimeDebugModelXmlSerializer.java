@@ -97,9 +97,6 @@ public class MyRuntimeDebugModelXmlSerializer extends RuntimeDebugModelXmlSerial
 
     private String replaceRootElement(String xmlString, String replaceFromTag, String replaceToTag) {
 
-        xmlString = Utils.normalizeXml(xmlString);
-        if (xmlString == null) return "";
-
         xmlString = xmlString.replaceFirst("<" + replaceFromTag, "<" + replaceToTag);
         if (!xmlString.endsWith("/>")) {
             StringBuilder builder = new StringBuilder(xmlString);
