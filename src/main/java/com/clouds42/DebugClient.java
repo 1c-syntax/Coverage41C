@@ -88,14 +88,16 @@ public class DebugClient extends AbstractDebugClient{
         RDBGAttachDebugUIRequest requestContent = ResponseFactory.eINSTANCE.createRDBGAttachDebugUIRequest();
         requestContent.setCredentials(RuntimePresentationConverter.fromPresentation(password));
         Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "attachDebugUI");
-        RDBGAttachDebugUIResponse responseContent = this.performRuntimeHttpRequest(request, this.initRequest(requestContent), RDBGAttachDebugUIResponse.class);
+        RDBGAttachDebugUIResponse responseContent = AbstractDebugClient.performRuntimeHttpRequest(this, request, this.initRequest(requestContent), RDBGAttachDebugUIResponse.class);
+        assert responseContent != null;
         return responseContent.getResult();
     }
 
     public boolean disconnect() throws RuntimeDebugClientException {
         RDBGDetachDebugUIRequest requestContent = ResponseFactory.eINSTANCE.createRDBGDetachDebugUIRequest();
         Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "detachDebugUI");
-        RDBGDetachDebugUIResponse responseContent = this.performRuntimeHttpRequest(request, this.initRequest(requestContent), RDBGDetachDebugUIResponse.class);
+        RDBGDetachDebugUIResponse responseContent = AbstractDebugClient.performRuntimeHttpRequest(this, request, this.initRequest(requestContent), RDBGDetachDebugUIResponse.class);
+        assert responseContent != null;
         return responseContent.isResult();
     }
 
@@ -126,7 +128,8 @@ public class DebugClient extends AbstractDebugClient{
         RDBGGetDbgTargetStateRequest requestContent = ResponseFactory.eINSTANCE.createRDBGGetDbgTargetStateRequest();
         requestContent.setId(this.buildDebugTargetIdLight(debugTarget));
         Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "getDbgTargetState");
-        RDBGGetDbgTargetStateResponse responseContent = this.performRuntimeHttpRequest(request, this.initRequest(requestContent), RDBGGetDbgTargetStateResponse.class);
+        RDBGGetDbgTargetStateResponse responseContent = AbstractDebugClient.performRuntimeHttpRequest(this, request, this.initRequest(requestContent), RDBGGetDbgTargetStateResponse.class);
+        assert responseContent != null;
         return responseContent.getState();
     }
 
@@ -217,7 +220,8 @@ public class DebugClient extends AbstractDebugClient{
         }
 
         Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "getDbgTargets");
-        RDBGSGetDbgTargetsResponse responseContent = this.performRuntimeHttpRequest(request, this.initRequest(requestContent), RDBGSGetDbgTargetsResponse.class);
+        RDBGSGetDbgTargetsResponse responseContent = AbstractDebugClient.performRuntimeHttpRequest(this, request, this.initRequest(requestContent), RDBGSGetDbgTargetsResponse.class);
+        assert responseContent != null;
         return responseContent.getId();
     }
 
@@ -225,7 +229,7 @@ public class DebugClient extends AbstractDebugClient{
         RDBGGetCallStackRequest requestContent = ResponseFactory.eINSTANCE.createRDBGGetCallStackRequest();
         requestContent.setId(this.buildDebugTargetIdLight(debugTarget));
         Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "getCallStack");
-        RDBGGetCallStackResponse responseContent = this.performRuntimeHttpRequest(request, this.initRequest(requestContent), RDBGGetCallStackResponse.class);
+        RDBGGetCallStackResponse responseContent = AbstractDebugClient.performRuntimeHttpRequest(this, request, this.initRequest(requestContent), RDBGGetCallStackResponse.class);
         return responseContent == null ? Collections.emptyList() : Lists.reverse(responseContent.getCallStack());
     }
 
@@ -240,7 +244,7 @@ public class DebugClient extends AbstractDebugClient{
         requestContent.setTargetID(this.buildDebugTargetIdLight(debugTarget));
         requestContent.getExpr().addAll(requests.stream().map(this::buildCalculationSourceDataStorage).collect(Collectors.toList()));
         Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "evalExpr");
-        RDBGEvalExprResponse responseContent = this.performRuntimeHttpRequest(request, this.initRequest(requestContent), RDBGEvalExprResponse.class);
+        RDBGEvalExprResponse responseContent = AbstractDebugClient.performRuntimeHttpRequest(this, request, this.initRequest(requestContent), RDBGEvalExprResponse.class);
         return responseContent != null && !responseContent.getResult().isEmpty() ? responseContent.getResult() : null;
     }
 
@@ -256,7 +260,8 @@ public class DebugClient extends AbstractDebugClient{
         toEvaluate.setSrcCalcInfo(expressionInfo);
         requestContent.getExpr().add(toEvaluate);
         Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "evalLocalVariables");
-        RDBGEvalLocalVariablesResponse responseContent = this.performRuntimeHttpRequest(request, this.initRequest(requestContent), RDBGEvalLocalVariablesResponse.class);
+        RDBGEvalLocalVariablesResponse responseContent = AbstractDebugClient.performRuntimeHttpRequest(this, request, this.initRequest(requestContent), RDBGEvalLocalVariablesResponse.class);
+        assert responseContent != null;
         return responseContent.getResult();
     }
 
@@ -267,7 +272,7 @@ public class DebugClient extends AbstractDebugClient{
         newValue.setVariant(NewValueVariant.VAL);
         requestContent.setNewValueInfo(newValue);
         Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "modifyValue");
-        return this.performRuntimeHttpRequest(request, this.initRequest(requestContent), RDBGModifyValueResponse.class);
+        return AbstractDebugClient.performRuntimeHttpRequest(this, request, this.initRequest(requestContent), RDBGModifyValueResponse.class);
     }
 
     public RDBGModifyValueResponse modifyExpression(BslValuePath expressionPath, String expression, DebugTargetId debugTarget, int stackLevel, int maxSize, boolean isMultiLine, int waitTime, UUID expressionUuid, UUID evaluationUuid) throws RuntimeDebugClientException {
@@ -277,7 +282,7 @@ public class DebugClient extends AbstractDebugClient{
         newValue.setVariant(NewValueVariant.EXPR);
         requestContent.setNewValueInfo(newValue);
         Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "modifyValue");
-        return this.performRuntimeHttpRequest(request, this.initRequest(requestContent), RDBGModifyValueResponse.class);
+        return AbstractDebugClient.performRuntimeHttpRequest(this, request, this.initRequest(requestContent), RDBGModifyValueResponse.class);
     }
 
     public void setDebugAreas(List<DebugAreaInfo> areas) throws RuntimeDebugClientException {
@@ -290,7 +295,7 @@ public class DebugClient extends AbstractDebugClient{
     public List<DebugAreaInfo> getDebugAreas() throws RuntimeDebugClientException {
         RDBGGetListOfDebugAreaRequest requestContent = ResponseFactory.eINSTANCE.createRDBGGetListOfDebugAreaRequest();
         Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "getListOfDebugArea");
-        RDBGGetListOfDebugAreaResponse responseContent = this.performRuntimeHttpRequest(request, this.initRequest(requestContent), RDBGGetListOfDebugAreaResponse.class);
+        RDBGGetListOfDebugAreaResponse responseContent = AbstractDebugClient.performRuntimeHttpRequest(this, request, this.initRequest(requestContent), RDBGGetListOfDebugAreaResponse.class);
         return (responseContent != null && responseContent.getDebugAreaInfo() != null ? responseContent.getDebugAreaInfo() : Lists.newArrayList());
     }
 
@@ -316,13 +321,15 @@ public class DebugClient extends AbstractDebugClient{
 
     public boolean notifyInfobaseUpdateStart() throws RuntimeDebugClientException {
         Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "startUpdateIB");
-        RDBGStartUpdateIBResponse responseContent = this.performRuntimeHttpRequest(request, this.initRequest(ResponseFactory.eINSTANCE.createRDBGStartUpdateIBRequest()), RDBGStartUpdateIBResponse.class);
+        RDBGStartUpdateIBResponse responseContent = AbstractDebugClient.performRuntimeHttpRequest(this, request, this.initRequest(ResponseFactory.eINSTANCE.createRDBGStartUpdateIBRequest()), RDBGStartUpdateIBResponse.class);
+        assert responseContent != null;
         return responseContent.isResult();
     }
 
     public boolean notifyInfobaseUpdateFinish() throws RuntimeDebugClientException {
         Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "finishUpdateIB");
-        RDBGFinishUpdateIBResponse responseContent = this.performRuntimeHttpRequest(request, this.initRequest(ResponseFactory.eINSTANCE.createRDBGStartUpdateIBRequest()), RDBGFinishUpdateIBResponse.class);
+        RDBGFinishUpdateIBResponse responseContent = AbstractDebugClient.performRuntimeHttpRequest(this, request, this.initRequest(ResponseFactory.eINSTANCE.createRDBGStartUpdateIBRequest()), RDBGFinishUpdateIBResponse.class);
+        assert responseContent != null;
         return responseContent.isResult();
     }
 
@@ -348,7 +355,8 @@ public class DebugClient extends AbstractDebugClient{
         requestContent.setAction(actionType);
         requestContent.setTargetID(this.buildDebugTargetIdLight(debugTarget));
         Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "step");
-        RDBGStepResponse responseContent = this.performRuntimeHttpRequest(request, this.initRequest(requestContent), RDBGStepResponse.class);
+        RDBGStepResponse responseContent = AbstractDebugClient.performRuntimeHttpRequest(this, request, this.initRequest(requestContent), RDBGStepResponse.class);
+        assert responseContent != null;
         return responseContent.getItem();
     }
 

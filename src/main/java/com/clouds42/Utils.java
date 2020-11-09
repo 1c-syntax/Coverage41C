@@ -360,6 +360,7 @@ public class Utils {
             logger.error(e.getLocalizedMessage());
         }
     }
+
     public static String normalizeXml(String xmlString) {
         String result = "";
         if(!xmlString.startsWith("<")) {
