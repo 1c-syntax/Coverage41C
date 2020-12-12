@@ -32,7 +32,7 @@ public class SendMessageCommand implements Callable<Integer> {
     @Override
     public Integer call() throws Exception {
 
-        boolean isWindows = System.getProperty ("os.name").toLowerCase().contains("win");
+        boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
 
         String pipeName = Utils.getPipeName(connectionOptions);
 
@@ -49,20 +49,23 @@ public class SendMessageCommand implements Callable<Integer> {
         pipeOut.println(commandText);
         logger.info("Command send finished: " + commandText);
         String result = "";
-        for(int i = 0; i < 10; i++) {
+        for (int i = 0; i < 10; i++) {
+            logger.info("Try: " + i);
             try {
                 result = pipeIn.readLine();
                 break;
-            } catch(IOException e) {
+            } catch (IOException e) {
                 logger.info("Can't read answer from main app...");
-                Thread.sleep(1000);
+                Thread.sleep(10);
             }
         }
         if (result.equals(PipeMessages.OK_RESULT)) {
             logger.info("Command success: " + commandText);
+            client.close();
             return CommandLine.ExitCode.OK;
         } else {
             logger.info("Command failed: " + commandText);
+            client.close();
             return CommandLine.ExitCode.SOFTWARE;
         }
     }

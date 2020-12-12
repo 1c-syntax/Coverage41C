@@ -25,3 +25,4 @@ gradle-app.setting
 /choco/*.nupkg
 .scannerwork
 .metadata
+/src/test/java/com/clouds42/CoverageMyTest.java

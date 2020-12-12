@@ -39,11 +39,13 @@ import java.io.*;
 import java.lang.invoke.MethodHandles;
 import java.math.BigDecimal;
 import java.net.URI;
-import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -83,9 +85,8 @@ public class Utils {
         } else if (moduleType == ModuleType.ApplicationModule
                 || moduleType == ModuleType.Unknown)
         {
-
+            logger.info("Couldn't find UUID for module type: " + moduleType + " for object " + mdObject.getName());
         }
-        logger.info("Couldn't find UUID for module type: " + moduleType + " for object " + mdObject.getName());
         return "UNKNOWN";
     }
 
@@ -125,7 +126,7 @@ public class Utils {
     }
 
     private static void addCoverageData(Map<URI, Map<BigDecimal, Integer>> coverageData, URI uri) {
-        Tokenizer tokenizer = null;
+        Tokenizer tokenizer;
         try {
             tokenizer = new Tokenizer(Files.readString(Path.of(uri)));
         } catch (IOException e) {
@@ -147,7 +148,7 @@ public class Utils {
 
     private static boolean mustCovered(Tree node) {
         return (node instanceof BSLParser.StatementContext
-                && !((BSLParser.StatementContext)node).children.stream().anyMatch(parseTree ->
+                && ((BSLParser.StatementContext)node).children.stream().noneMatch(parseTree ->
                     parseTree instanceof BSLParser.PreprocessorContext
                     || parseTree instanceof BSLParser.CompoundStatementContext
                         && ((BSLParser.CompoundStatementContext) parseTree).children.stream().anyMatch(
@@ -163,15 +164,17 @@ public class Utils {
         if (metadataOptions.isRawMode()) {
             logger.info("Sources directory not set. Enabling RAW mode");
             rawMode = true;
+        } else {
+            logger.info("Project directory: " + metadataOptions.getProjectDirName());
         }
 
         Map<String, URI> uriListByKey = new HashMap<>();
 
         if (!rawMode) {
-            logger.info("Reading configuration sources...");
 
             Path rootPath = Path.of(metadataOptions.getProjectDirName())
                     .resolve(metadataOptions.getSrcDirName());
+            logger.info("Reading configuration sources from root path: " + rootPath.toAbsolutePath());
 
             if (Files.isDirectory(rootPath)) {
 
@@ -184,16 +187,12 @@ public class Utils {
 
                     List<Command> commandsList = mdObj.getCommands();
                     if (commandsList != null) {
-                        commandsList.forEach(cmd -> {
-                            addAllModulesToList(conf, metadataOptions, uriListByKey, cmd, coverageData);
-                        });
+                        commandsList.forEach(cmd -> addAllModulesToList(conf, metadataOptions, uriListByKey, cmd, coverageData));
                     }
 
                     List<Form> formsList = mdObj.getForms();
                     if (formsList != null) {
-                        formsList.forEach(form -> {
-                            addAllModulesToList(conf, metadataOptions, uriListByKey, form, coverageData);
-                        });
+                        formsList.forEach(form -> addAllModulesToList(conf, metadataOptions, uriListByKey, form, coverageData));
                     }
                 }
 
@@ -222,7 +221,7 @@ public class Utils {
                             externalDataProcessorName, "Forms");
                     try (Stream<Path> walk = Files.list(externalDataProcessorPath)) {
 
-                        List<String> result = walk.map(x -> x.toString())
+                        List<String> result = walk.map(Path::toString)
                                 .filter(f -> f.endsWith(".xml")).collect(Collectors.toList());
 
                         XPath formXPath = XPathFactory.newInstance().newXPath();
@@ -287,9 +286,7 @@ public class Utils {
                     throw new Exception("Unknown source format");
                 }
 
-                uriListByKey.forEach((s, uri) -> {
-                    addCoverageData(coverageData, uri);
-                });
+                uriListByKey.forEach((s, uri) -> addCoverageData(coverageData, uri));
 
             }
 
@@ -364,6 +361,45 @@ public class Utils {
         }
     }
 
+    public static String normalizeXml(String xmlString) {
+        String result = "";
+        if(!xmlString.startsWith("<")) {
+            return xmlString;
+        }
+        Pattern p = Pattern.compile("<\\w\\S*");
+        Matcher m = p.matcher(xmlString);
+        String replaceFromTag = "";
+        if(m.find()){
+            replaceFromTag = xmlString.substring(m.start() + 1, m.end());
+        }
+        if(replaceFromTag.isEmpty()) {
+            return result;
+        }
+        result = xmlString;
+        String tag = "</" + replaceFromTag + ">";
+        int indx = xmlString.indexOf(tag);
+        if(indx!=-1) {
+            result = result.substring(0, indx + tag.length());
+        }
+
+        indx = result.indexOf("/>");
+        if(indx!=-1) {
+            String candidate = result.substring(0,indx+2);
+            m = p.matcher(candidate);
+            String candidateTag = "";
+            while(m.find()) {
+                candidateTag = result.substring(m.start() + 1, m.end());
+            }
+
+            if(replaceFromTag.equalsIgnoreCase(candidateTag)) {
+                result = candidate;
+            }
+
+        }
+
+        return result;
+    }
+
     private static void dumpLcovFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
                                         MetadataOptions metadataOptions,
                                         OutputOptions outputOptions) {
@@ -373,7 +409,7 @@ public class Utils {
             if (outputOptions.getOutputFile() == null) {
                 outputStream = new OutputStreamWriter(System.out);
             } else {
-                outputStream = new OutputStreamWriter(new FileOutputStream(outputOptions.getOutputFile()), Charset.forName("UTF-8"));
+                outputStream = new OutputStreamWriter(new FileOutputStream(outputOptions.getOutputFile()), StandardCharsets.UTF_8);
             }
             PrintWriter writer = new PrintWriter(outputStream);
 
@@ -385,9 +421,7 @@ public class Utils {
                 }
                 writer.println("TN:");
                 writer.printf("SF:%s\n", projectUri.relativize(uri).getPath());
-                bigDecimalsMap.forEach((bigDecimal, integer) -> {
-                    writer.printf("DA:%s,%d\n", bigDecimal.toString(), integer);
-                });
+                bigDecimalsMap.forEach((bigDecimal, integer) -> writer.printf("DA:%s,%d\n", bigDecimal.toString(), integer));
                 writer.printf("LH:%d\n", bigDecimalsMap.values().stream().filter(aInteger -> aInteger > 0).count());
                 writer.printf("LF:%d\n", bigDecimalsMap.size());
                 writer.println("end_of_record");
@@ -421,7 +455,7 @@ public class Utils {
             String path = projectUri.relativize(uri).getPath();
             long linesToCover = bigDecimalsMap.size();
             long coveredLinesCount = bigDecimalsMap.values().stream().filter(aInteger -> aInteger > 0).count();
-            Double coverage = Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100.;
+            double coverage = Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100.;
             Object[] dataRow = {
                     path,
                     linesToCover,
@@ -429,7 +463,7 @@ public class Utils {
                     coverage};
             dataList.add(dataRow);
         });
-        Collections.sort(dataList, Comparator.comparing(objects -> ((Double) objects[3])));
+        dataList.sort(Comparator.comparing(objects -> ((Double) objects[3])));
         AsciiTable at = new AsciiTable();
         at.addRule();
         at.addRow("Path", "Lines to cover", "Covered lines", "Coverage, %");
@@ -451,11 +485,11 @@ public class Utils {
         String pipeName;
         if (isWindows) {
             pipeName = String.format("\\\\.\\pipe\\COVER_%s_%s", connectionOptions.getInfobaseAlias(),
-                    debugUri.toString().replaceAll("[^a-zA-Z0-9-_\\.]", "_"));
+                    debugUri.toString().replaceAll("[^a-zA-Z0-9-_.]", "_"));
         } else {
             Path tempDir = Files.createTempDirectory("coverage41c");
             Path sock = tempDir.resolve(String.format("%s_%s.sock", connectionOptions.getInfobaseAlias(),
-                    debugUri.toString().replaceAll("[^a-zA-Z0-9-_\\.]", "_")));
+                    debugUri.toString().replaceAll("[^a-zA-Z0-9-_.]", "_")));
             pipeName = sock.toString();
         }
         return pipeName;
@@ -463,11 +497,11 @@ public class Utils {
 
     public static boolean isProcessStillAlive(Integer pid) {
         String OS = System.getProperty("os.name").toLowerCase();
-        String command = null;
-        if (OS.indexOf("win") >= 0) {
+        String command;
+        if (OS.contains("win")) {
             logger.debug("Check alive Windows mode. Pid: [{}]", pid);
             command = "cmd /c tasklist /FI \"PID eq " + pid + "\"";
-        } else if (OS.indexOf("nix") >= 0 || OS.indexOf("nux") >= 0) {
+        } else if (OS.contains("nix") || OS.contains("nux")) {
             logger.debug("Check alive Linux/Unix mode. Pid: [{}]", pid);
             command = "ps -p " + pid;
         } else {
@@ -485,7 +519,7 @@ public class Utils {
 
             InputStreamReader isReader = new InputStreamReader(pr.getInputStream());
             BufferedReader bReader = new BufferedReader(isReader);
-            String strLine = null;
+            String strLine;
             while ((strLine= bReader.readLine()) != null) {
                 if (strLine.contains(" " + pid + " ")) {
                     return true;

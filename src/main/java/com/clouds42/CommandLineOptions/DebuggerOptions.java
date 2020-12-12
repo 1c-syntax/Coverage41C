@@ -14,7 +14,7 @@ public class DebuggerOptions {
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    @Option(names = {"-p", "--password"}, description = "Dbgs password", interactive = true)
+    @Option(names = {"-p", "--password"}, description = "Dbgs password", interactive = true, defaultValue = "")
     private String password;
 
     @Option(names = {"-p:env", "--password:env"}, description = "Password environment variable name", defaultValue = "")

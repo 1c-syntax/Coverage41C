@@ -6,7 +6,7 @@ plugins {
 }
 
 group 'com.clouds42'
-version '2.3'
+version '2.4'
 
 sourceCompatibility = 11
 
@@ -42,17 +42,24 @@ dependencies {
     compile group: 'org.slf4j', name: 'slf4j-api', version: '2.0.0-alpha1'
     compile group: 'org.slf4j', name: 'slf4j-simple', version: '2.0.0-alpha1'
 
-    compile group: 'org.scala-sbt.ipcsocket', name: 'ipcsocket', version: '1.0.0'
+    compile group: 'org.scala-sbt.ipcsocket', name: 'ipcsocket', version: '1.1.0'
 
-    compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.common', version: '2.18.0'
+    compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.common', version: '2.16.0'
     compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.ecore.xmi', version: '2.16.0'
     compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.ecore.xcore', version: '1.4.0'
 
-    compile group: 'org.eclipse.platform', name: 'org.eclipse.osgi', version: '3.15.200'
+    compile group: 'org.eclipse.platform', name: 'org.eclipse.osgi', version: '3.15.300'
+
+    compile group: 'org.eclipse.platform', name: 'org.eclipse.core.runtime', version: '3.15.300'
+    compile group: 'org.eclipse.platform', name: 'org.eclipse.osgi.services', version: '3.8.0'
+    compile group: 'org.eclipse.platform', name: 'org.eclipse.equinox.common', version: '3.10.400'
+
 
     compile group: 'org.eclipse.jetty', name: 'jetty-client', version: '9.4.27.v20200227'
 
     compile group: 'com.google.guava', name: 'guava', version: '29.0-jre'
+
+    compile group: 'com.google.inject', name: 'guice', version: '4.0'
 
     compile group: 'de.vandermeer', name:'asciitable', version: '0.3.2'
 
@@ -67,8 +74,7 @@ dependencies {
         exclude group: "org.glassfish", module: "javax.json"
     }
 
-    providedCompile fileTree(edtLocation) { include 'com._1c.g5.v8.dt.debug.core_*.jar' }
-    providedCompile fileTree(edtLocation) { include 'com._1c.g5.v8.dt.debug.model_*.jar' }
+    providedCompile fileTree(edtLocation) { include 'com._1c.g5.v8.dt.debug.*.jar' }
 
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.6.2'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.6.2'
@@ -109,7 +115,7 @@ buildConfig {
     buildConfigField("String", "APP_VERSION", "\"${project.version}\"")
     buildConfigField("long", "BUILD_TIME", "${System.currentTimeMillis()}L")
 }
-
+/*
 githubRelease {
     token findProperty('github.token')
     owner "proDOOMman"
@@ -118,3 +124,4 @@ githubRelease {
     releaseAssets.from(distZip.archiveFile)
     dryRun false
 }
+*/
