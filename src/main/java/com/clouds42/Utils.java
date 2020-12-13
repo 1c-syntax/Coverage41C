@@ -3,6 +3,7 @@ package com.clouds42;
 import com.clouds42.CommandLineOptions.ConnectionOptions;
 import com.clouds42.CommandLineOptions.MetadataOptions;
 import com.clouds42.CommandLineOptions.OutputOptions;
+import com.github._1c_syntax.bsl.parser.BSLLexer;
 import com.github._1c_syntax.bsl.parser.BSLParser;
 import com.github._1c_syntax.bsl.parser.BSLParserRuleContext;
 import com.github._1c_syntax.bsl.parser.Tokenizer;
@@ -15,9 +16,11 @@ import com.github._1c_syntax.mdclasses.metadata.additional.ModuleType;
 import com.github._1c_syntax.mdclasses.metadata.additional.SupportVariant;
 import de.vandermeer.asciitable.AsciiTable;
 import de.vandermeer.asciitable.CWC_LongestLine;
+import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.tree.TerminalNodeImpl;
 import org.antlr.v4.runtime.tree.Tree;
 import org.antlr.v4.runtime.tree.Trees;
+import org.apache.commons.lang3.Range;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
@@ -44,6 +47,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -124,6 +129,18 @@ public class Utils {
         });
     }
 
+    private static final Pattern COVER_ON = Pattern.compile(
+            "Cover:(?:вкл|on)", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+    );
+
+    private static final Pattern COVER_OFF = Pattern.compile(
+            "Cover:(?:выкл|off)", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+    );
+
+    private static final Pattern COVER_AUTO = Pattern.compile(
+            "Cover:(?:авто|auto)", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
+    );
+
     private static void addCoverageData(Map<URI, Map<BigDecimal, Integer>> coverageData, URI uri) {
         Tokenizer tokenizer = null;
         try {
@@ -138,9 +155,60 @@ public class Utils {
                 .filter(Utils::mustCovered)
                 .mapToInt(node -> ((BSLParserRuleContext) node).getStart().getLine())
                 .distinct().toArray();
+
+        List<Range<Integer>> coverageIgnorance = new ArrayList<>();
+        Stack<Integer> coverageIgnoranceStartStack = new Stack();
+        List<Range<Integer>> coverageAutoIgnorance = new ArrayList<>();
+        Stack<Integer> coverageAutoIgnoranceStartStack = new Stack();
+
+        if (linesToCover.length > 0) {
+
+            List<Token> comments = tokenizer.getTokens().stream()
+                    .filter(token -> token.getType() == BSLLexer.LINE_COMMENT)
+                    .collect(Collectors.toList());
+
+            for (Token comment : comments) {
+                int commentLine = comment.getLine();
+                Matcher offMatcher = COVER_OFF.matcher(comment.getText());
+                if (offMatcher.find()) {
+                    coverageIgnoranceStartStack.push(commentLine);
+                } else {
+                    Matcher autoMatcher = COVER_AUTO.matcher(comment.getText());
+                    if (autoMatcher.find()) {
+                        coverageAutoIgnoranceStartStack.push(commentLine);
+                    } else {
+                        Matcher onMatcher = COVER_ON.matcher(comment.getText());
+                        if (onMatcher.find()) {
+                            while (!coverageIgnoranceStartStack.empty()) {
+                                coverageIgnorance.add(Range.between(coverageIgnoranceStartStack.pop(), commentLine));
+                            }
+                            while (!coverageAutoIgnoranceStartStack.empty()) {
+                                coverageAutoIgnorance.add(Range.between(coverageAutoIgnoranceStartStack.pop(), commentLine));
+                            }
+                        }
+                    }
+                }
+            }
+            while (!coverageIgnoranceStartStack.empty()) {
+                coverageIgnorance.add(
+                        Range.between(coverageIgnoranceStartStack.pop(), linesToCover[linesToCover.length - 1]));
+            }
+            while (!coverageAutoIgnoranceStartStack.empty()) {
+                coverageAutoIgnorance.add(
+                        Range.between(coverageAutoIgnoranceStartStack.pop(), linesToCover[linesToCover.length - 1]));
+            }
+
+            linesToCover = Arrays.stream(linesToCover).filter(i ->
+                    !coverageIgnorance.stream().anyMatch(integerRange -> integerRange.contains(i))).toArray();
+        }
+
         Map<BigDecimal, Integer> coverMap = new HashMap<>();
         for(int lineNumber : linesToCover) {
-            coverMap.put(new BigDecimal(lineNumber), 0);
+            int countValue = 0;
+            if (coverageAutoIgnorance.stream().anyMatch(integerRange -> integerRange.contains(lineNumber))) {
+                countValue = -1;
+            }
+            coverMap.put(new BigDecimal(lineNumber), countValue);
         }
         coverageData.put(uri, coverMap);
     }
@@ -336,18 +404,20 @@ public class Utils {
                 Element fileElement = doc.createElement("file");
                 fileElement.setAttribute("path", projectUri.relativize(uri).getPath());
                 bigDecimalsMap.forEach((bigDecimal, integer) -> {
-                    Element lineElement = doc.createElement("lineToCover");
-                    lineElement.setAttribute("covered", Boolean.toString(integer > 0));
-                    lineElement.setAttribute("lineNumber", bigDecimal.toString());
-                    fileElement.appendChild(lineElement);
+                    if (integer >= 0) {
+                        Element lineElement = doc.createElement("lineToCover");
+                        lineElement.setAttribute("covered", Boolean.toString(integer > 0));
+                        lineElement.setAttribute("lineNumber", bigDecimal.toString());
+                        fileElement.appendChild(lineElement);
+                    }
                 });
                 mainRootElement.appendChild(fileElement);
             });
             long linesToCover = 0;
             long coveredLinesCount = 0;
             for (Map<BigDecimal, Integer> bigDecimalMap : coverageData.values()) {
-                linesToCover += bigDecimalMap.size();
-                coveredLinesCount += bigDecimalMap.values().stream().filter(aInteger -> aInteger > 0).count();
+                linesToCover += bigDecimalMap.values().stream().filter(value -> value >= 0).count();
+                coveredLinesCount += bigDecimalMap.values().stream().filter(value -> value > 0).count();
             }
             logger.info("Lines to cover: " + linesToCover);
             logger.info("Covered lines: " + coveredLinesCount);
@@ -391,7 +461,9 @@ public class Utils {
                 writer.println("TN:");
                 writer.printf("SF:%s\n", projectUri.relativize(uri).getPath());
                 bigDecimalsMap.forEach((bigDecimal, integer) -> {
-                    writer.printf("DA:%s,%d\n", bigDecimal.toString(), integer);
+                    if (integer >= 0) {
+                        writer.printf("DA:%s,%d\n", bigDecimal.toString(), integer);
+                    }
                 });
                 writer.printf("LH:%d\n", bigDecimalsMap.values().stream().filter(aInteger -> aInteger > 0).count());
                 writer.printf("LF:%d\n", bigDecimalsMap.size());
@@ -400,8 +472,8 @@ public class Utils {
             long linesToCover = 0;
             long coveredLinesCount = 0;
             for (Map<BigDecimal, Integer> bigDecimalMap : coverageData.values()) {
-                linesToCover += bigDecimalMap.size();
-                coveredLinesCount += bigDecimalMap.values().stream().filter(aInteger -> aInteger > 0).count();
+                linesToCover += bigDecimalMap.values().stream().filter(value -> value >= 0).count();
+                coveredLinesCount += bigDecimalMap.values().stream().filter(value -> value > 0).count();
             }
             logger.info("Lines to cover: " + linesToCover);
             logger.info("Covered lines: " + coveredLinesCount);
@@ -424,7 +496,7 @@ public class Utils {
                 return;
             }
             String path = projectUri.relativize(uri).getPath();
-            long linesToCover = bigDecimalsMap.size();
+            long linesToCover = bigDecimalsMap.values().stream().filter(aInteger -> aInteger >= 0).count();
             long coveredLinesCount = bigDecimalsMap.values().stream().filter(aInteger -> aInteger > 0).count();
             Double coverage = Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100.;
             Object[] dataRow = {
