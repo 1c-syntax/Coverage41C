@@ -247,8 +247,12 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                                     }
                                 }
                             } else {
+                                int currentValue = coverMap.getOrDefault(lineNo, 0);
+                                if (currentValue < 0) {
+                                    currentValue = 0;
+                                }
                                 coverMap.put(lineNo,
-                                        coverMap.getOrDefault(lineNo, 0)
+                                        currentValue
                                                 + lineInfo.getFrequency().intValue());
                             }
                         }
