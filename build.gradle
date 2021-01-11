@@ -74,7 +74,7 @@ dependencies {
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.6.2'
     testCompile 'org.xmlunit:xmlunit-core:2.6.4'
     testCompile 'org.xmlunit:xmlunit-matchers:2.6.4'
-    testCompile 'com.fasterxml.jackson.core:jackson-core:2.11.0'
+    testCompile 'com.fasterxml.jackson.core:jackson-core:2.12.1'
     testCompile 'com.fasterxml.jackson.core:jackson-databind:2.11.0'
 }
 
