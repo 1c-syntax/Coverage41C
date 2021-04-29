@@ -1,0 +1,34 @@
+version: 2
+updates:
+- package-ecosystem: gradle
+  directory: "/"
+  schedule:
+    interval: daily
+    time: "22:00"
+  open-pull-requests-limit: 10
+  target-branch: develop
+  ignore:
+  - dependency-name: org.eclipse.emf:org.eclipse.emf.ecore.xcore
+    versions:
+    - ">= 1.13.a, < 1.14"
+  - dependency-name: org.eclipse.emf:org.eclipse.emf.ecore.xcore
+    versions:
+    - "> 1.4.0, < 2"
+  - dependency-name: com.fasterxml.jackson.core:jackson-core
+    versions:
+    - 2.12.1
+    - 2.12.2
+  - dependency-name: com.fasterxml.jackson.core:jackson-databind
+    versions:
+    - 2.12.1
+    - 2.12.2
+  - dependency-name: org.eclipse.jetty:jetty-client
+    versions:
+    - 11.0.0
+    - 11.0.1
+  - dependency-name: com.google.guava:guava
+    versions:
+    - 30.1-jre
+  - dependency-name: org.eclipse.emf:org.eclipse.emf.common
+    versions:
+    - 2.21.0
