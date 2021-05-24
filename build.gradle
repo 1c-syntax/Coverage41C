@@ -13,8 +13,10 @@ sourceCompatibility = 11
 repositories {
     mavenCentral()
     maven { url 'https://jitpack.io' }
-    maven { url 'https://dl.bintray.com/epsilonlabs/epsilon-standalone/'}
+   // maven { url 'https://dl.bintray.com/epsilonlabs/epsilon-standalone/'}
+    maven { url 'https://repo1.maven.org/maven2/' }
 }
+
 
 configurations {
     providedCompile
@@ -29,7 +31,7 @@ dependencies {
             ringExecutable = 'ring.cmd'
         }
         exec {
-            commandLine ringExecutable, 'edt', 'locations', 'list'
+            commandLine ringExecutable, 'edt@2020.5.1', 'locations', 'list'
             standardOutput = output
         }
         edtLocation = output.toString().trim().split("\n")[0].trim() + '/plugins/'
@@ -46,7 +48,7 @@ dependencies {
 
     compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.common', version: '2.16.0'
     compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.ecore.xmi', version: '2.16.0'
-    compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.ecore.xcore', version: '1.4.0'
+    compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.ecore.xcore.lib', version: '1.4.0'
 
     compile group: 'org.eclipse.platform', name: 'org.eclipse.osgi', version: '3.15.300'
 
@@ -63,9 +65,9 @@ dependencies {
 
     compile group: 'de.vandermeer', name:'asciitable', version: '0.3.2'
 
-    implementation 'com.github.1c-syntax:mdclasses:0.5.0'
+    implementation 'com.github.1c-syntax:mdclasses:0.8.0'
 
-    implementation('com.github.1c-syntax:bsl-parser:0.14.1') {
+    implementation('com.github.1c-syntax:bsl-parser:0.18.0') {
         exclude group: "com.tunnelvisionlabs", module: "antlr4-annotations"
         exclude group: "com.ibm.icu", module: "*"
         exclude group: "org.antlr", module: "ST4"
@@ -74,7 +76,7 @@ dependencies {
         exclude group: "org.glassfish", module: "javax.json"
     }
 
-    providedCompile fileTree(edtLocation) { include 'com._1c.g5.v8.dt.debug.*.jar' }
+    compile fileTree(edtLocation) { include 'com._1c.g5.v8.dt.debug.*.jar' }
 
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.6.2'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.6.2'
@@ -115,13 +117,12 @@ buildConfig {
     buildConfigField("String", "APP_VERSION", "\"${project.version}\"")
     buildConfigField("long", "BUILD_TIME", "${System.currentTimeMillis()}L")
 }
-/*
+
 githubRelease {
-    token findProperty('github.token')
+    token findProperty('github.token')?: ""
     owner "proDOOMman"
     repo "Coverage41C"
     targetCommitish "master"
     releaseAssets.from(distZip.archiveFile)
     dryRun false
 }
-*/

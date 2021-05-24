@@ -5,12 +5,12 @@ import com.clouds42.CommandLineOptions.MetadataOptions;
 import com.clouds42.CommandLineOptions.OutputOptions;
 import com.github._1c_syntax.bsl.parser.BSLParser;
 import com.github._1c_syntax.bsl.parser.BSLParserRuleContext;
+import com.github._1c_syntax.bsl.parser.BSLTokenizer;
 import com.github._1c_syntax.bsl.parser.Tokenizer;
-import com.github._1c_syntax.mdclasses.mdo.Command;
-import com.github._1c_syntax.mdclasses.mdo.Form;
 import com.github._1c_syntax.mdclasses.mdo.MDObjectBase;
 import com.github._1c_syntax.mdclasses.mdo.SettingsStorage;
 import com.github._1c_syntax.mdclasses.metadata.Configuration;
+import com.github._1c_syntax.mdclasses.metadata.additional.MDOModule;
 import com.github._1c_syntax.mdclasses.metadata.additional.ModuleType;
 import com.github._1c_syntax.mdclasses.metadata.additional.SupportVariant;
 import de.vandermeer.asciitable.AsciiTable;
@@ -83,8 +83,7 @@ public class Utils {
                 || moduleType == ModuleType.CommonModule) {
             return "d5963243-262e-4398-b4d7-fb16d06484f6";
         } else if (moduleType == ModuleType.ApplicationModule
-                || moduleType == ModuleType.Unknown)
-        {
+                || moduleType == ModuleType.UNKNOWN) {
             logger.info("Couldn't find UUID for module type: " + moduleType + " for object " + mdObject.getName());
         }
         return "UNKNOWN";
@@ -98,37 +97,11 @@ public class Utils {
         return objectId + "/" + propertyId;
     }
 
-    private static void addAllModulesToList(Configuration conf, MetadataOptions metadataOptions,
-                                     Map<String, URI> uriListByKey, MDObjectBase mdObj,
-                                     Map<URI, Map<BigDecimal, Integer>> coverageData) {
-        String mdObjUuid = mdObj.getUuid();
-        Map<URI, ModuleType> modulesByType = mdObj.getModulesByType();
-        if (modulesByType == null) {
-            logger.info("Found empty modules in metadata object: " + mdObj.getName());
-            return;
-        }
-        modulesByType.forEach((uri, moduleType) -> {
-            uriListByKey.put(getUriKey(mdObjUuid, moduleType, mdObj), uri);
-
-            if (metadataOptions.getRemoveSupport() != SupportVariant.NONE) {
-                SupportVariant moduleSupportVariant = conf.getModuleSupport(uri).values().stream()
-                        .min(Comparator.naturalOrder())
-                        .orElse(SupportVariant.NONE);
-                if (moduleSupportVariant.compareTo(metadataOptions.getRemoveSupport()) <= 0) {
-                    coverageData.put(uri, new HashMap<>());
-                    return;
-                }
-            }
-
-            addCoverageData(coverageData, uri);
-
-        });
-    }
 
     private static void addCoverageData(Map<URI, Map<BigDecimal, Integer>> coverageData, URI uri) {
         Tokenizer tokenizer;
         try {
-            tokenizer = new Tokenizer(Files.readString(Path.of(uri)));
+            tokenizer = new BSLTokenizer(Files.readString(Path.of(uri)));
         } catch (IOException e) {
             logger.error(e.getLocalizedMessage());
             return;
@@ -140,7 +113,7 @@ public class Utils {
                 .mapToInt(node -> ((BSLParserRuleContext) node).getStart().getLine())
                 .distinct().toArray();
         Map<BigDecimal, Integer> coverMap = new HashMap<>();
-        for(int lineNumber : linesToCover) {
+        for (int lineNumber : linesToCover) {
             coverMap.put(new BigDecimal(lineNumber), 0);
         }
         coverageData.put(uri, coverMap);
@@ -148,11 +121,11 @@ public class Utils {
 
     private static boolean mustCovered(Tree node) {
         return (node instanceof BSLParser.StatementContext
-                && ((BSLParser.StatementContext)node).children.stream().noneMatch(parseTree ->
-                    parseTree instanceof BSLParser.PreprocessorContext
-                    || parseTree instanceof BSLParser.CompoundStatementContext
+                && ((BSLParser.StatementContext) node).children.stream().noneMatch(parseTree ->
+                parseTree instanceof BSLParser.PreprocessorContext
+                        || parseTree instanceof BSLParser.CompoundStatementContext
                         && ((BSLParser.CompoundStatementContext) parseTree).children.stream().anyMatch(
-                            parseTree1 -> parseTree1 instanceof BSLParser.TryStatementContext)))
+                        parseTree1 -> parseTree1 instanceof BSLParser.TryStatementContext)))
                 || node instanceof BSLParser.GlobalMethodCallContext
                 || node instanceof BSLParser.Var_nameContext;
     }
@@ -180,20 +153,25 @@ public class Utils {
 
                 Configuration conf = Configuration.create(rootPath);
 
-                Set<MDObjectBase> configurationChildren = conf.getChildren();
-                for (MDObjectBase mdObj : configurationChildren) {
+                for (MDOModule module : conf.getModules()) {
+                    MDObjectBase mdObj = module.getOwner();
 
-                    addAllModulesToList(conf, metadataOptions, uriListByKey, mdObj, coverageData);
+                    String mdObjUuid = mdObj.getUuid();
 
-                    List<Command> commandsList = mdObj.getCommands();
-                    if (commandsList != null) {
-                        commandsList.forEach(cmd -> addAllModulesToList(conf, metadataOptions, uriListByKey, cmd, coverageData));
+                    uriListByKey.put(getUriKey(mdObjUuid, module.getModuleType(), mdObj), module.getUri());
+
+                    if (metadataOptions.getRemoveSupport() != SupportVariant.NONE) {
+                        SupportVariant moduleSupportVariant = conf.getModuleSupport(module.getUri()).values().stream()
+                                .min(Comparator.naturalOrder())
+                                .orElse(SupportVariant.NONE);
+                        if (moduleSupportVariant.compareTo(metadataOptions.getRemoveSupport()) <= 0) {
+                            coverageData.put(module.getUri(), new HashMap<>());
+                            continue;
+                        }
                     }
 
-                    List<Form> formsList = mdObj.getForms();
-                    if (formsList != null) {
-                        formsList.forEach(form -> addAllModulesToList(conf, metadataOptions, uriListByKey, form, coverageData));
-                    }
+                    addCoverageData(coverageData, module.getUri());
+
                 }
 
             } else {
@@ -309,8 +287,8 @@ public class Utils {
     }
 
     private static void dumpGenericCoverageFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
-                                        MetadataOptions metadataOptions,
-                                        OutputOptions outputOptions) {
+                                                MetadataOptions metadataOptions,
+                                                OutputOptions outputOptions) {
         DocumentBuilderFactory icFactory = DocumentBuilderFactory.newInstance();
         DocumentBuilder icBuilder;
         try {
@@ -363,35 +341,35 @@ public class Utils {
 
     public static String normalizeXml(String xmlString) {
         String result = "";
-        if(!xmlString.startsWith("<")) {
+        if (!xmlString.startsWith("<")) {
             return xmlString;
         }
         Pattern p = Pattern.compile("<\\w\\S*");
         Matcher m = p.matcher(xmlString);
         String replaceFromTag = "";
-        if(m.find()){
+        if (m.find()) {
             replaceFromTag = xmlString.substring(m.start() + 1, m.end());
         }
-        if(replaceFromTag.isEmpty()) {
+        if (replaceFromTag.isEmpty()) {
             return result;
         }
         result = xmlString;
         String tag = "</" + replaceFromTag + ">";
         int indx = xmlString.indexOf(tag);
-        if(indx!=-1) {
+        if (indx != -1) {
             result = result.substring(0, indx + tag.length());
         }
 
         indx = result.indexOf("/>");
-        if(indx!=-1) {
-            String candidate = result.substring(0,indx+2);
+        if (indx != -1) {
+            String candidate = result.substring(0, indx + 2);
             m = p.matcher(candidate);
             String candidateTag = "";
-            while(m.find()) {
+            while (m.find()) {
                 candidateTag = result.substring(m.start() + 1, m.end());
             }
 
-            if(replaceFromTag.equalsIgnoreCase(candidateTag)) {
+            if (replaceFromTag.equalsIgnoreCase(candidateTag)) {
                 result = candidate;
             }
 
@@ -401,8 +379,8 @@ public class Utils {
     }
 
     private static void dumpLcovFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
-                                        MetadataOptions metadataOptions,
-                                        OutputOptions outputOptions) {
+                                     MetadataOptions metadataOptions,
+                                     OutputOptions outputOptions) {
 
         try {
             OutputStreamWriter outputStream;
@@ -479,7 +457,7 @@ public class Utils {
     }
 
     public static String getPipeName(ConnectionOptions connectionOptions) throws IOException {
-        boolean isWindows = System.getProperty ("os.name").toLowerCase().contains("win");
+        boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
 
         URI debugUri = URI.create(connectionOptions.getDebugServerUrl());
         String pipeName;
@@ -512,7 +490,7 @@ public class Utils {
     }
 
     private static boolean isProcessIdRunning(String pid, String command) {
-        logger.debug("Command [{}]",command );
+        logger.debug("Command [{}]", command);
         try {
             Runtime rt = Runtime.getRuntime();
             Process pr = rt.exec(command);
@@ -520,7 +498,7 @@ public class Utils {
             InputStreamReader isReader = new InputStreamReader(pr.getInputStream());
             BufferedReader bReader = new BufferedReader(isReader);
             String strLine;
-            while ((strLine= bReader.readLine()) != null) {
+            while ((strLine = bReader.readLine()) != null) {
                 if (strLine.contains(" " + pid + " ")) {
                     return true;
                 }

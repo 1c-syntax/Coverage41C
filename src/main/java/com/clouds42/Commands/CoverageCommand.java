@@ -24,6 +24,7 @@ import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
+import java.lang.module.ModuleDescriptor.Version;
 
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -274,12 +275,12 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                 throw new RuntimeDebugClientException("Can't connect to debug server. Connection result: " + connectionResult);
             }
         }
+        Version apiver =  Version.parse(client.getApiVersion());
         logger.info("Setup settings...");
         client.initSettings(false);
         client.setAutoconnectDebugTargets(
                 debuggerOptions.getDebugAreaNames(),
-                debuggerOptions.getAutoconnectTargets());
-
+                debuggerOptions.getFilteredAutoconnectTargets(apiver));
         logger.info("Setup targets...");
         List<DebugTargetId> debugTargets;
         if (debuggerOptions.getDebugAreaNames().isEmpty()) {

@@ -25,6 +25,8 @@ import java.net.URI;
 import java.net.URL;
 import java.nio.charset.Charset;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.zip.Inflater;
 import java.util.zip.InflaterInputStream;
 
@@ -86,7 +88,7 @@ public abstract class AbstractDebugClient {
 
             FutureResponseListener listener = new FutureResponseListener(request, 2147483647);
             request.send(listener);
-            ContentResponse response = listener.get();
+            ContentResponse response = listener.get(60L, TimeUnit.SECONDS);
             int status = response.getStatus();
             if (HttpStatus.isSuccess(status)) {
                 if (responseClass != null && status != 204) {
@@ -113,12 +115,13 @@ public abstract class AbstractDebugClient {
                     Exception exception = abstractDebugClient.serializer.deserialize(errorMessage, Exception.class, "exception", "Exception");
                     throw new RuntimeDebugClientException("Unsuccessful response from 1C:Enterprise" + exception.getDescr());
                 } catch (IOException e) {
+                    logger.debug("exception raw data `[{}]`", errorMessage);
                     throw new RuntimeDebugClientException("Error occurred while processing response", e);
                 }
             } else {
                 throw new RuntimeDebugClientException("Unsuccessful response from 1C:Enterprise status: " + response.getStatus() + " " + response.getReason());
             }
-        } catch (ExecutionException | InterruptedException e) {
+        } catch (ExecutionException | InterruptedException | TimeoutException e) {
             throw new RuntimeDebugClientException(e);
         }
     }
