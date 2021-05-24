@@ -73,6 +73,14 @@ public class DebugClient extends AbstractDebugClient{
         }
     }
 
+    public String getApiVersion() throws RuntimeDebugClientException{
+
+        Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "getRDbgAPIVer");
+        MiscRDbgGetAPIVerResponse responseContent = AbstractDebugClient.performRuntimeHttpRequest(this, request, null, MiscRDbgGetAPIVerResponse.class);
+        assert responseContent != null;
+        return responseContent.getVersion();
+
+    }
     public void dispose() throws RuntimeDebugClientException {
         if (!this.httpClient.isStopping() || !this.httpClient.isStopped()) {
             try {
@@ -85,6 +93,7 @@ public class DebugClient extends AbstractDebugClient{
     }
 
     public AttachDebugUIResult connect(String password) throws RuntimeDebugClientException {
+
         RDBGAttachDebugUIRequest requestContent = ResponseFactory.eINSTANCE.createRDBGAttachDebugUIRequest();
         requestContent.setCredentials(RuntimePresentationConverter.fromPresentation(password));
         Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "attachDebugUI");
