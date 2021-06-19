@@ -1,6 +1,6 @@
 package com.clouds42.CommandLineOptions;
 
-import com.github._1c_syntax.mdclasses.metadata.additional.SupportVariant;
+import com.github._1c_syntax.mdclasses.supportconf.SupportVariant;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine.Option;

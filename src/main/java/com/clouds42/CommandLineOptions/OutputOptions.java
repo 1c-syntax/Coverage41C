@@ -11,7 +11,8 @@ public class OutputOptions {
 
     public enum OutputFormat {
         GENERIC_COVERAGE,
-        LCOV
+        LCOV,
+        COBERTURA
     }
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());

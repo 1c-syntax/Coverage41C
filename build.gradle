@@ -1,19 +1,19 @@
 plugins {
     id 'java'
     id 'application'
+    id 'jacoco'
     id "com.github.breadmoirai.github-release" version "2.2.12"
     id "com.github.jarmstrong.buildconfig" version "1.9.0"
 }
 
 group 'com.clouds42'
-version '2.4'
+version '2.5'
 
 sourceCompatibility = 11
 
 repositories {
     mavenCentral()
     maven { url 'https://jitpack.io' }
-   // maven { url 'https://dl.bintray.com/epsilonlabs/epsilon-standalone/'}
     maven { url 'https://repo1.maven.org/maven2/' }
 }
 
@@ -31,20 +31,20 @@ dependencies {
             ringExecutable = 'ring.cmd'
         }
         exec {
-            commandLine ringExecutable, 'edt@2020.5.1', 'locations', 'list'
+            commandLine ringExecutable, 'edt@2021.1.5', 'locations', 'list'
             standardOutput = output
         }
         edtLocation = output.toString().trim().split("\n")[0].trim() + '/plugins/'
     }
     println 'EDT location: ' + edtLocation
 
-    compile group: 'info.picocli', name: 'picocli', version: '4.3.2'
-    annotationProcessor 'info.picocli:picocli-codegen:4.3.2'
+    compile group: 'info.picocli', name: 'picocli', version: '4.6.1'
+    annotationProcessor 'info.picocli:picocli-codegen:4.6.1'
 
     compile group: 'org.slf4j', name: 'slf4j-api', version: '2.0.0-alpha1'
     compile group: 'org.slf4j', name: 'slf4j-simple', version: '2.0.0-alpha1'
 
-    compile group: 'org.scala-sbt.ipcsocket', name: 'ipcsocket', version: '1.1.0'
+    compile group: 'org.scala-sbt.ipcsocket', name: 'ipcsocket', version: '1.4.0'
 
     compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.common', version: '2.16.0'
     compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.ecore.xmi', version: '2.16.0'
@@ -65,9 +65,9 @@ dependencies {
 
     compile group: 'de.vandermeer', name:'asciitable', version: '0.3.2'
 
-    implementation 'com.github.1c-syntax:mdclasses:0.8.0'
+    implementation 'com.github.1c-syntax:mdclasses:0.9.1'
 
-    implementation('com.github.1c-syntax:bsl-parser:0.18.0') {
+    implementation('com.github.1c-syntax:bsl-parser:0.19.3') {
         exclude group: "com.tunnelvisionlabs", module: "antlr4-annotations"
         exclude group: "com.ibm.icu", module: "*"
         exclude group: "org.antlr", module: "ST4"
@@ -97,6 +97,7 @@ run {
 }
 
 test {
+    finalizedBy jacocoTestReport
     classpath += configurations.providedCompile
     useJUnitPlatform()
     testLogging.showStandardStreams = true
@@ -109,6 +110,10 @@ startScripts {
 
 application {
     mainClassName = 'com.clouds42.Coverage41C'
+}
+
+jacocoTestReport {
+    dependsOn test
 }
 
 buildConfig {

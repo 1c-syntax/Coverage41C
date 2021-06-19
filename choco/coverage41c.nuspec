@@ -2,7 +2,7 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
   <metadata>
     <id>Coverage41C</id>
-    <version>2.3</version>
+    <version>2.5</version>
     <packageSourceUrl>https://github.com/proDOOMman/Coverage41C</packageSourceUrl>
     <owners>proDOOMman</owners>
     <title>Coverage41C (Install)</title>

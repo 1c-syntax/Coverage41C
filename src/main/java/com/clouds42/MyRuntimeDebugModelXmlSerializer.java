@@ -1,12 +1,11 @@
 package com.clouds42;
 
-import com._1c.g5.v8.dt.internal.debug.core.DebugCorePlugin;
 import com._1c.g5.v8.dt.internal.debug.core.runtime.client.RuntimeDebugModelXmlSerializer;
 import com._1c.g5.v8.dt.internal.debug.core.runtime.client.RuntimeExtendedMetaData;
 import com.google.common.base.Preconditions;
+import com.google.inject.Singleton;
 import org.eclipse.emf.ecore.EObject;
 import org.eclipse.emf.ecore.xmi.impl.XMLResourceImpl;
-import com.google.inject.Singleton;
 import org.xml.sax.InputSource;
 
 import java.io.ByteArrayOutputStream;
@@ -14,7 +13,6 @@ import java.io.IOException;
 import java.io.StringReader;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.text.MessageFormat;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -74,7 +72,7 @@ public class MyRuntimeDebugModelXmlSerializer extends RuntimeDebugModelXmlSerial
         return result;
     }
 
-    private EObject convertToEObject(String xmlString) throws IOException {
+    protected EObject convertToEObject(String xmlString) throws IOException {
         Map<Object, Object> loadOptions = new HashMap();
         loadOptions.put("EXTENDED_META_DATA", true);
         loadOptions.put("LAX_FEATURE_PROCESSING", true);
@@ -84,7 +82,7 @@ public class MyRuntimeDebugModelXmlSerializer extends RuntimeDebugModelXmlSerial
         return (EObject)resource.getContents().get(0);
     }
 
-    private String convertToXml(EObject eObject) throws IOException {
+    protected String convertToXml(EObject eObject) throws IOException {
         XMLResourceImpl resource = new XMLResourceImpl();
         resource.setEncoding(ENCODING.name());
         resource.getContents().add(eObject);
@@ -95,7 +93,7 @@ public class MyRuntimeDebugModelXmlSerializer extends RuntimeDebugModelXmlSerial
         return new String(outputStream.toByteArray(), ENCODING);
     }
 
-    private String replaceRootElement(String xmlString, String replaceFromTag, String replaceToTag) {
+    protected String replaceRootElement(String xmlString, String replaceFromTag, String replaceToTag) {
 
         xmlString = xmlString.replaceFirst("<" + replaceFromTag, "<" + replaceToTag);
         if (!xmlString.endsWith("/>")) {
@@ -111,9 +109,7 @@ public class MyRuntimeDebugModelXmlSerializer extends RuntimeDebugModelXmlSerial
         return xmlString;
     }
 
-
-
-    private String removeUtf8Bom(String string) {
+    protected String removeUtf8Bom(String string) {
         return string.startsWith(String.valueOf('\ufeff')) ? string.substring(1) : string;
     }
 }

@@ -3,17 +3,13 @@ package com.clouds42;
 import com.clouds42.CommandLineOptions.ConnectionOptions;
 import com.clouds42.CommandLineOptions.MetadataOptions;
 import com.clouds42.CommandLineOptions.OutputOptions;
-import com.github._1c_syntax.bsl.parser.BSLLexer;
-import com.github._1c_syntax.bsl.parser.BSLParser;
-import com.github._1c_syntax.bsl.parser.BSLParserRuleContext;
-import com.github._1c_syntax.bsl.parser.BSLTokenizer;
-import com.github._1c_syntax.bsl.parser.Tokenizer;
-import com.github._1c_syntax.mdclasses.mdo.MDObjectBase;
-import com.github._1c_syntax.mdclasses.mdo.SettingsStorage;
-import com.github._1c_syntax.mdclasses.metadata.Configuration;
-import com.github._1c_syntax.mdclasses.metadata.additional.MDOModule;
-import com.github._1c_syntax.mdclasses.metadata.additional.ModuleType;
-import com.github._1c_syntax.mdclasses.metadata.additional.SupportVariant;
+import com.github._1c_syntax.bsl.parser.*;
+import com.github._1c_syntax.mdclasses.mdo.AbstractMDObjectBase;
+import com.github._1c_syntax.mdclasses.mdo.MDSettingsStorage;
+import com.github._1c_syntax.mdclasses.Configuration;
+import com.github._1c_syntax.mdclasses.mdo.support.MDOModule;
+import com.github._1c_syntax.mdclasses.mdo.support.ModuleType;
+import com.github._1c_syntax.mdclasses.supportconf.SupportVariant;
 import de.vandermeer.asciitable.AsciiTable;
 import de.vandermeer.asciitable.CWC_LongestLine;
 import org.antlr.v4.runtime.Token;
@@ -46,6 +42,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Instant;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -56,13 +53,13 @@ public class Utils {
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    public static String getModuleTypeUuid(ModuleType moduleType, MDObjectBase mdObject) {
+    public static String getModuleTypeUuid(ModuleType moduleType, AbstractMDObjectBase mdObject) {
         if (moduleType == ModuleType.CommandModule) {
             return "078a6af8-d22c-4248-9c33-7e90075a3d2c";
         } else if (moduleType == ModuleType.ObjectModule) {
             return "a637f77f-3840-441d-a1c3-699c8c5cb7e0";
         } else if (moduleType == ModuleType.ManagerModule) {
-            if (mdObject instanceof SettingsStorage) {
+            if (mdObject instanceof MDSettingsStorage) {
                 return "0c8cad23-bf8c-468e-b49e-12f1927c048b";
             } else {
                 return "d1b64a2c-8078-4982-8190-8f81aefda192";
@@ -92,7 +89,7 @@ public class Utils {
         return "UNKNOWN";
     }
 
-    private static String getUriKey(String mdObjUuid, ModuleType moduleType, MDObjectBase mdObj) {
+    private static String getUriKey(String mdObjUuid, ModuleType moduleType, AbstractMDObjectBase mdObj) {
         return mdObjUuid + "/" + getModuleTypeUuid(moduleType, mdObj);
     }
 
@@ -135,7 +132,8 @@ public class Utils {
 
         if (linesToCover.length > 0) {
 
-            List<Token> comments = tokenizer.getTokens().stream()
+            List<Token> allTokens = tokenizer.getTokens();
+            List<Token> comments = allTokens.stream()
                     .filter(token -> token.getType() == BSLLexer.LINE_COMMENT)
                     .collect(Collectors.toList());
 
@@ -220,7 +218,7 @@ public class Utils {
                 Configuration conf = Configuration.create(rootPath);
 
                 for (MDOModule module : conf.getModules()) {
-                    MDObjectBase mdObj = module.getOwner();
+                    AbstractMDObjectBase mdObj = module.getOwner();
 
                     String mdObjUuid = mdObj.getUuid();
 
@@ -347,8 +345,120 @@ public class Utils {
             dumpGenericCoverageFile(coverageData, metadataOptions, outputOptions);
         } else if (outputOptions.getOutputFormat() == OutputOptions.OutputFormat.LCOV) {
             dumpLcovFile(coverageData, metadataOptions, outputOptions);
+        } else if (outputOptions.getOutputFormat() == OutputOptions.OutputFormat.COBERTURA) {
+            dumpCoberturaFile(coverageData, metadataOptions, outputOptions);
         } else {
             logger.info("Unknown format");
+        }
+    }
+
+    private static void dumpCoberturaFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
+                                          MetadataOptions metadataOptions,
+                                          OutputOptions outputOptions) {
+        DocumentBuilderFactory icFactory = DocumentBuilderFactory.newInstance();
+        DocumentBuilder icBuilder;
+        try {
+            long linesToCover = 0;
+            long coveredLinesCount = 0;
+            for (Map<BigDecimal, Integer> bigDecimalMap : coverageData.values()) {
+                linesToCover += bigDecimalMap.values().stream().filter(value -> value >= 0).count();
+                coveredLinesCount += bigDecimalMap.values().stream().filter(value -> value > 0).count();
+            }
+            logger.info("Lines to cover: " + linesToCover);
+            logger.info("Covered lines: " + coveredLinesCount);
+            if (linesToCover > 0) {
+                logger.info("Coverage: " + Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100. + "%");
+            }
+
+            URI projectUri = Path.of(metadataOptions.getProjectDirName()).toUri();
+            icBuilder = icFactory.newDocumentBuilder();
+            Document doc = icBuilder.newDocument();
+            Element mainRootElement = doc.createElement("coverage");
+            String lineRate = "0.0";
+            if (linesToCover > 0) {
+                lineRate = String.valueOf(Math.floorDiv(coveredLinesCount * 100, linesToCover) / 100.);
+            }
+            mainRootElement.setAttribute("line-rate", lineRate);
+            mainRootElement.setAttribute("branch-rate", "0.0");
+            mainRootElement.setAttribute("lines-covered", String.valueOf(coveredLinesCount));
+            mainRootElement.setAttribute("lines-valid", String.valueOf(linesToCover));
+            mainRootElement.setAttribute("branches-covered", "0");
+            mainRootElement.setAttribute("branches-valid", "0");
+            mainRootElement.setAttribute("complexity", "0");
+            mainRootElement.setAttribute("version", "0");
+            mainRootElement.setAttribute("timestamp", String.valueOf(Instant.now().getEpochSecond()));
+            doc.appendChild(mainRootElement);
+
+            Element sourcesElement = doc.createElement("sources");
+            mainRootElement.appendChild(sourcesElement);
+
+            Element sourceElement = doc.createElement("source");
+            String[] projectDirArray = projectUri.getPath().split("/");
+            if (projectDirArray.length > 2) {
+                sourceElement.setTextContent("/builds/" + projectDirArray[projectDirArray.length - 2] + "/" + projectDirArray[projectDirArray.length - 1] + "/");
+            } else {
+                sourcesElement.setTextContent(projectUri.getPath());
+            }
+            sourcesElement.appendChild(sourceElement);
+
+            Element packagesElement = doc.createElement("packages");
+            mainRootElement.appendChild(packagesElement);
+
+            Element packageElement = doc.createElement("package");
+            packageElement.setAttribute("name", "Main");
+            packageElement.setAttribute("line-rate", lineRate);
+            packageElement.setAttribute("branch-rate", "0.0");
+            packageElement.setAttribute("complexity", "0");
+            packagesElement.appendChild(packageElement);
+
+            Element classesElement = doc.createElement("classes");
+            packageElement.appendChild(classesElement);
+
+            coverageData.forEach((uri, bigDecimalsMap) -> {
+                if (bigDecimalsMap.isEmpty()) {
+                    return;
+                }
+
+                long fileLinesToCover = bigDecimalsMap.values().stream().filter(value -> value >= 0).count();
+                long fileCoveredLinesCount = bigDecimalsMap.values().stream().filter(value -> value > 0).count();
+                String fileLineRate = "0.0";
+                if (fileLinesToCover > 0) {
+                    fileLineRate = String.valueOf(Math.floorDiv(fileCoveredLinesCount * 100, fileLinesToCover) / 100.);
+                }
+
+                Element classElement = doc.createElement("class");
+                classElement.setAttribute("name", projectUri.relativize(uri).getPath());
+                classElement.setAttribute("line-rate", fileLineRate);
+                classElement.setAttribute("branch-rate", "0.0");
+                classElement.setAttribute("complexity", "0");
+                classElement.setAttribute("filename", projectUri.relativize(uri).getPath());
+                classesElement.appendChild(classElement);
+
+                Element methodsElement = doc.createElement("methods");
+                classElement.appendChild(methodsElement);
+
+                bigDecimalsMap.forEach((bigDecimal, hits) -> {
+                    if (hits >= 0) {
+                        Element lineElement = doc.createElement("line");
+                        lineElement.setAttribute("hits", String.valueOf(hits));
+                        lineElement.setAttribute("number", bigDecimal.toString());
+                        lineElement.setAttribute("branch", "false");
+                        classElement.appendChild(lineElement);
+                    }
+                });
+            });
+            Transformer transformer = TransformerFactory.newInstance().newTransformer();
+            transformer.setOutputProperty(OutputKeys.INDENT, "yes");
+            DOMSource source = new DOMSource(doc);
+            StreamResult outputStream;
+            if (outputOptions.getOutputFile() == null) {
+                outputStream = new StreamResult(System.out);
+            } else {
+                outputStream = new StreamResult(new FileOutputStream(outputOptions.getOutputFile()));
+            }
+            transformer.transform(source, outputStream);
+        } catch (Exception e) {
+            logger.error(e.getLocalizedMessage());
         }
     }
 
@@ -537,7 +647,9 @@ public class Utils {
             pipeName = String.format("\\\\.\\pipe\\COVER_%s_%s", connectionOptions.getInfobaseAlias(),
                     debugUri.toString().replaceAll("[^a-zA-Z0-9-_.]", "_"));
         } else {
-            Path tempDir = Files.createTempDirectory("coverage41c");
+            File tempDirFile = new File("/tmp/coverage41c/");
+            tempDirFile.mkdirs();
+            Path tempDir = tempDirFile.toPath();
             Path sock = tempDir.resolve(String.format("%s_%s.sock", connectionOptions.getInfobaseAlias(),
                     debugUri.toString().replaceAll("[^a-zA-Z0-9-_.]", "_")));
             pipeName = sock.toString();

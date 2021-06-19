@@ -36,7 +36,7 @@ class CoverageTest {
 
     final String ibUser = "Администратор";
     final String ibPassword = "\\\"\\\"";
-    final String v8version = "8.3.17";
+    final String v8version = "8.3.18.";
     final String buildDirName = "build";
 
     String vrunnerExecutable = "vrunner";
@@ -136,7 +136,7 @@ class CoverageTest {
             return mainAppReturnCode;
         });
 
-        Thread.sleep(500); // wait for socket server
+        Thread.sleep(1500); // wait for socket server
 
         String[] mainAppCheckArguments = {
                 PipeMessages.CHECK_COMMAND,
