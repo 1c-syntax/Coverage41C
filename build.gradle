@@ -7,7 +7,7 @@ plugins {
 }
 
 group 'com.clouds42'
-version '2.5'
+version '2.5.1'
 
 sourceCompatibility = 11
 
@@ -76,7 +76,7 @@ dependencies {
         exclude group: "org.glassfish", module: "javax.json"
     }
 
-    compile fileTree(edtLocation) { include 'com._1c.g5.v8.dt.debug.*.jar' }
+    providedCompile fileTree(edtLocation) { include 'com._1c.g5.v8.dt.debug.*.jar' }
 
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.6.2'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.6.2'

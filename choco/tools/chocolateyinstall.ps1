@@ -2,7 +2,7 @@
 $toolsDir   = "$(Split-Path -parent $MyInvocation.MyCommand.Definition)"
 $url = "https://github.com/proDOOMman/Coverage41C/releases/download/v$($env:chocolateyPackageVersion)/$($env:ChocolateyPackageName)-$($env:chocolateyPackageVersion).zip"
 
-$checksum = "0A3D91E605E99B6462DD1B67501BD4AE2A06F27371ADB245B38B8CAFD1E7DB34"
+$checksum = "FAA275EE03A79337D9FA12FF5F1FCF6A2D52E09C8C708EA5AEC6C8C8FCFC1436"
 
 $packageArgs = @{
   packageName   = $env:ChocolateyPackageName

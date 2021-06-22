@@ -2,17 +2,17 @@
 <package xmlns="http://schemas.microsoft.com/packaging/2015/06/nuspec.xsd">
   <metadata>
     <id>Coverage41C</id>
-    <version>2.5</version>
-    <packageSourceUrl>https://github.com/proDOOMman/Coverage41C</packageSourceUrl>
+    <version>2.5.1</version>
+    <packageSourceUrl>https://github.com/1c-syntax/Coverage41C</packageSourceUrl>
     <owners>proDOOMman</owners>
     <title>Coverage41C (Install)</title>
     <authors>Stanislav Kosolapov</authors>
-    <projectUrl>https://github.com/proDOOMman/Coverage41C</projectUrl>
+    <projectUrl>https://github.com/1c-syntax/Coverage41C</projectUrl>
     <copyright>2020 proDOOMman</copyright>
-    <licenseUrl>https://raw.githubusercontent.com/proDOOMman/Coverage41C/master/LICENSE</licenseUrl>
+    <licenseUrl>https://raw.githubusercontent.com/1c-syntax/Coverage41C/master/LICENSE</licenseUrl>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
     <docsUrl>https://42clouds.com/ru-ru/techdocs/raschyot-pokrytiya-koda-1C-testami.html</docsUrl>
-    <bugTrackerUrl>https://github.com/proDOOMman/Coverage41C/issues</bugTrackerUrl>
+    <bugTrackerUrl>https://github.com/1c-syntax/Coverage41C/issues</bugTrackerUrl>
     <tags>Coverage41C 1С Java</tags>
     <summary>Coverage tool for 1C:Enterprise</summary>
     <description>Coverage41C measure coverage in 1C:Enterprise applications and export them to genericCoverage.xml for SonarQube</description>
