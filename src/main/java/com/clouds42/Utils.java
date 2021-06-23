@@ -3,18 +3,22 @@ package com.clouds42;
 import com.clouds42.CommandLineOptions.ConnectionOptions;
 import com.clouds42.CommandLineOptions.MetadataOptions;
 import com.clouds42.CommandLineOptions.OutputOptions;
-import com.github._1c_syntax.bsl.parser.*;
+import com.github._1c_syntax.bsl.parser.BSLLexer;
+import com.github._1c_syntax.bsl.parser.BSLParser;
+import com.github._1c_syntax.bsl.parser.BSLParserRuleContext;
+import com.github._1c_syntax.bsl.parser.BSLTokenizer;
+import com.github._1c_syntax.bsl.parser.Tokenizer;
+import com.github._1c_syntax.mdclasses.Configuration;
 import com.github._1c_syntax.mdclasses.mdo.AbstractMDObjectBase;
 import com.github._1c_syntax.mdclasses.mdo.MDSettingsStorage;
-import com.github._1c_syntax.mdclasses.Configuration;
 import com.github._1c_syntax.mdclasses.mdo.support.MDOModule;
 import com.github._1c_syntax.mdclasses.mdo.support.ModuleType;
 import com.github._1c_syntax.mdclasses.supportconf.SupportVariant;
 import de.vandermeer.asciitable.AsciiTable;
 import de.vandermeer.asciitable.CWC_LongestLine;
 import org.antlr.v4.runtime.Token;
+import org.antlr.v4.runtime.tree.ParseTree;
 import org.antlr.v4.runtime.tree.TerminalNodeImpl;
-import org.antlr.v4.runtime.tree.Tree;
 import org.antlr.v4.runtime.tree.Trees;
 import org.apache.commons.lang3.Range;
 import org.slf4j.Logger;
@@ -183,15 +187,14 @@ public class Utils {
         coverageData.put(uri, coverMap);
     }
 
-    private static boolean mustCovered(Tree node) {
+    private static boolean mustCovered(ParseTree node) {
         return (node instanceof BSLParser.StatementContext
-                && ((BSLParser.StatementContext) node).children.stream().noneMatch(parseTree ->
+                && Trees.getChildren(node).stream().noneMatch(parseTree ->
                 parseTree instanceof BSLParser.PreprocessorContext
                         || parseTree instanceof BSLParser.CompoundStatementContext
-                        && ((BSLParser.CompoundStatementContext) parseTree).children.stream().anyMatch(
+                        && Trees.getChildren(parseTree).stream().anyMatch(
                         parseTree1 -> parseTree1 instanceof BSLParser.TryStatementContext)))
-                || node instanceof BSLParser.GlobalMethodCallContext
-                || node instanceof BSLParser.Var_nameContext;
+                || node instanceof BSLParser.GlobalMethodCallContext;
     }
 
     public static Map<String, URI> readMetadata(MetadataOptions metadataOptions,
