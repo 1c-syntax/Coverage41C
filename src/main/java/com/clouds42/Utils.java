@@ -194,8 +194,7 @@ public class Utils {
                         || parseTree instanceof BSLParser.CompoundStatementContext
                         && Trees.getChildren(parseTree).stream().anyMatch(
                         parseTree1 -> parseTree1 instanceof BSLParser.TryStatementContext)))
-                || node instanceof BSLParser.GlobalMethodCallContext
-                || node instanceof BSLParser.Var_nameContext;
+                || node instanceof BSLParser.GlobalMethodCallContext;
     }
 
     public static Map<String, URI> readMetadata(MetadataOptions metadataOptions,
