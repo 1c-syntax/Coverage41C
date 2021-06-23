@@ -3,10 +3,14 @@ package com.clouds42;
 import com.clouds42.CommandLineOptions.ConnectionOptions;
 import com.clouds42.CommandLineOptions.MetadataOptions;
 import com.clouds42.CommandLineOptions.OutputOptions;
-import com.github._1c_syntax.bsl.parser.*;
+import com.github._1c_syntax.bsl.parser.BSLLexer;
+import com.github._1c_syntax.bsl.parser.BSLParser;
+import com.github._1c_syntax.bsl.parser.BSLParserRuleContext;
+import com.github._1c_syntax.bsl.parser.BSLTokenizer;
+import com.github._1c_syntax.bsl.parser.Tokenizer;
+import com.github._1c_syntax.mdclasses.Configuration;
 import com.github._1c_syntax.mdclasses.mdo.AbstractMDObjectBase;
 import com.github._1c_syntax.mdclasses.mdo.MDSettingsStorage;
-import com.github._1c_syntax.mdclasses.Configuration;
 import com.github._1c_syntax.mdclasses.mdo.support.MDOModule;
 import com.github._1c_syntax.mdclasses.mdo.support.ModuleType;
 import com.github._1c_syntax.mdclasses.supportconf.SupportVariant;
@@ -185,10 +189,10 @@ public class Utils {
 
     private static boolean mustCovered(Tree node) {
         return (node instanceof BSLParser.StatementContext
-                && ((BSLParser.StatementContext) node).children.stream().noneMatch(parseTree ->
+                && Trees.getChildren(node).stream().noneMatch(parseTree ->
                 parseTree instanceof BSLParser.PreprocessorContext
                         || parseTree instanceof BSLParser.CompoundStatementContext
-                        && ((BSLParser.CompoundStatementContext) parseTree).children.stream().anyMatch(
+                        && Trees.getChildren(parseTree).stream().anyMatch(
                         parseTree1 -> parseTree1 instanceof BSLParser.TryStatementContext)))
                 || node instanceof BSLParser.GlobalMethodCallContext
                 || node instanceof BSLParser.Var_nameContext;
