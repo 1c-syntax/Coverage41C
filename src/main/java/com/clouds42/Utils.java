@@ -17,8 +17,8 @@ import com.github._1c_syntax.mdclasses.supportconf.SupportVariant;
 import de.vandermeer.asciitable.AsciiTable;
 import de.vandermeer.asciitable.CWC_LongestLine;
 import org.antlr.v4.runtime.Token;
+import org.antlr.v4.runtime.tree.ParseTree;
 import org.antlr.v4.runtime.tree.TerminalNodeImpl;
-import org.antlr.v4.runtime.tree.Tree;
 import org.antlr.v4.runtime.tree.Trees;
 import org.apache.commons.lang3.Range;
 import org.slf4j.Logger;
@@ -187,7 +187,7 @@ public class Utils {
         coverageData.put(uri, coverMap);
     }
 
-    private static boolean mustCovered(Tree node) {
+    private static boolean mustCovered(ParseTree node) {
         return (node instanceof BSLParser.StatementContext
                 && Trees.getChildren(node).stream().noneMatch(parseTree ->
                 parseTree instanceof BSLParser.PreprocessorContext
