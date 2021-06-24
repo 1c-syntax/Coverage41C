@@ -28,7 +28,9 @@
         <lineToCover covered="false" lineNumber="3"/>
     </file>
     <file path="src/test/resources/edt/pc/src/Catalogs/Справочник1/Forms/ФормаСписка/Module.bsl">
-        <lineToCover covered="true" lineNumber="4"/>
+        <lineToCover covered="true" lineNumber="5"/>
+        <lineToCover covered="true" lineNumber="6"/>
+        <lineToCover covered="true" lineNumber="8"/>
     </file>
     <file path="src/test/resources/edt/pc/src/CommonCommands/ОбщаяКоманда1/CommandModule.bsl">
         <lineToCover covered="true" lineNumber="5"/>
