@@ -186,7 +186,9 @@
         <lineToCover covered="true" lineNumber="3"/>
     </file>
     <file path="src/test/resources/configuration/Catalogs/Справочник1/Forms/ФормаСписка/Ext/Form/Module.bsl">
-        <lineToCover covered="true" lineNumber="4"/>
+        <lineToCover covered="true" lineNumber="5"/>
+        <lineToCover covered="true" lineNumber="6"/>
+        <lineToCover covered="true" lineNumber="8"/>
     </file>
     <file path="src/test/resources/configuration/AccountingRegisters/РегистрБухгалтерии1/Ext/RecordSetModule.bsl">
         <lineToCover covered="false" lineNumber="3"/>
