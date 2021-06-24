@@ -4,8 +4,6 @@ import com.clouds42.CommandLineOptions.ConnectionOptions;
 import com.clouds42.CommandLineOptions.MetadataOptions;
 import com.clouds42.CommandLineOptions.OutputOptions;
 import com.github._1c_syntax.bsl.parser.BSLLexer;
-import com.github._1c_syntax.bsl.parser.BSLParser;
-import com.github._1c_syntax.bsl.parser.BSLParserRuleContext;
 import com.github._1c_syntax.bsl.parser.BSLTokenizer;
 import com.github._1c_syntax.bsl.parser.Tokenizer;
 import com.github._1c_syntax.mdclasses.Configuration;
@@ -17,9 +15,6 @@ import com.github._1c_syntax.mdclasses.supportconf.SupportVariant;
 import de.vandermeer.asciitable.AsciiTable;
 import de.vandermeer.asciitable.CWC_LongestLine;
 import org.antlr.v4.runtime.Token;
-import org.antlr.v4.runtime.tree.ParseTree;
-import org.antlr.v4.runtime.tree.TerminalNodeImpl;
-import org.antlr.v4.runtime.tree.Trees;
 import org.apache.commons.lang3.Range;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -123,11 +118,7 @@ public class Utils {
             return;
         }
 
-        int[] linesToCover = Trees.getDescendants(tokenizer.getAst()).stream()
-                .filter(node -> !(node instanceof TerminalNodeImpl))
-                .filter(Utils::mustCovered)
-                .mapToInt(node -> ((BSLParserRuleContext) node).getStart().getLine())
-                .distinct().toArray();
+        int[] linesToCover = LinesToCover.getLines(tokenizer.getAst());
 
         List<Range<Integer>> coverageIgnorance = new ArrayList<>();
         Stack<Integer> coverageIgnoranceStartStack = new Stack();
@@ -185,16 +176,6 @@ public class Utils {
             coverMap.put(new BigDecimal(lineNumber), countValue);
         }
         coverageData.put(uri, coverMap);
-    }
-
-    private static boolean mustCovered(ParseTree node) {
-        return (node instanceof BSLParser.StatementContext
-                && Trees.getChildren(node).stream().noneMatch(parseTree ->
-                parseTree instanceof BSLParser.PreprocessorContext
-                        || parseTree instanceof BSLParser.CompoundStatementContext
-                        && Trees.getChildren(parseTree).stream().anyMatch(
-                        parseTree1 -> parseTree1 instanceof BSLParser.TryStatementContext)))
-                || node instanceof BSLParser.GlobalMethodCallContext;
     }
 
     public static Map<String, URI> readMetadata(MetadataOptions metadataOptions,
