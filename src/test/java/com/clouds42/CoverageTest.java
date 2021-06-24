@@ -36,7 +36,7 @@ class CoverageTest {
 
     final String ibUser = "Администратор";
     final String ibPassword = "\\\"\\\"";
-    final String v8version = "8.3.18.";
+    final String v8version = "8.3.18";
     final String buildDirName = "build";
 
     String vrunnerExecutable = "vrunner";
