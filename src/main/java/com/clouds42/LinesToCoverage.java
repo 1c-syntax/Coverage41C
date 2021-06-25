@@ -6,13 +6,13 @@ import org.antlr.v4.runtime.tree.ParseTree;
 import org.antlr.v4.runtime.tree.TerminalNodeImpl;
 import org.antlr.v4.runtime.tree.Trees;
 
-public class LinesToCover {
+public class LinesToCoverage {
 
     static int[] getLines(BSLParserRuleContext ast) {
 
         return Trees.getDescendants(ast).stream()
                 .filter(node -> !(node instanceof TerminalNodeImpl))
-                .filter(LinesToCover::mustCovered)
+                .filter(LinesToCoverage::mustCovered)
                 .mapToInt(node -> ((BSLParserRuleContext) node).getStart().getLine())
                 .distinct().toArray();
     }
@@ -23,7 +23,7 @@ public class LinesToCover {
                 parseTree instanceof BSLParser.PreprocessorContext
                         || parseTree instanceof BSLParser.CompoundStatementContext
                         && Trees.getChildren(parseTree).stream().anyMatch(
-                        parseTree1 -> parseTree1 instanceof BSLParser.TryStatementContext)))
+                        child -> child instanceof BSLParser.TryStatementContext)))
                 || node instanceof BSLParser.GlobalMethodCallContext;
     }
 

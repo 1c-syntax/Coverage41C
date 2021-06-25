@@ -118,7 +118,7 @@ public class Utils {
             return;
         }
 
-        int[] linesToCover = LinesToCover.getLines(tokenizer.getAst());
+        int[] linesToCover = LinesToCoverage.getLines(tokenizer.getAst());
 
         List<Range<Integer>> coverageIgnorance = new ArrayList<>();
         Stack<Integer> coverageIgnoranceStartStack = new Stack();
