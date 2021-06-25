@@ -65,7 +65,7 @@ dependencies {
 
     compile group: 'de.vandermeer', name:'asciitable', version: '0.3.2'
 
-    implementation 'com.github.1c-syntax:mdclasses:0.9.3'
+    implementation 'com.github.1c-syntax:mdclasses:a5ce5cd5439201040caf27fdc8e4763a7f45f65c'
 
     implementation('com.github.1c-syntax:bsl-parser:0.19.3') {
         exclude group: "com.tunnelvisionlabs", module: "antlr4-annotations"
