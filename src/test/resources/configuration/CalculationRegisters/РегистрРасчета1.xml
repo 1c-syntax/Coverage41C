@@ -126,6 +126,7 @@
 					<FullTextSearch>Use</FullTextSearch>
 				</Properties>
 			</Dimension>
+			<Recalculation>Перерасчет1</Recalculation>
 			<Form>ФормаСписка</Form>
 		</ChildObjects>
 	</CalculationRegister>

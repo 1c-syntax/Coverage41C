@@ -1,0 +1,26 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.9">
+	<Recalculation uuid="b6bf09de-cb9b-4d7f-a755-044d4d832b7e">
+		<InternalInfo>
+			<xr:GeneratedType name="RecalculationRecord.РегистрРасчета1.Перерасчет1" category="Record">
+				<xr:TypeId>b50174ca-e9a2-4a84-8eee-0dda65e5f0f3</xr:TypeId>
+				<xr:ValueId>0ff8840c-f815-4c0b-a33a-74d787f9d844</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="RecalculationManager.РегистрРасчета1.Перерасчет1" category="Manager">
+				<xr:TypeId>7f3769f5-31e4-4311-a602-bc19551c7973</xr:TypeId>
+				<xr:ValueId>1623489d-39ab-4753-8b01-9d6c5a7b9440</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="RecalculationRecordSet.РегистрРасчета1.Перерасчет1" category="RecordSet">
+				<xr:TypeId>01fd1c65-5d34-48e5-83f3-964a3b088082</xr:TypeId>
+				<xr:ValueId>090c4f8a-0171-497d-aeb9-73d34b65bc3e</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>Перерасчет1</Name>
+			<Synonym/>
+			<Comment/>
+			<DataLockControlMode>Managed</DataLockControlMode>
+		</Properties>
+		<ChildObjects/>
+	</Recalculation>
+</MetaDataObject>
