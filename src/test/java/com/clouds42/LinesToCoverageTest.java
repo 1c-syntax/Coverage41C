@@ -45,9 +45,9 @@ class LinesToCoverageTest {
         // 13, 17, 19, 22, 23, 24, 27, 29, 30, 31, 33, 34, 35, 38, 39, 41, 42, 45, 46, 50, 51, 52, 54,
         // 56, 58, 60, 66, 67, 69, 70, 71, 73, 74, 75, 78, 79, 80, 81, 82, 84, 92, 93, 94, 98, 103, 105,
         // 112, 112
-        var expected = new int[]{ 13, 17, 19, 22, 23, 24, 27, 29, 30, 31, 33, 34, 35, 38, 39, 41, 42, 45, 46, 50, 51, 52, 54,
-                 56, 58, 60, 66, 67, 69, 70, 71, 73, 74, 75, 76, 78, 79, 80, 81, 82, 84, 92, 93, 94, 98, 103, 105,
-                 112};
+        var expected = new int[]{13, 17, 19, 22, 23, 24, 27, 29, 30, 31, 33, 34, 35, 38, 39, 41, 42, 45, 46, 50, 51, 52, 54,
+                56, 58, 60, 66, 67, 69, 70, 71, 73, 74, 75, 76, 78, 79, 80, 81, 82, 84, 92, 93, 94, 98, 103, 105,
+                112};
         assertThat(linesToCover, equalTo(expected));
     }
 
@@ -71,7 +71,23 @@ class LinesToCoverageTest {
 
         int[] linesToCover = LinesToCoverage.getLines(tokenizer.getAst());
 
-        var expected = new int[]{3, 4, 8, 13, 19, 21, 24, 25, 27};
+        // 3 , 8 , 15, 18, 19, 20, 21, 23, 24, 29, 30, 31, 32, 33, 34, 35, 36, 37, 41, 42, 48,
+        // 51, 53, 57, 63, 66, 67, 68, 69, 70, 72, 72
+        var expected = new int[]{3, 8, 15, 18, 19, 20, 21, 23, 24, 29, 30, 31, 32, 33, 34, 35, 36, 37, 41, 42, 48,
+                50, 53, 57, 60, 63, 66, 67, 68, 69, 70, 72};
+        assertThat(linesToCover, equalTo(expected));
+    }
+
+    @Test
+    void AssigmentTest() throws IOException {
+
+        var file = new File("src/test/resources/linestocoverage/assigment.bsl");
+        BSLTokenizer tokenizer = new BSLTokenizer(Files.readString(file.toPath()));
+
+        int[] linesToCover = LinesToCoverage.getLines(tokenizer.getAst());
+
+        // 4	, 10, 17, 21, 25, 31, 37, 43, 45, 51, 57, 62, 66, 70, 74, 78, 80, 80, 81, 81
+        var expected = new int[]{4, 10, 17, 21, 25, 31, 37, 43, 45, 51, 57, 62, 66, 70, 74, 78, 80, 81};
         assertThat(linesToCover, equalTo(expected));
     }
 }

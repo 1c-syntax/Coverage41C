@@ -45,7 +45,8 @@ public class LinesToCoverage {
             BSLParser.ForEachStatementContext.class,
             BSLParser.ForStatementContext.class,
             BSLParser.WhileStatementContext.class,
-            BSLParser.GlobalMethodCallContext.class
+            BSLParser.GlobalMethodCallContext.class,
+            BSLParser.MethodCallContext.class
     );
 
     private static final Set<Integer> tokenTypes = Set.of(
@@ -62,6 +63,7 @@ public class LinesToCoverage {
         return Trees.getDescendants(ast).stream()
                 .filter(LinesToCoverage::mustCovered)
                 .mapToInt(LinesToCoverage::getLine)
+                .filter(lineNumber -> lineNumber != 0)
                 .distinct().toArray();
     }
 
@@ -81,11 +83,47 @@ public class LinesToCoverage {
     private static int getLine(ParseTree node) {
 
         if (node instanceof ParserRuleContext) {
-            return ((ParserRuleContext) node).getStart().getLine();
+            if (!(node instanceof BSLParser.MethodCallContext)) {
+                return ((ParserRuleContext) node).getStart().getLine();
+            }
+            var methodCall = getRootParent((BSLParserRuleContext) node, BSLParser.RULE_complexIdentifier);
+            if (methodCall != null) {
+                return methodCall.getStart().getLine();
+            }
         } else if (node instanceof TerminalNode) {
             return ((TerminalNode) node).getSymbol().getLine();
         }
 
-        throw new IllegalArgumentException();
+        return 0;
+    }
+
+    // Удалить после переноса хелпера в парсер
+
+    /**
+     * Рекурсивно находит самого верхнего родителя текущей ноды нужного типа
+     *
+     * @param tnc       - нода, для которой ищем родителя
+     * @param ruleindex - BSLParser.RULE_*
+     * @return tnc - если родитель не найден, вернет null
+     */
+    public static BSLParserRuleContext getRootParent(BSLParserRuleContext tnc, int ruleindex) {
+        final var parent = tnc.getParent();
+        if (parent == null) {
+            return null;
+        }
+
+        if (getRuleIndex(parent) == ruleindex) {
+            return (BSLParserRuleContext) parent;
+        } else {
+            return getRootParent((BSLParserRuleContext) parent, ruleindex);
+        }
+    }
+
+    private static int getRuleIndex(ParseTree node) {
+        if (node instanceof TerminalNode) {
+            return ((TerminalNode) node).getSymbol().getType();
+        } else {
+            return ((BSLParserRuleContext) node).getRuleIndex();
+        }
     }
 }
