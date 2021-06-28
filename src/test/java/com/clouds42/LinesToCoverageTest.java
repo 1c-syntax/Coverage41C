@@ -86,8 +86,10 @@ class LinesToCoverageTest {
 
         int[] linesToCover = LinesToCoverage.getLines(tokenizer.getAst());
 
-        // 4	, 10, 17, 21, 25, 31, 37, 43, 45, 51, 57, 62, 66, 70, 74, 78, 80, 80, 81, 81
-        var expected = new int[]{4, 10, 17, 21, 25, 31, 37, 43, 45, 51, 57, 62, 66, 70, 74, 78, 80, 81};
+        // Реальный замер
+        // 5, 11, 18, 22, 26, 32, 38, 44, 46, 52, 58, 63, 68, 70, 79, 83, 87, 91, 94, 98, 102, 104, 104, 105, 105
+        var expected = new int[]{5, 11, 18, 22, 26, 32, 38, 44, 46, 52, 58, 63, 68, 70, 79, 83, 87, 91, 94, 98, 102,
+                104, 105, };
         assertThat(linesToCover, equalTo(expected));
     }
 
