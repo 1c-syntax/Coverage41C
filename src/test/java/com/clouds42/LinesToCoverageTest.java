@@ -112,6 +112,24 @@ class LinesToCoverageTest {
         assertThat(linesToCover, equalTo(expected));
     }
 
+    @Test
+    void otherTest() throws IOException {
+
+        var file = new File("src/test/resources/linestocoverage/other.bsl");
+        BSLTokenizer tokenizer = new BSLTokenizer(Files.readString(file.toPath()));
+
+        int[] linesToCover = LinesToCoverage.getLines(tokenizer.getAst());
+
+        // Реальный замер
+        // 1, 4, 10, 15, 18, 19, 21, 34, 48, 50, 53, 55, 59, 61, 62, 64, 65, 70, 72, 76, 80, 84, 87, 91, 92, 94, 94,
+        // 95, 95, 96, 96
+        var expected = new int[]{4, 10, 15, 18, 19, 21, 34, 48, 50, 53, 55, 59, 61, 62, 64, 65,
+                67, // ИнформацияОбОшибке() Ее тут быть не должно
+                70, 72, 76, 80, 84,
+                87, 91, 92, 94, 95, 96};
+
+        assertThat(linesToCover, equalTo(expected));
+    }
 
     @Test
     void NotCoveredTest() throws IOException {
