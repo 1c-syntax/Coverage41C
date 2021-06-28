@@ -90,4 +90,23 @@ class LinesToCoverageTest {
         var expected = new int[]{4, 10, 17, 21, 25, 31, 37, 43, 45, 51, 57, 62, 66, 70, 74, 78, 80, 81};
         assertThat(linesToCover, equalTo(expected));
     }
+
+    @Test
+    void DoTest() throws IOException {
+
+        var file = new File("src/test/resources/linestocoverage/do.bsl");
+        BSLTokenizer tokenizer = new BSLTokenizer(Files.readString(file.toPath()));
+
+        int[] linesToCover = LinesToCoverage.getLines(tokenizer.getAst());
+
+        // Реальный замер
+        //  4, 5, 6, 7, 8, 12, 16, 22, 23, 25, 30, 31, 32, 33, 34, 35, 36, 37, 39, 43, 44, 53, 54,
+        //  56, 61, 64, 65, 66, 67, 68, 70, 75, 76, 77, 78, 79, 80, 82, 85, 86, 89, 95, 96, 97, 99, 102, 103,
+        //  106, 107, 109, 109, 110, 110, 111, 111, 112, 112
+        var expected = new int[]{4, 5, 6, 7, 8, 12, 16, 22, 23, 25, 30, 31, 32, 33, 34, 35, 36, 37, 39, 43, 44, 53, 54,
+                56, 61, 64, 65, 66, 67, 68, 70, 75, 76, 77, 78, 79, 80, 82, 85, 86, 89, 95, 96, 97, 99, 102, 103, 106,
+                107, 109, 110, 111, 112};
+
+        assertThat(linesToCover, equalTo(expected));
+    }
 }
