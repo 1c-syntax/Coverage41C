@@ -63,6 +63,7 @@ public class LinesToCoverage {
 
         return Trees.getDescendants(ast).stream()
                 .filter(LinesToCoverage::mustCovered)
+                .filter(GlobalCallsFilter::filterByName)
                 .mapToInt(LinesToCoverage::getLine)
                 .filter(lineNumber -> lineNumber != 0)
                 .distinct().toArray();
