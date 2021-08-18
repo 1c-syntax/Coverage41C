@@ -4,6 +4,7 @@ plugins {
     id 'jacoco'
     id "com.github.breadmoirai.github-release" version "2.2.12"
     id "com.github.jarmstrong.buildconfig" version "1.9.0"
+    id "com.github.hierynomus.license" version "0.15.0"
 }
 
 group 'com.clouds42'
@@ -130,4 +131,22 @@ githubRelease {
     targetCommitish "master"
     releaseAssets.from(distZip.archiveFile)
     dryRun false
+}
+
+license {
+    header = rootProject.file("HEADER.txt")
+
+    ext["year"] = "2020-" + Calendar.getInstance().get(Calendar.YEAR)
+    ext["name"] = "Kosolapov Stanislav aka proDOOMman <prodoomman@gmail.com>"
+    ext["project"] = "Coverage41C"
+    exclude("**/*.properties")
+    exclude("**/*.xml")
+    exclude("**/*.json")
+    exclude("**/*.bsl")
+    exclude("**/*.os")
+    exclude("**/*.txt")
+    exclude("**/*.java.orig")
+    exclude("**/*.impl")
+    strictCheck = true
+    mapping("java", "SLASHSTAR_STYLE")
 }
