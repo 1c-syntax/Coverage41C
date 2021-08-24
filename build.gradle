@@ -147,6 +147,7 @@ license {
     exclude("**/*.txt")
     exclude("**/*.java.orig")
     exclude("**/*.impl")
+    exclude("**/BuildConfig.java")
     strictCheck = true
     mapping("java", "SLASHSTAR_STYLE")
 }
