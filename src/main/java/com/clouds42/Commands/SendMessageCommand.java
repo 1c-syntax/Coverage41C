@@ -68,10 +68,10 @@ public class SendMessageCommand implements Callable<Integer> {
         BufferedReader pipeIn = new BufferedReader(new InputStreamReader(client.getInputStream()));
         String commandText = new CommandLine(this).getCommandName();
         pipeOut.println(commandText);
-        logger.info("Command send finished: " + commandText);
+        logger.info("Command send finished: {}", commandText);
         String result = "";
         for (int i = 0; i < 10; i++) {
-            logger.info("Try: " + i);
+            logger.info("Try: {}", i);
             try {
                 result = pipeIn.readLine();
                 break;
@@ -81,11 +81,11 @@ public class SendMessageCommand implements Callable<Integer> {
             }
         }
         if (result.equals(PipeMessages.OK_RESULT)) {
-            logger.info("Command success: " + commandText);
+            logger.info("Command success: {}", commandText);
             client.close();
             return CommandLine.ExitCode.OK;
         } else {
-            logger.info("Command failed: " + commandText);
+            logger.info("Command failed: {}", commandText);
             client.close();
             return CommandLine.ExitCode.SOFTWARE;
         }
