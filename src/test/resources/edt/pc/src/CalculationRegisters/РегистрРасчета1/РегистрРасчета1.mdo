@@ -39,6 +39,15 @@
     <maxValue xsi:type="core:UndefinedValue"/>
     <fullTextSearch>Use</fullTextSearch>
   </dimensions>
+  <recalculations uuid="b6bf09de-cb9b-4d7f-a755-044d4d832b7e">
+    <producedTypes>
+      <recordType typeId="b50174ca-e9a2-4a84-8eee-0dda65e5f0f3" valueTypeId="0ff8840c-f815-4c0b-a33a-74d787f9d844"/>
+      <managerType typeId="7f3769f5-31e4-4311-a602-bc19551c7973" valueTypeId="1623489d-39ab-4753-8b01-9d6c5a7b9440"/>
+      <recordSetType typeId="01fd1c65-5d34-48e5-83f3-964a3b088082" valueTypeId="090c4f8a-0171-497d-aeb9-73d34b65bc3e"/>
+    </producedTypes>
+    <name>Перерасчет1</name>
+    <dataLockControlMode>Managed</dataLockControlMode>
+  </recalculations>
   <forms uuid="ccb50988-1274-49b8-a2df-e0e254189782">
     <name>ФормаСписка</name>
     <synonym>

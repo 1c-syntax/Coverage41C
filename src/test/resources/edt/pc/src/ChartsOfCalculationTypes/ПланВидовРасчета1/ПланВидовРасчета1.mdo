@@ -29,6 +29,8 @@
   <editType>InDialog</editType>
   <choiceMode>BothWays</choiceMode>
   <defaultObjectForm>ChartOfCalculationTypes.ПланВидовРасчета1.Form.ФормаВидаРасчета</defaultObjectForm>
+  <dependenceOnCalculationTypes>OnActionPeriod</dependenceOnCalculationTypes>
+  <baseCalculationTypes>ChartOfCalculationTypes.ПланВидовРасчета1</baseCalculationTypes>
   <forms uuid="074ec017-25bd-4bc4-b701-330282691754">
     <name>ФормаВидаРасчета</name>
     <synonym>

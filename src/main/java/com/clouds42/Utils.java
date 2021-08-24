@@ -28,7 +28,7 @@ import com.github._1c_syntax.bsl.parser.BSLLexer;
 import com.github._1c_syntax.bsl.parser.BSLTokenizer;
 import com.github._1c_syntax.bsl.parser.Tokenizer;
 import com.github._1c_syntax.mdclasses.Configuration;
-import com.github._1c_syntax.mdclasses.mdo.AbstractMDObjectBase;
+import com.github._1c_syntax.mdclasses.mdo.MDOHasModule;
 import com.github._1c_syntax.mdclasses.mdo.MDSettingsStorage;
 import com.github._1c_syntax.mdclasses.mdo.support.MDOModule;
 import com.github._1c_syntax.mdclasses.mdo.support.ModuleType;
@@ -73,7 +73,7 @@ public class Utils {
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    public static String getModuleTypeUuid(ModuleType moduleType, AbstractMDObjectBase mdObject) {
+    public static String getModuleTypeUuid(ModuleType moduleType, MDOHasModule mdObject) {
         if (moduleType == ModuleType.CommandModule) {
             return "078a6af8-d22c-4248-9c33-7e90075a3d2c";
         } else if (moduleType == ModuleType.ObjectModule) {
@@ -109,7 +109,7 @@ public class Utils {
         return "UNKNOWN";
     }
 
-    private static String getUriKey(String mdObjUuid, ModuleType moduleType, AbstractMDObjectBase mdObj) {
+    private static String getUriKey(String mdObjUuid, ModuleType moduleType, MDOHasModule mdObj) {
         return mdObjUuid + "/" + getModuleTypeUuid(moduleType, mdObj);
     }
 
@@ -223,7 +223,7 @@ public class Utils {
                 Configuration conf = Configuration.create(rootPath);
 
                 for (MDOModule module : conf.getModules()) {
-                    AbstractMDObjectBase mdObj = module.getOwner();
+                    MDOHasModule mdObj = module.getOwner();
 
                     String mdObjUuid = mdObj.getUuid();
 
