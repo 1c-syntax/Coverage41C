@@ -107,12 +107,12 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     private boolean systemStarted = false;
 
     private void connectAllTargets(List<DebugTargetId> debugTargets) {
-        logger.info("Current debug targets size: " + debugTargets.size());
+        logger.info("Current debug targets size: {}", debugTargets.size());
         debugTargets.forEach(debugTarget -> {
             String id = debugTarget.getId();
             String seanceId = debugTarget.getSeanceId();
             String targetType = debugTarget.getTargetType().getName();
-            logger.info("Id: " + id + ", seance id: " + seanceId + ", target type: " + targetType);
+            logger.info("Id: {} , seance id: {} , target type: {}", id, seanceId, targetType);
             try {
                 client.attachRuntimeDebugTargets(Collections.singletonList(UUID.fromString(debugTarget.getId())));
             } catch (RuntimeDebugClientException e) {
@@ -166,7 +166,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
 
     private void shutdown() throws IOException {
         if (opid > 0 && !Utils.isProcessStillAlive(opid)) {
-            logger.info("Owner process stopped: " + opid);
+            logger.info("Owner process stopped: {}", opid);
         }
 
         gracefulShutdown(null);
@@ -200,7 +200,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         try {
             client.attachRuntimeDebugTargets(Collections.singletonList(UUID.fromString(targetId.getId())));
         } catch (RuntimeDebugClientException e) {
-            logger.info("Command: " + command.getCmdID().getName() + " error!");
+            logger.info("Command: {} error!", command.getCmdID().getName());
             logger.error(e.getLocalizedMessage());
         }
     }
@@ -208,9 +208,9 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     private void mainLoop(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet) throws RuntimeDebugClientException {
         while (!stopExecution.get()) {
             List<? extends DBGUIExtCmdInfoBase> commandsList = client.ping();
-            logger.info("Ping result commands size: " + commandsList.size());
+            logger.info("Ping result commands size: {}", commandsList.size());
             commandsList.forEach(command -> {
-                logger.info("Command: " + command.getCmdID().getName());
+                logger.info("Command: {}", command.getCmdID().getName());
                 if (command.getCmdID() == DBGUIExtCmds.MEASURE_RESULT_PROCESSING) {
                     measureResultProcessing(uriListByKey, externalDataProcessorsUriSet, (DBGUIExtCmdInfoMeasureImpl) command);
                 } else if (command.getCmdID() == DBGUIExtCmds.TARGET_STARTED) {
@@ -228,7 +228,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
             BSLModuleIdInternal moduleId = moduleInfo.getModuleID();
             String moduleUrl = moduleId.getURL();
             if (loggingOptions.isVerbose() && !moduleUrl.isEmpty() && !externalDataProcessorsUriSet.contains(moduleUrl)) {
-                logger.info("Found external data processor: " + moduleUrl);
+                logger.info("Found external data processor: {}", moduleUrl);
                 externalDataProcessorsUriSet.add(moduleUrl);
             }
             String moduleExtensionName = moduleId.getExtensionName();
@@ -245,8 +245,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                     uri = URI.create("file:///" + key);
                 }
                 if (uri == null) {
-                    logger.info("Couldn't find object id " + objectId
-                            + ", property id " + propertyId + " in sources!");
+                    logger.info("Couldn't find object id {}, property id {} in sources!", objectId, propertyId);
                 } else {
                     EList<PerformanceInfoLine> lineInfoList = moduleInfo.getLineInfo();
                     lineInfoList.forEach(lineInfo -> {
@@ -255,13 +254,13 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                         if (!coverMap.isEmpty() || rawMode) {
                             if (!rawMode && !coverMap.containsKey(lineNo)) {
                                 if (loggingOptions.isVerbose()) {
-                                    logger.info("Can't find line to cover " + lineNo + " in module " + uri);
+                                    logger.info("Can't find line to cover {} in module {}", lineNo, uri);
                                     try {
                                         Stream<String> all_lines = Files.lines(Paths.get(uri));
                                         Optional<String> first = all_lines.skip(lineNo.longValue() - 1).findFirst();
                                         if (first.isPresent()) {
                                             String specific_line_n = first.get();
-                                            logger.info(">>> " + specific_line_n);
+                                            logger.info(">>> {}", specific_line_n);
                                         }
                                     } catch (Exception e) {
                                         logger.error(e.getLocalizedMessage());

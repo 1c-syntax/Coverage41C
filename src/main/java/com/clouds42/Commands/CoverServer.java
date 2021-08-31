@@ -82,7 +82,7 @@ public abstract class CoverServer {
                             }
                         });
                     } catch (IOException e) {
-                        logger.info("Can't accept socket: " + e.getLocalizedMessage());
+                        logger.info("Can't accept socket: {}", e.getLocalizedMessage());
                     }
                 }
                 return true;
@@ -103,7 +103,7 @@ public abstract class CoverServer {
                 line = in.readLine();
                 if (line != null) {
                     line = line.trim().toLowerCase();
-                    logger.info("Get command: " + line);
+                    logger.info("Get command: {}", line);
                     switch (line) {
                         case PipeMessages.DUMP_COMMAND:
                             Utils.dumpCoverageFile(getCoverageData(), getMetadataOptions(), getOutputOptions());

@@ -86,7 +86,7 @@ public class ConvertCommand implements Callable<Integer> {
             }
             URI fileUri = uriListByKey.get(fileKey);
             if (fileUri == null) {
-                logger.error("Can't find file key: " + fileKey);
+                logger.error("Can't find file key: {}", fileKey);
                 continue;
             }
             Map<BigDecimal, Integer> coverMap = coverageData.get(fileUri);
@@ -103,11 +103,11 @@ public class ConvertCommand implements Callable<Integer> {
                     BigDecimal lineNo = new BigDecimal(lineNoNode.getAttributes().getNamedItem("lineNumber").getTextContent());
                     if (!coverMap.containsKey(lineNo)) {
                         if (loggingOptions.isVerbose()) {
-                            logger.info("Can't find line to cover " + lineNo + " in module " + fileUri);
+                            logger.info("Can't find line to cover {} in module {}", lineNo, fileUri);
                             try {
                                 Stream<String> all_lines = Files.lines(Paths.get(fileUri));
                                 String specific_line_n = all_lines.skip(lineNo.longValue() - 1).findFirst().get();
-                                logger.info(">>> " + specific_line_n);
+                                logger.info(">>> {}", specific_line_n);
                             } catch (Exception e) {
                                 logger.error(e.getLocalizedMessage());
                             }

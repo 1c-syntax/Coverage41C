@@ -104,7 +104,7 @@ public class Utils {
             return "d5963243-262e-4398-b4d7-fb16d06484f6";
         } else if (moduleType == ModuleType.ApplicationModule
                 || moduleType == ModuleType.UNKNOWN) {
-            logger.info("Couldn't find UUID for module type: " + moduleType + " for object " + mdObject.getName());
+            logger.info("Couldn't find UUID for module type: {} for object {}", moduleType, mdObject.getName());
         }
         return "UNKNOWN";
     }
@@ -207,7 +207,7 @@ public class Utils {
             logger.info("Sources directory not set. Enabling RAW mode");
             rawMode = true;
         } else {
-            logger.info("Project directory: " + metadataOptions.getProjectDirName());
+            logger.info("Project directory: {}", metadataOptions.getProjectDirName());
         }
 
         Map<String, URI> uriListByKey = new HashMap<>();
@@ -216,7 +216,7 @@ public class Utils {
 
             Path rootPath = Path.of(metadataOptions.getProjectDirName())
                     .resolve(metadataOptions.getSrcDirName());
-            logger.info("Reading configuration sources from root path: " + rootPath.toAbsolutePath());
+            logger.info("Reading configuration sources from root path: {}", rootPath.toAbsolutePath());
 
             if (Files.isDirectory(rootPath)) {
 
@@ -287,7 +287,7 @@ public class Utils {
                                         Paths.get(externalDataProcessorPath.toString(),
                                                 formName, "Ext", "Form", "Module.bsl").toUri());
                             } catch (Exception e) {
-                                logger.error("Can't read form xml: " + e.getLocalizedMessage());
+                                logger.error("Can't read form xml: {}", e.getLocalizedMessage());
                             }
                         });
 
@@ -322,7 +322,7 @@ public class Utils {
                             }
                         }
                         if (formName.isEmpty()) {
-                            logger.error("Can't find form name: " + formUuid);
+                            logger.error("Can't find form name: {}", formUuid);
                             continue;
                         }
                         uriListByKey.put(getUriKey(formUuid, ModuleType.FormModule, null),
@@ -369,10 +369,10 @@ public class Utils {
                 linesToCover += bigDecimalMap.values().stream().filter(value -> value >= 0).count();
                 coveredLinesCount += bigDecimalMap.values().stream().filter(value -> value > 0).count();
             }
-            logger.info("Lines to cover: " + linesToCover);
-            logger.info("Covered lines: " + coveredLinesCount);
+            logger.info("Lines to cover: {}", linesToCover);
+            logger.info("Covered lines: {}", coveredLinesCount);
             if (linesToCover > 0) {
-                logger.info("Coverage: " + Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100. + "%");
+                logger.info("Coverage: {}%", Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100.);
             }
 
             URI projectUri = Path.of(metadataOptions.getProjectDirName()).toUri();
@@ -502,10 +502,10 @@ public class Utils {
                 linesToCover += bigDecimalMap.values().stream().filter(value -> value >= 0).count();
                 coveredLinesCount += bigDecimalMap.values().stream().filter(value -> value > 0).count();
             }
-            logger.info("Lines to cover: " + linesToCover);
-            logger.info("Covered lines: " + coveredLinesCount);
+            logger.info("Lines to cover: {}", linesToCover);
+            logger.info("Covered lines: {}", coveredLinesCount);
             if (linesToCover > 0) {
-                logger.info("Coverage: " + Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100. + "%");
+                logger.info("Coverage: {}%", Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100.);
             }
             Transformer transformer = TransformerFactory.newInstance().newTransformer();
             transformer.setOutputProperty(OutputKeys.INDENT, "yes");
@@ -597,10 +597,10 @@ public class Utils {
                 linesToCover += bigDecimalMap.values().stream().filter(value -> value >= 0).count();
                 coveredLinesCount += bigDecimalMap.values().stream().filter(value -> value > 0).count();
             }
-            logger.info("Lines to cover: " + linesToCover);
-            logger.info("Covered lines: " + coveredLinesCount);
+            logger.info("Lines to cover: {}", linesToCover);
+            logger.info("Covered lines: {}", coveredLinesCount);
             if (linesToCover > 0) {
-                logger.info("Coverage: " + Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100. + "%");
+                logger.info("Coverage: {}%", Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100.);
             }
 
             writer.close();
