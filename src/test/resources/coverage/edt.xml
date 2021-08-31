@@ -79,6 +79,7 @@
         <lineToCover covered="false" lineNumber="3"/>
     </file>
     <file path="src/test/resources/edt/pc/src/CalculationRegisters/РегистрРасчета1/Recalculations/Перерасчет1/RecordSetModule.bsl">
+        <lineToCover covered="false" lineNumber="4"/>
         <lineToCover covered="false" lineNumber="3"/>
     </file>
     <file path="src/test/resources/edt/pc/src/ExchangePlans/ПланОбмена1/ManagerModule.bsl">

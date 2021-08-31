@@ -70,6 +70,7 @@
         <lineToCover covered="false" lineNumber="3"/>
     </file>
     <file path="src/test/resources/configuration/CalculationRegisters/РегистрРасчета1/Recalculations/Перерасчет1/Ext/RecordSetModule.bsl">
+        <lineToCover covered="false" lineNumber="4"/>
         <lineToCover covered="false" lineNumber="3"/>
     </file>
     <file path="src/test/resources/configuration/InformationRegisters/РегистрСведений1/Ext/ManagerModule.bsl">
