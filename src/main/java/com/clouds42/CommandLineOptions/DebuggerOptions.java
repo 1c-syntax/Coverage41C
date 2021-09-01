@@ -21,7 +21,8 @@
  */
 package com.clouds42.CommandLineOptions;
 
-import com._1c.g5.v8.dt.debug.model.base.data.DebugTargetType;
+
+import com.clouds42.DebugTargetType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine.Option;
