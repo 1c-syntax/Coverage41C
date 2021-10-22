@@ -29,9 +29,15 @@ import org.eclipse.emf.ecore.EObject;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.client.api.ContentResponse;
 import org.eclipse.jetty.client.api.Request;
+import org.eclipse.jetty.client.dynamic.HttpClientTransportDynamic;
 import org.eclipse.jetty.client.util.FutureResponseListener;
-import org.eclipse.jetty.client.util.StringContentProvider;
-import org.eclipse.jetty.http.*;
+import org.eclipse.jetty.client.util.StringRequestContent;
+import org.eclipse.jetty.http.HttpField;
+import org.eclipse.jetty.http.HttpFields;
+import org.eclipse.jetty.http.HttpHeader;
+import org.eclipse.jetty.http.HttpMethod;
+import org.eclipse.jetty.http.HttpStatus;
+import org.eclipse.jetty.io.ClientConnector;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -66,16 +72,26 @@ public abstract class AbstractDebugClient {
     protected HttpClient createHttpClient(long idleTimeout) {
         SslContextFactory.Client sslContextFactory = new SslContextFactory.Client();
         sslContextFactory.setTrustAll(true);
-        HttpClient httpClient = new HttpClient(sslContextFactory);
-        HttpField agent = new HttpField("User-Agent", "1CV8");
+
+        ClientConnector clientConnector = new ClientConnector();
+        clientConnector.setSslContextFactory(sslContextFactory);
+
+        HttpClient httpClient = new HttpClient(new HttpClientTransportDynamic(clientConnector));
         httpClient.setFollowRedirects(true);
-        httpClient.setUserAgentField(agent);
+        httpClient.setUserAgentField(new HttpField("User-Agent", "1CV8"));
         httpClient.setIdleTimeout(idleTimeout);
         return httpClient;
     }
 
     protected Request buildRequest(HttpClient httpClient, HttpMethod method, String componentUrl) {
-        return httpClient.newRequest(this.toUri(componentUrl)).method(method).header(HttpHeader.ACCEPT, "application/xml").header(HttpHeader.CONNECTION, HttpHeader.KEEP_ALIVE.asString()).header(HttpHeader.CONTENT_TYPE, "application/xml").header("1C-ApplicationName", "1C:Enterprise DT");
+        return httpClient.newRequest(this.toUri(componentUrl))
+                .method(method)
+                .headers(httpFields -> httpFields
+                        .add(HttpHeader.ACCEPT, "application/xml")
+                        .add(HttpHeader.CONNECTION, HttpHeader.KEEP_ALIVE.asString())
+                        .add(HttpHeader.CONTENT_TYPE, "application/xml")
+                        .add("1C-ApplicationName", "1C:Enterprise DT")
+                );
     }
 
     protected String getComponentUrl(String debugServerUrl, String suffix) {
@@ -101,7 +117,7 @@ public abstract class AbstractDebugClient {
             if (requestContent != null) {
                 try {
                     String serializedRequest = abstractDebugClient.serializer.serialize(requestContent);
-                    request.content(new StringContentProvider(serializedRequest));
+                    request.body(new StringRequestContent(serializedRequest));
                 } catch (IOException e) {
                     throw new RuntimeDebugClientException("Error occurred while processing request", e);
                 }
