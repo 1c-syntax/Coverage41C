@@ -39,8 +39,8 @@ dependencies {
     }
     println 'EDT location: ' + edtLocation
 
-    compile group: 'info.picocli', name: 'picocli', version: '4.6.1'
-    annotationProcessor 'info.picocli:picocli-codegen:4.6.1'
+    compile group: 'info.picocli', name: 'picocli', version: '4.6.3'
+    annotationProcessor 'info.picocli:picocli-codegen:4.6.2'
 
     compile group: 'org.slf4j', name: 'slf4j-api', version: '2.0.0-alpha1'
     compile group: 'org.slf4j', name: 'slf4j-simple', version: '2.0.0-alpha1'
@@ -51,24 +51,24 @@ dependencies {
     compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.ecore.xmi', version: '2.16.0'
     compile group: 'org.eclipse.emf', name: 'org.eclipse.emf.ecore.xcore.lib', version: '1.6.0'
 
-    compile group: 'org.eclipse.platform', name: 'org.eclipse.osgi', version: '3.17.0'
+    compile group: 'org.eclipse.platform', name: 'org.eclipse.osgi', version: '3.17.100'
 
-    compile group: 'org.eclipse.platform', name: 'org.eclipse.core.runtime', version: '3.23.0'
+    compile group: 'org.eclipse.platform', name: 'org.eclipse.core.runtime', version: '3.24.0'
     compile group: 'org.eclipse.platform', name: 'org.eclipse.osgi.services', version: '3.10.200'
-    compile group: 'org.eclipse.platform', name: 'org.eclipse.equinox.common', version: '3.15.0'
+    compile group: 'org.eclipse.platform', name: 'org.eclipse.equinox.common', version: '3.15.100'
 
 
     compile group: 'org.eclipse.jetty', name: 'jetty-client', version: '11.0.6'
 
     compile group: 'com.google.guava', name: 'guava', version: '31.0.1-jre'
 
-    compile group: 'com.google.inject', name: 'guice', version: '5.0.1'
+    compile group: 'com.google.inject', name: 'guice', version: '5.1.0'
 
     compile group: 'de.vandermeer', name:'asciitable', version: '0.3.2'
 
-    implementation 'com.github.1c-syntax:mdclasses:a5ce5cd5439201040caf27fdc8e4763a7f45f65c'
+    implementation 'com.github.1c-syntax:mdclasses:0.9.3'
 
-    implementation('com.github.1c-syntax:bsl-parser:0.19.4') {
+    implementation('com.github.1c-syntax:bsl-parser:0.20.3') {
         exclude group: "com.tunnelvisionlabs", module: "antlr4-annotations"
         exclude group: "com.ibm.icu", module: "*"
         exclude group: "org.antlr", module: "ST4"
@@ -79,12 +79,12 @@ dependencies {
 
     providedCompile fileTree(edtLocation) { include 'com._1c.g5.v8.dt.debug.*.jar' }
 
-    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.1'
-    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.8.1'
-    testCompile 'org.xmlunit:xmlunit-core:2.8.3'
-    testCompile 'org.xmlunit:xmlunit-matchers:2.8.3'
-    testCompile 'com.fasterxml.jackson.core:jackson-core:2.13.0'
-    testCompile 'com.fasterxml.jackson.core:jackson-databind:2.13.0'
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.2'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.8.2'
+    testCompile 'org.xmlunit:xmlunit-core:2.9.0'
+    testCompile 'org.xmlunit:xmlunit-matchers:2.9.0'
+    testCompile 'com.fasterxml.jackson.core:jackson-core:2.13.1'
+    testCompile 'com.fasterxml.jackson.core:jackson-databind:2.13.1'
 }
 
 tasks.withType(JavaCompile) {
