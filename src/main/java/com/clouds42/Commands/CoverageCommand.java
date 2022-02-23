@@ -45,11 +45,11 @@ import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
-import java.lang.module.ModuleDescriptor.Version;
 
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.lang.invoke.MethodHandles;
+import java.lang.module.ModuleDescriptor.Version;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.nio.file.Files;
@@ -232,8 +232,9 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                 externalDataProcessorsUriSet.add(moduleUrl);
             }
             String moduleExtensionName = moduleId.getExtensionName();
-            if (filterOptions.getExtensionName().equals(moduleExtensionName)
-                    && filterOptions.getExternalDataProcessorUrl().equals(moduleUrl)) {
+            if (rawMode
+                    || (filterOptions.getExtensionName().equals(moduleExtensionName)
+                    && filterOptions.getExternalDataProcessorUrl().equals(moduleUrl))) {
                 String objectId = moduleId.getObjectID();
                 String propertyId = moduleId.getPropertyID();
                 String key = Utils.getUriKey(objectId, propertyId);
@@ -299,7 +300,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                 throw new RuntimeDebugClientException("Can't connect to debug server. Connection result: " + connectionResult);
             }
         }
-        Version apiver =  Version.parse(client.getApiVersion());
+        Version apiver = Version.parse(client.getApiVersion());
         logger.info("Setup settings...");
         client.initSettings(false);
         client.setAutoconnectDebugTargets(
@@ -342,7 +343,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         }
 
         Utils.dumpCoverageFile(coverageData, metadataOptions, outputOptions);
-        if(serverPipeOut!=null) {
+        if (serverPipeOut != null) {
             serverPipeOut.println(PipeMessages.OK_RESULT);
         }
         stopExecution.set(true);
