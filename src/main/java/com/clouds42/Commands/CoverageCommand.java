@@ -232,8 +232,9 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                 externalDataProcessorsUriSet.add(moduleUrl);
             }
             String moduleExtensionName = moduleId.getExtensionName();
-            if (filterOptions.getExtensionName().equals(moduleExtensionName)
-                    && filterOptions.getExternalDataProcessorUrl().equals(moduleUrl)) {
+            if (rawMode
+                    || (filterOptions.getExtensionName().equals(moduleExtensionName)
+                    && filterOptions.getExternalDataProcessorUrl().equals(moduleUrl))) {
                 String objectId = moduleId.getObjectID();
                 String propertyId = moduleId.getPropertyID();
                 String key = Utils.getUriKey(objectId, propertyId);
