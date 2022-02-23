@@ -1,7 +1,7 @@
 /*
  * This file is a part of Coverage41C.
  *
- * Copyright (c) 2020-2021
+ * Copyright (c) 2020-2022
  * Kosolapov Stanislav aka proDOOMman <prodoomman@gmail.com> and contributors
  *
  * SPDX-License-Identifier: LGPL-3.0-or-later
