@@ -79,6 +79,18 @@ class LinesToCoverageTest {
     }
 
     @Test
+    void IfTest() throws IOException {
+
+        var file = new File("src/test/resources/linestocoverage/if.bsl");
+        BSLTokenizer tokenizer = new BSLTokenizer(Files.readString(file.toPath()));
+
+        int[] linesToCover = LinesToCoverage.getLines(tokenizer.getAst());
+
+        var expected = new int[]{3, 8, 10, 16, 17, 19, 21, 22, 23};
+        assertThat(linesToCover, equalTo(expected));
+    }
+
+    @Test
     void AssigmentTest() throws IOException {
 
         var file = new File("src/test/resources/linestocoverage/assigment.bsl");
