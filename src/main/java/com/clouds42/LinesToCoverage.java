@@ -41,6 +41,7 @@ public class LinesToCoverage {
             BSLParser.BreakStatementContext.class,
             BSLParser.ContinueStatementContext.class,
             BSLParser.IfStatementContext.class,
+            BSLParser.ElsifBranchContext.class,
             BSLParser.RaiseStatementContext.class,
             BSLParser.ForEachStatementContext.class,
             BSLParser.ForStatementContext.class,
