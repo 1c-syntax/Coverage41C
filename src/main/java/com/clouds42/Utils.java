@@ -28,11 +28,12 @@ import com.github._1c_syntax.bsl.parser.BSLLexer;
 import com.github._1c_syntax.bsl.parser.BSLTokenizer;
 import com.github._1c_syntax.bsl.parser.Tokenizer;
 import com.github._1c_syntax.mdclasses.Configuration;
-import com.github._1c_syntax.mdclasses.mdo.MDOHasModule;
+import com.github._1c_syntax.mdclasses.mdo.AbstractMDObjectBSL;
+//import com.github._1c_syntax.mdclasses.mdo.MDOHasModule;
 import com.github._1c_syntax.mdclasses.mdo.MDSettingsStorage;
 import com.github._1c_syntax.mdclasses.mdo.support.MDOModule;
-import com.github._1c_syntax.mdclasses.mdo.support.ModuleType;
-import com.github._1c_syntax.mdclasses.supportconf.SupportVariant;
+import com.github._1c_syntax.bsl.types.ModuleType;
+import com.github._1c_syntax.bsl.support.SupportVariant;
 import de.vandermeer.asciitable.AsciiTable;
 import de.vandermeer.asciitable.CWC_LongestLine;
 import org.antlr.v4.runtime.Token;
@@ -73,7 +74,7 @@ public class Utils {
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    public static String getModuleTypeUuid(ModuleType moduleType, MDOHasModule mdObject) {
+    public static String getModuleTypeUuid(ModuleType moduleType, AbstractMDObjectBSL mdObject) {
         if (moduleType == ModuleType.CommandModule) {
             return "078a6af8-d22c-4248-9c33-7e90075a3d2c";
         } else if (moduleType == ModuleType.ObjectModule) {
@@ -109,7 +110,7 @@ public class Utils {
         return "UNKNOWN";
     }
 
-    private static String getUriKey(String mdObjUuid, ModuleType moduleType, MDOHasModule mdObj) {
+    private static String getUriKey(String mdObjUuid, ModuleType moduleType, AbstractMDObjectBSL mdObj) {
         return mdObjUuid + "/" + getModuleTypeUuid(moduleType, mdObj);
     }
 
@@ -185,7 +186,7 @@ public class Utils {
             }
 
             linesToCover = Arrays.stream(linesToCover).filter(i ->
-                    !coverageIgnorance.stream().anyMatch(integerRange -> integerRange.contains(i))).toArray();
+              coverageIgnorance.stream().noneMatch(integerRange -> integerRange.contains(i))).toArray();
         }
 
         Map<BigDecimal, Integer> coverMap = new HashMap<>();
@@ -223,7 +224,7 @@ public class Utils {
                 Configuration conf = Configuration.create(rootPath);
 
                 for (MDOModule module : conf.getModules()) {
-                    MDOHasModule mdObj = module.getOwner();
+                    AbstractMDObjectBSL mdObj = module.getOwner();
 
                     String mdObjUuid = mdObj.getUuid();
 
