@@ -66,7 +66,7 @@ dependencies {
 
     compile group: 'de.vandermeer', name:'asciitable', version: '0.3.2'
 
-    implementation 'com.github.1c-syntax:mdclasses:0.10.2'
+    implementation 'com.github.1c-syntax:mdclasses:9658e9a17ec989b5f392f975a15c4bd17f9ed1c6'
     compile group: 'io.github.1c-syntax', name: 'bsl-common-library', version: '0.3.0'
 
     implementation('com.github.1c-syntax:bsl-parser:0.20.3') {

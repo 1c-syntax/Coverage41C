@@ -24,6 +24,7 @@ package com.clouds42;
 import com.clouds42.CommandLineOptions.ConnectionOptions;
 import com.clouds42.CommandLineOptions.MetadataOptions;
 import com.clouds42.CommandLineOptions.OutputOptions;
+import com.github._1c_syntax.bsl.mdo.ModuleOwner;
 import com.github._1c_syntax.bsl.parser.BSLLexer;
 import com.github._1c_syntax.bsl.parser.BSLTokenizer;
 import com.github._1c_syntax.bsl.parser.Tokenizer;
@@ -74,7 +75,7 @@ public class Utils {
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    public static String getModuleTypeUuid(ModuleType moduleType, AbstractMDObjectBSL mdObject) {
+    public static String getModuleTypeUuid(ModuleType moduleType, ModuleOwner mdObject) {
         if (moduleType == ModuleType.CommandModule) {
             return "078a6af8-d22c-4248-9c33-7e90075a3d2c";
         } else if (moduleType == ModuleType.ObjectModule) {
@@ -110,7 +111,7 @@ public class Utils {
         return "UNKNOWN";
     }
 
-    private static String getUriKey(String mdObjUuid, ModuleType moduleType, AbstractMDObjectBSL mdObj) {
+    private static String getUriKey(String mdObjUuid, ModuleType moduleType, ModuleOwner mdObj) {
         return mdObjUuid + "/" + getModuleTypeUuid(moduleType, mdObj);
     }
 
@@ -224,7 +225,7 @@ public class Utils {
                 Configuration conf = Configuration.create(rootPath);
 
                 for (MDOModule module : conf.getModules()) {
-                    AbstractMDObjectBSL mdObj = module.getOwner();
+                    ModuleOwner mdObj = module.getOwner();
 
                     String mdObjUuid = mdObj.getUuid();
 
