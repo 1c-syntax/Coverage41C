@@ -153,7 +153,9 @@ public class GlobalCallsFilter {
             "errorinfo",
             "информацияобошибке",
             "errordescription",
-            "описаниеошибки"
+            "описаниеошибки",
+            "найти",
+            "find"
 
     );
 

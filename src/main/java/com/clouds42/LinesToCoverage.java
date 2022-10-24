@@ -48,7 +48,9 @@ public class LinesToCoverage {
             BSLParser.WhileStatementContext.class,
             BSLParser.GlobalMethodCallContext.class,
             BSLParser.MethodCallContext.class,
-            BSLParser.ExecuteStatementContext.class
+            BSLParser.ExecuteStatementContext.class,
+            BSLParser.AddHandlerStatementContext.class,
+            BSLParser.RemoveHandlerStatementContext.class
     );
 
     private static final Set<Integer> tokenTypes = Set.of(
