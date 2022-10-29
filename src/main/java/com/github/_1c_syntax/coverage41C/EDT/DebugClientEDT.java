@@ -15,7 +15,6 @@ import com._1c.g5.v8.dt.internal.debug.core.runtime.client.RuntimeDebugModelXmlS
 import com.clouds42.CommandLineOptions.DebuggerOptions;
 import com.clouds42.DebugClient;
 import com.clouds42.MyRuntimeDebugModelXmlSerializer;
-import com.clouds42.Utils;
 import com.github._1c_syntax.coverage41C.CoverageCollector;
 import com.github._1c_syntax.coverage41C.DebugClientException;
 import com.github._1c_syntax.coverage41C.DebugTargetType;
@@ -26,22 +25,14 @@ import org.slf4j.LoggerFactory;
 import java.lang.invoke.MethodHandles;
 import java.math.BigDecimal;
 import java.net.URI;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.*;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 public class DebugClientEDT {
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     private final DebugClient client;
-
-    private boolean isVerbose;
-    private boolean rawMode;
-    private String extensionName;
-    private String externalDataProcessorUrl;
 
     private CoverageCollector collector;
 
@@ -50,15 +41,7 @@ public class DebugClientEDT {
         client = new DebugClient(serializer);
     }
 
-    public void setOptions(boolean isVerbose, boolean rawMode) {
-        this.isVerbose = isVerbose;
-        this.rawMode = rawMode;
-
-    }
-
-    public void setResolverOptions(String extensionName, String externalDataProcessorUrl, CoverageCollector collector) {
-        this.extensionName = extensionName;
-        this.externalDataProcessorUrl = externalDataProcessorUrl;
+    public void setCollector(CoverageCollector collector) {
         this.collector = collector;
     }
 
@@ -195,7 +178,7 @@ public class DebugClientEDT {
         }
     }
 
-    public void ping(Set<String> externalDataProcessorsUriSet) throws DebugClientException {
+    public void ping() throws DebugClientException {
 
         List<? extends DBGUIExtCmdInfoBase> commandsList;
 
@@ -209,73 +192,36 @@ public class DebugClientEDT {
         commandsList.forEach(command -> {
             logger.info("Command: {}", command.getCmdID().getName());
             if (command.getCmdID() == DBGUIExtCmds.MEASURE_RESULT_PROCESSING) {
-                measureResultProcessing(externalDataProcessorsUriSet, (DBGUIExtCmdInfoMeasureImpl) command);
+                measureResultProcessing((DBGUIExtCmdInfoMeasureImpl) command);
             } else if (command.getCmdID() == DBGUIExtCmds.TARGET_STARTED) {
                 targetStarted((DBGUIExtCmdInfoStartedImpl) command);
             }
         });
     }
 
-    private void measureResultProcessing(Set<String> externalDataProcessorsUriSet, DBGUIExtCmdInfoMeasureImpl command) {
+    private void measureResultProcessing(DBGUIExtCmdInfoMeasureImpl command) {
         logger.info("Found MEASURE_RESULT_PROCESSING command");
-
-        var uriListByKey = collector.getUriListByKey();
 
         PerformanceInfoMain measure = command.getMeasure();
         EList<PerformanceInfoModule> moduleInfoList = measure.getModuleData();
         moduleInfoList.forEach(moduleInfo -> {
             BSLModuleIdInternal moduleId = moduleInfo.getModuleID();
             String moduleUrl = moduleId.getURL();
-            if (isVerbose && !moduleUrl.isEmpty() && !externalDataProcessorsUriSet.contains(moduleUrl)) {
-                logger.info("Found external data processor: {}", moduleUrl);
-                externalDataProcessorsUriSet.add(moduleUrl);
-            }
+
             String moduleExtensionName = moduleId.getExtensionName();
-            if (rawMode
-                    || (extensionName.equals(moduleExtensionName)
-                    && externalDataProcessorUrl.equals(moduleUrl))) {
+            if (collector.isFiltered(moduleUrl, moduleExtensionName)) {
                 String objectId = moduleId.getObjectID();
                 String propertyId = moduleId.getPropertyID();
-                String key = Utils.getUriKey(objectId, propertyId);
 
-                URI uri;
-                if (!rawMode) {
-                    uri = uriListByKey.get(key);
-                } else {
-                    uri = URI.create("file:///" + key);
-                }
+                URI uri = collector.getUri(objectId, propertyId);
                 if (uri == null) {
                     logger.info("Couldn't find object id {}, property id {} in sources!", objectId, propertyId);
                 } else {
                     EList<PerformanceInfoLine> lineInfoList = moduleInfo.getLineInfo();
                     lineInfoList.forEach(lineInfo -> {
                         BigDecimal lineNo = lineInfo.getLineNo();
-                        Map<BigDecimal, Integer> coverMap = collector.get(uri);
-                        if (!coverMap.isEmpty() || rawMode) {
-                            if (!rawMode && !coverMap.containsKey(lineNo)) {
-                                if (isVerbose) {
-                                    logger.info("Can't find line to cover {} in module {}", lineNo, uri);
-                                    try {
-                                        Stream<String> all_lines = Files.lines(Paths.get(uri));
-                                        Optional<String> first = all_lines.skip(lineNo.longValue() - 1).findFirst();
-                                        if (first.isPresent()) {
-                                            String specific_line_n = first.get();
-                                            logger.info(">>> {}", specific_line_n);
-                                        }
-                                    } catch (Exception e) {
-                                        logger.error(e.getLocalizedMessage());
-                                    }
-                                }
-                            } else {
-                                int currentValue = coverMap.getOrDefault(lineNo, 0);
-                                if (currentValue < 0) {
-                                    currentValue = 0;
-                                }
-                                coverMap.put(lineNo,
-                                        currentValue
-                                                + lineInfo.getFrequency().intValue());
-                            }
-                        }
+                        var frequency = lineInfo.getFrequency().intValue();
+                        collector.addCoverage(uri, lineNo, frequency);
                     });
                 }
             }

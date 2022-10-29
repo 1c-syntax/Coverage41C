@@ -39,8 +39,6 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.lang.invoke.MethodHandles;
 import java.lang.module.ModuleDescriptor.Version;
-import java.math.BigDecimal;
-import java.net.URI;
 import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -86,23 +84,18 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         int result = CommandLine.ExitCode.OK;
         getServerSocket();
 
-        client = new DebugClientEDT();
-        client.setOptions(
+        collector.readMetadata(metadataOptions);
+        collector.setOptions(
+                metadataOptions.isRawMode(),
                 loggingOptions.isVerbose(),
-                metadataOptions.isRawMode()
-        );
-
-        client.setResolverOptions(
                 filterOptions.getExtensionName(),
-                filterOptions.getExternalDataProcessorUrl(),
-                collector
+                filterOptions.getExternalDataProcessorUrl()
         );
 
+        client = new DebugClientEDT();
+        client.setCollector(collector);
 
         UUID measureUuid = UUID.randomUUID();
-
-        collector.readMetadata(metadataOptions);
-
         try {
             startSystem(measureUuid);
         } catch (DebugClientException e) {
@@ -114,10 +107,8 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
 
         addShutdownHook();
 
-        Set<String> externalDataProcessorsUriSet = new HashSet<>();
-
         try {
-            mainLoop(externalDataProcessorsUriSet);
+            mainLoop();
         } catch (DebugClientException e) {
             logger.error("Can't send ping to debug server. Coverage analyzing finished");
             logger.error(e.getLocalizedMessage());
@@ -155,9 +146,9 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         }));
     }
 
-    private void mainLoop(Set<String> externalDataProcessorsUriSet) throws DebugClientException {
+    private void mainLoop() throws DebugClientException {
         while (!stopExecution.get()) {
-            client.ping(externalDataProcessorsUriSet);
+            client.ping();
         }
     }
 
