@@ -4,7 +4,6 @@ import com._1c.g5.v8.dt.debug.core.runtime.client.RuntimeDebugClientException;
 import com._1c.g5.v8.dt.debug.model.base.data.AttachDebugUIResult;
 import com._1c.g5.v8.dt.debug.model.base.data.BSLModuleIdInternal;
 import com._1c.g5.v8.dt.debug.model.base.data.DebugTargetId;
-import com._1c.g5.v8.dt.debug.model.base.data.DebugTargetType;
 import com._1c.g5.v8.dt.debug.model.dbgui.commands.DBGUIExtCmdInfoBase;
 import com._1c.g5.v8.dt.debug.model.dbgui.commands.DBGUIExtCmds;
 import com._1c.g5.v8.dt.debug.model.dbgui.commands.impl.DBGUIExtCmdInfoMeasureImpl;
@@ -18,6 +17,7 @@ import com.clouds42.DebugClient;
 import com.clouds42.MyRuntimeDebugModelXmlSerializer;
 import com.clouds42.Utils;
 import com.github._1c_syntax.coverage41C.DebugClientException;
+import com.github._1c_syntax.coverage41C.DebugTargetType;
 import org.eclipse.emf.common.util.EList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,6 +28,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class DebugClientEDT {
@@ -161,14 +162,25 @@ public class DebugClientEDT {
 
     public void setupSettings(List<String> debugAreaNames,  List<DebugTargetType> debugTargets) throws DebugClientException {
         logger.info("Setup settings...");
+
         try {
             client.initSettings(false);
             client.setAutoconnectDebugTargets(
                     debugAreaNames,
-                    debugTargets);
+                    convertDebugTargets(debugTargets));
         } catch (RuntimeDebugClientException ex) {
             throw new DebugClientException("Error on setupSettings", ex);
         }
+    }
+
+    private List<com._1c.g5.v8.dt.debug.model.base.data.DebugTargetType> convertDebugTargets(List<DebugTargetType> debugTargets) {
+        return debugTargets.stream()
+                .map(type -> castByName(type, com._1c.g5.v8.dt.debug.model.base.data.DebugTargetType.class))
+                .collect(Collectors.toList());
+    }
+
+    private <F extends Enum<F>> F castByName(final Enum<?> e, final Class<F> fClass) {
+        return F.valueOf(fClass, e.name());
     }
 
     private void targetStarted(DBGUIExtCmdInfoStartedImpl command) {

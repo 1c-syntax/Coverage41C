@@ -25,6 +25,7 @@ import com.clouds42.CommandLineOptions.*;
 import com.clouds42.PipeMessages;
 import com.clouds42.Utils;
 import com.github._1c_syntax.coverage41C.DebugClientException;
+import com.github._1c_syntax.coverage41C.DebugTargetType;
 import com.github._1c_syntax.coverage41C.EDT.DebugClientEDT;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -178,16 +179,27 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         client.connect(debuggerOptions.getPassword());
 
         Version apiver = Version.parse(client.getApiVersion());
+        var debugTargets = debuggerOptions.getAutoconnectTargets();
 
         client.setupSettings(
                 debuggerOptions.getDebugAreaNames(),
-                debuggerOptions.getFilteredAutoconnectTargets(apiver));
+                filterTargetsByApiVersion(debugTargets, apiver));
 
         client.connectTargets(debuggerOptions);
         client.enableProfiling(measureUuid);
 
         systemStarted = true;
 
+    }
+
+    private static List<DebugTargetType> filterTargetsByApiVersion(List<DebugTargetType> debugTargets, Version ApiVersion) {
+        List<DebugTargetType> debugTypes = new java.util.ArrayList<>(debugTargets);
+
+        if (Version.parse("8.3.16").compareTo(ApiVersion) > 0) {
+            debugTypes.remove(DebugTargetType.MOBILE_MANAGED_CLIENT);
+            logger.info("[{}] was removed", DebugTargetType.MOBILE_MANAGED_CLIENT);
+        }
+        return debugTypes;
     }
 
     protected void gracefulShutdown(PrintWriter serverPipeOut) {
