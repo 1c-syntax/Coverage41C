@@ -16,6 +16,7 @@ import com.clouds42.CommandLineOptions.DebuggerOptions;
 import com.clouds42.DebugClient;
 import com.clouds42.MyRuntimeDebugModelXmlSerializer;
 import com.clouds42.Utils;
+import com.github._1c_syntax.coverage41C.CoverageCollector;
 import com.github._1c_syntax.coverage41C.DebugClientException;
 import com.github._1c_syntax.coverage41C.DebugTargetType;
 import org.eclipse.emf.common.util.EList;
@@ -41,7 +42,8 @@ public class DebugClientEDT {
     private boolean rawMode;
     private String extensionName;
     private String externalDataProcessorUrl;
-    Map<URI, Map<BigDecimal, Integer>> coverageData;
+
+    private CoverageCollector collector;
 
     public DebugClientEDT() {
         RuntimeDebugModelXmlSerializer serializer = new MyRuntimeDebugModelXmlSerializer();
@@ -54,10 +56,10 @@ public class DebugClientEDT {
 
     }
 
-    public void setResolverOptions(String extensionName, String externalDataProcessorUrl, Map<URI, Map<BigDecimal, Integer>> coverageData) {
+    public void setResolverOptions(String extensionName, String externalDataProcessorUrl, CoverageCollector collector) {
         this.extensionName = extensionName;
         this.externalDataProcessorUrl = externalDataProcessorUrl;
-        this.coverageData = coverageData;
+        this.collector = collector;
     }
 
     private void connectAllTargets(List<DebugTargetId> debugTargets) {
@@ -193,7 +195,7 @@ public class DebugClientEDT {
         }
     }
 
-    public void ping(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet) throws DebugClientException {
+    public void ping(Set<String> externalDataProcessorsUriSet) throws DebugClientException {
 
         List<? extends DBGUIExtCmdInfoBase> commandsList;
 
@@ -207,15 +209,18 @@ public class DebugClientEDT {
         commandsList.forEach(command -> {
             logger.info("Command: {}", command.getCmdID().getName());
             if (command.getCmdID() == DBGUIExtCmds.MEASURE_RESULT_PROCESSING) {
-                measureResultProcessing(uriListByKey, externalDataProcessorsUriSet, (DBGUIExtCmdInfoMeasureImpl) command);
+                measureResultProcessing(externalDataProcessorsUriSet, (DBGUIExtCmdInfoMeasureImpl) command);
             } else if (command.getCmdID() == DBGUIExtCmds.TARGET_STARTED) {
                 targetStarted((DBGUIExtCmdInfoStartedImpl) command);
             }
         });
     }
 
-    private void measureResultProcessing(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet, DBGUIExtCmdInfoMeasureImpl command) {
+    private void measureResultProcessing(Set<String> externalDataProcessorsUriSet, DBGUIExtCmdInfoMeasureImpl command) {
         logger.info("Found MEASURE_RESULT_PROCESSING command");
+
+        var uriListByKey = collector.getUriListByKey();
+
         PerformanceInfoMain measure = command.getMeasure();
         EList<PerformanceInfoModule> moduleInfoList = measure.getModuleData();
         moduleInfoList.forEach(moduleInfo -> {
@@ -245,7 +250,7 @@ public class DebugClientEDT {
                     EList<PerformanceInfoLine> lineInfoList = moduleInfo.getLineInfo();
                     lineInfoList.forEach(lineInfo -> {
                         BigDecimal lineNo = lineInfo.getLineNo();
-                        Map<BigDecimal, Integer> coverMap = coverageData.get(uri);
+                        Map<BigDecimal, Integer> coverMap = collector.get(uri);
                         if (!coverMap.isEmpty() || rawMode) {
                             if (!rawMode && !coverMap.containsKey(lineNo)) {
                                 if (isVerbose) {

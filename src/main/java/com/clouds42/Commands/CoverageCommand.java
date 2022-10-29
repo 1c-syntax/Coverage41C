@@ -24,6 +24,7 @@ package com.clouds42.Commands;
 import com.clouds42.CommandLineOptions.*;
 import com.clouds42.PipeMessages;
 import com.clouds42.Utils;
+import com.github._1c_syntax.coverage41C.CoverageCollector;
 import com.github._1c_syntax.coverage41C.DebugClientException;
 import com.github._1c_syntax.coverage41C.DebugTargetType;
 import com.github._1c_syntax.coverage41C.EDT.DebugClientEDT;
@@ -74,18 +75,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
 
     private DebugClientEDT client;
 
-    private final Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<>() {
-        @Override
-        public Map<BigDecimal, Integer> get(Object key) {
-            Map<BigDecimal, Integer> map = super.get(key);
-            if (map == null) {
-                map = new HashMap<>();
-                put((URI) key, map);
-            }
-            return map;
-        }
-    };
-
+    private final CoverageCollector collector = new CoverageCollector();
 
     private final AtomicBoolean stopExecution = new AtomicBoolean(false);
     private boolean systemStarted = false;
@@ -105,13 +95,13 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         client.setResolverOptions(
                 filterOptions.getExtensionName(),
                 filterOptions.getExternalDataProcessorUrl(),
-                coverageData
+                collector
         );
 
 
         UUID measureUuid = UUID.randomUUID();
 
-        Map<String, URI> uriListByKey = Utils.readMetadata(metadataOptions, coverageData);
+        collector.readMetadata(metadataOptions);
 
         try {
             startSystem(measureUuid);
@@ -127,7 +117,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         Set<String> externalDataProcessorsUriSet = new HashSet<>();
 
         try {
-            mainLoop(uriListByKey, externalDataProcessorsUriSet);
+            mainLoop(externalDataProcessorsUriSet);
         } catch (DebugClientException e) {
             logger.error("Can't send ping to debug server. Coverage analyzing finished");
             logger.error(e.getLocalizedMessage());
@@ -165,9 +155,9 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         }));
     }
 
-    private void mainLoop(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet) throws DebugClientException {
+    private void mainLoop(Set<String> externalDataProcessorsUriSet) throws DebugClientException {
         while (!stopExecution.get()) {
-            client.ping(uriListByKey, externalDataProcessorsUriSet);
+            client.ping(externalDataProcessorsUriSet);
         }
     }
 
@@ -209,7 +199,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
 
         client.disableProfiling();
 
-        Utils.dumpCoverageFile(coverageData, metadataOptions, outputOptions);
+        collector.dumpCoverageFile(metadataOptions, outputOptions);
         if (serverPipeOut != null) {
             serverPipeOut.println(PipeMessages.OK_RESULT);
         }
@@ -224,8 +214,8 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     }
 
     @Override
-    protected Map<URI, Map<BigDecimal, Integer>> getCoverageData() {
-        return coverageData;
+    protected CoverageCollector getCollector() {
+        return collector;
     }
 
     @Override

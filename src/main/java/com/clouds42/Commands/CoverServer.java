@@ -26,6 +26,7 @@ import com.clouds42.CommandLineOptions.MetadataOptions;
 import com.clouds42.CommandLineOptions.OutputOptions;
 import com.clouds42.PipeMessages;
 import com.clouds42.Utils;
+import com.github._1c_syntax.coverage41C.CoverageCollector;
 import org.scalasbt.ipcsocket.UnixDomainServerSocket;
 import org.scalasbt.ipcsocket.Win32NamedPipeServerSocket;
 import org.slf4j.Logger;
@@ -106,15 +107,14 @@ public abstract class CoverServer {
                     logger.info("Get command: {}", line);
                     switch (line) {
                         case PipeMessages.DUMP_COMMAND:
-                            Utils.dumpCoverageFile(getCoverageData(), getMetadataOptions(), getOutputOptions());
+                            getCollector().dumpCoverageFile(getMetadataOptions(), getOutputOptions());
                             out.println(PipeMessages.OK_RESULT);
                             return true;
                         case PipeMessages.STATS_COMMAND:
                             out.println(PipeMessages.OK_RESULT);
                             return true;
                         case PipeMessages.CLEAN_COMMAND:
-                            getCoverageData().forEach((uri, bigDecimalIntegerMap) ->
-                                    bigDecimalIntegerMap.replaceAll((k, v) -> 0));
+                            getCollector().clean();
                             out.println(PipeMessages.OK_RESULT);
                             return true;
                         case PipeMessages.CHECK_COMMAND:
@@ -144,7 +144,7 @@ public abstract class CoverServer {
 
     protected abstract MetadataOptions getMetadataOptions();
 
-    protected abstract Map<URI, Map<BigDecimal, Integer>> getCoverageData();
+    protected abstract CoverageCollector getCollector();
 
     protected abstract OutputOptions getOutputOptions();
 
