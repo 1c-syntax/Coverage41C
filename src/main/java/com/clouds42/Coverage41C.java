@@ -21,11 +21,20 @@
  */
 package com.clouds42;
 
-import com.clouds42.Commands.*;
+import com.clouds42.Commands.ConvertCommand;
+import com.clouds42.Commands.CoverageCommand;
+import com.clouds42.Commands.SendCheckMessageCommand;
+import com.clouds42.Commands.SendCleanMessageCommand;
+import com.clouds42.Commands.SendDumpMessageCommand;
+import com.clouds42.Commands.SendStatsMessageCommand;
+import com.clouds42.Commands.SendStopMessageCommand;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.ExitCodeGenerator;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
-
-import java.util.concurrent.Callable;
+import picocli.CommandLine.IFactory;
 
 @Command(name = "Coverage41C",
         mixinStandardHelpOptions = true,
@@ -39,22 +48,30 @@ import java.util.concurrent.Callable;
                 SendCleanMessageCommand.class,
                 SendDumpMessageCommand.class,
                 SendStatsMessageCommand.class,
-                ConvertCommand.class}
-                )
-public class Coverage41C implements Callable<Integer> {
+                ConvertCommand.class
+        }
+)
+@SpringBootApplication
+public class Coverage41C implements CommandLineRunner, ExitCodeGenerator {
 
-    public static void main(String[] args) {
-        int exitCode = getCommandLine().execute(args);
-        System.exit(exitCode);
+    private IFactory factory;
+    private int exitCode;
+
+    Coverage41C(CommandLine.IFactory factory) {
+        this.factory = factory;
     }
 
-    public static CommandLine getCommandLine() {
-        return new CommandLine(new Coverage41C());
+    public static void main(String[] args) {
+        System.exit(SpringApplication.exit(SpringApplication.run(Coverage41C.class, args)));
     }
 
     @Override
-    public Integer call() throws Exception {
-        CommandLine.usage(this, System.out);
-        return 0;
+    public void run(String... args) throws Exception {
+        exitCode = new CommandLine(this, factory).execute(args);
+    }
+
+    @Override
+    public int getExitCode() {
+        return exitCode;
     }
 }

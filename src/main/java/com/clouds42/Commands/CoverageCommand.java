@@ -41,6 +41,7 @@ import com.clouds42.Utils;
 import org.eclipse.emf.common.util.EList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
@@ -59,6 +60,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 
+@Component
 @Command(name = PipeMessages.START_COMMAND, mixinStandardHelpOptions = true,
         description = "Start measure and save coverage data to file",
         sortOptions = false)

@@ -21,13 +21,28 @@
  */
 package com.clouds42;
 
+import com.clouds42.Commands.ConvertCommand;
 import org.junit.jupiter.api.Test;
+import org.junit.runner.RunWith;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.junit4.SpringRunner;
+import picocli.CommandLine;
 
 import java.io.File;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.springframework.boot.test.context.SpringBootTest.WebEnvironment.NONE;
 
+@RunWith(SpringRunner.class)
+@SpringBootTest(webEnvironment = NONE, classes = Coverage41C.class)
 public class ConvertTest {
+
+    @Autowired
+    CommandLine.IFactory factory;
+
+    @Autowired
+    ConvertCommand command;
 
     @Test
     void testConfigurator() {
@@ -38,12 +53,12 @@ public class ConvertTest {
         String outputXmlFileName = "build/genericCoverageCnvConf.xml";
 
         String[] mainAppConvertArguments = {
-                PipeMessages.CONVERT_COMMAND,
                 "-P", new File(".").getAbsolutePath(),
                 "-s", configurationSourceDir.getPath(),
                 "-c", expectedIntXmlFileName,
                 "-o", outputXmlFileName};
-        int mainAppConvertResult = Coverage41C.getCommandLine().execute(mainAppConvertArguments);
+
+        int mainAppConvertResult = new CommandLine(command, factory).execute(mainAppConvertArguments);
         assertEquals(0, mainAppConvertResult);
 
         TestUtils.assertCoverageEqual(expectedConfXmlFileName, outputXmlFileName);
@@ -59,12 +74,11 @@ public class ConvertTest {
         String outputXmlFileName = "build/genericCoverageCnvEdt.xml";
 
         String[] mainAppConvertEdtArguments = {
-                PipeMessages.CONVERT_COMMAND,
                 "-P", new File(".").getAbsolutePath(),
                 "-s", edtSourceDir.getPath(),
                 "-c", expectedIntXmlFileName,
                 "-o", outputXmlFileName};
-        int mainAppConvertEdtResult = Coverage41C.getCommandLine().execute(mainAppConvertEdtArguments);
+        int mainAppConvertEdtResult = new CommandLine(command, factory).execute(mainAppConvertEdtArguments);
         assertEquals(0, mainAppConvertEdtResult);
 
         TestUtils.assertCoverageEqual(expectedEdtXmlFileName, outputXmlFileName);

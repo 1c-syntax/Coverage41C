@@ -22,10 +22,12 @@
 package com.clouds42.Commands;
 
 import com.clouds42.PipeMessages;
+import org.springframework.stereotype.Component;
 import picocli.CommandLine.Command;
 
 @Command(name = PipeMessages.CLEAN_COMMAND,
         description = "Clear coverage data in main application",
         sortOptions = false)
+@Component
 public class SendCleanMessageCommand extends SendMessageCommand {
 }

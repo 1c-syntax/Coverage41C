@@ -22,10 +22,12 @@
 package com.clouds42.Commands;
 
 import com.clouds42.PipeMessages;
+import org.springframework.stereotype.Component;
 import picocli.CommandLine.Command;
 
 @Command(name = PipeMessages.STATS_COMMAND,
         description = "Print coverage statistic report",
         sortOptions = false)
+@Component
 public class SendStatsMessageCommand extends SendMessageCommand {
 }

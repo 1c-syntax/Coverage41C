@@ -26,22 +26,37 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
+import org.junit.runner.RunWith;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.junit4.SpringRunner;
+import picocli.CommandLine;
 
 import java.io.File;
 import java.io.IOException;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.springframework.boot.test.context.SpringBootTest.WebEnvironment.NONE;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@RunWith(SpringRunner.class)
+@SpringBootTest(webEnvironment = NONE, classes = Coverage41C.class)
+@DirtiesContext
 class CoverageTest {
-
-    final boolean isWindows = System.getProperty ("os.name").toLowerCase().contains("win");
+    @Autowired
+    CommandLine.IFactory factory;
+    final boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
 
     final File dtPath = new File("src/test/resources/dt/1Cv8.dt");
     final File vbParamsFile = new File("src/test/resources/bdd/VBParams.json");
@@ -57,12 +72,14 @@ class CoverageTest {
 
     final String ibUser = "Администратор";
     final String ibPassword = "\\\"\\\"";
-    final String v8version = "8.3.18";
+    final String v8version = "8.3.20";
     final String buildDirName = "build";
 
     String vrunnerExecutable = "vrunner";
     String dbgsUrlString;
     URL dbgsUrl;
+
+    CommandLine commandLine;
 
     @BeforeAll
     public void prepareIb() throws IOException, InterruptedException {
@@ -81,7 +98,8 @@ class CoverageTest {
         dbgsUrl = new URL(dbgsUrlString);
 
         String[] mainAppHelpArguments = {"--help"};
-        assertEquals(0, Coverage41C.getCommandLine().execute(mainAppHelpArguments));
+        commandLine = new CommandLine(Coverage41C.class, factory);
+        assertEquals(0, commandLine.execute(mainAppHelpArguments));
 
         Path ibPath = Path.of(buildDirName, "ib");
         if (Files.exists(ibPath)) {
@@ -118,6 +136,7 @@ class CoverageTest {
     void testConfigurator() throws InterruptedException, ExecutionException, IOException {
         File configurationSourceDir = new File("src/test/resources/configuration");
         String expectedXmlFileName = "src/test/resources/coverage/configuration.xml";
+        commandLine = new CommandLine(Coverage41C.class, factory);
         testCoverage(configurationSourceDir, expectedXmlFileName);
     }
 
@@ -125,12 +144,14 @@ class CoverageTest {
     void testEDT() throws InterruptedException, ExecutionException, IOException {
         File edtSourceDir = new File("src/test/resources/edt/pc");
         String expectedEdtXmlFileName = "src/test/resources/coverage/edt.xml";
+        commandLine = new CommandLine(Coverage41C.class, factory);
         testCoverage(edtSourceDir, expectedEdtXmlFileName);
     }
 
     @Test
     void testInternal() throws InterruptedException, ExecutionException, IOException {
         String expectedIntXmlFileName = "src/test/resources/coverage/internal.xml";
+        commandLine = new CommandLine(Coverage41C.class, factory);
         testCoverage(null, expectedIntXmlFileName);
     }
 
@@ -153,7 +174,8 @@ class CoverageTest {
                 mainAppArguments.addAll(Arrays.asList(additionalArgsArray));
             }
             String[] fullArgsArray = mainAppArguments.toArray(new String[mainAppArguments.size()]);
-            int mainAppReturnCode = Coverage41C.getCommandLine().execute(fullArgsArray);
+
+            int mainAppReturnCode = commandLine.execute(fullArgsArray);
             return mainAppReturnCode;
         });
 
@@ -163,14 +185,14 @@ class CoverageTest {
                 PipeMessages.CHECK_COMMAND,
                 "-i", fileIbName,
                 "-u", dbgsUrlString};
-        int mainAppCheckResult = Coverage41C.getCommandLine().execute(mainAppCheckArguments);
+        int mainAppCheckResult = commandLine.execute(mainAppCheckArguments);
         assertEquals(0, mainAppCheckResult);
 
         String[] mainAppCleanArguments = {
                 PipeMessages.CLEAN_COMMAND,
                 "-i", fileIbName,
                 "-u", dbgsUrlString};
-        int mainAppCleanResult = Coverage41C.getCommandLine().execute(mainAppCleanArguments);
+        int mainAppCleanResult = commandLine.execute(mainAppCleanArguments);
         assertEquals(0, mainAppCleanResult);
 
         ProcessBuilder vrunnerVanessaProcessBuilder = new ProcessBuilder();
@@ -192,7 +214,7 @@ class CoverageTest {
                 PipeMessages.DUMP_COMMAND,
                 "-i", fileIbName,
                 "-u", dbgsUrlString};
-        int mainAppDumpResult = Coverage41C.getCommandLine().execute(mainAppDumpArguments);
+        int mainAppDumpResult = commandLine.execute(mainAppDumpArguments);
         assertEquals(0, mainAppDumpResult);
 
         TestUtils.assertCoverageEqual(expectedXmlFileName, outputXmlFileName);
@@ -201,7 +223,7 @@ class CoverageTest {
                 PipeMessages.EXIT_COMMAND,
                 "-i", fileIbName,
                 "-u", dbgsUrlString};
-        int mainAppStopResult = Coverage41C.getCommandLine().execute(mainAppStopArguments);
+        int mainAppStopResult = commandLine.execute(mainAppStopArguments);
         assertEquals(0, mainAppStopResult);
 
         assertEquals(0, mainAppThread.get());
@@ -209,7 +231,5 @@ class CoverageTest {
         TestUtils.assertCoverageEqual(expectedXmlFileName, outputXmlFileName);
 
     }
-
-
 
 }

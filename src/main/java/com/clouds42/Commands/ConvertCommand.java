@@ -27,6 +27,7 @@ import com.clouds42.PipeMessages;
 import com.clouds42.Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
@@ -47,6 +48,7 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.stream.Stream;
 
+@Component
 @Command(name = PipeMessages.CONVERT_COMMAND, mixinStandardHelpOptions = true, version = BuildConfig.APP_VERSION,
         description = "Convert results from internal uuid-based format",
         sortOptions = false)

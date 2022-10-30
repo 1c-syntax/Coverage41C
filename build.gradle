@@ -5,10 +5,13 @@ plugins {
     id "com.github.breadmoirai.github-release" version "2.2.12"
     id "com.github.jarmstrong.buildconfig" version "1.9.0"
     id "com.github.hierynomus.license" version "0.15.0"
+    id 'org.springframework.boot' version '2.7.5'
 }
 
+apply plugin: 'io.spring.dependency-management'
+
 group 'com.clouds42'
-version '2.7.2'
+version '3.0.1'
 
 sourceCompatibility = 11
 
@@ -24,23 +27,29 @@ configurations {
 }
 
 dependencies {
+    testImplementation 'junit:junit:4.13.2'
     def output = new ByteArrayOutputStream()
     def edtLocation = System.getenv('EDT_LOCATION')
-    if (edtLocation == null) {
-        def ringExecutable = 'ring.sh'
-        if (System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('windows')) {
-            ringExecutable = 'ring.cmd'
-        }
-        exec {
-            commandLine ringExecutable, 'edt@2021.1.5', 'locations', 'list'
-            standardOutput = output
-        }
-        edtLocation = output.toString().trim().split("\n")[0].trim() + '/plugins/'
-    }
+//    if (edtLocation == null) {
+//        def ringExecutable = 'ring.sh'
+//        if (System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('windows')) {
+//            ringExecutable = 'ring.cmd'
+//        }
+//        exec {
+//            commandLine ringExecutable, 'edt@2021.1.5', 'locations', 'list'
+//            standardOutput = output
+//        }
+//        edtLocation = output.toString().trim().split("\n")[0].trim() + '/plugins/'
+//    }
     println 'EDT location: ' + edtLocation
 
-    compile group: 'info.picocli', name: 'picocli', version: '4.6.3'
-    annotationProcessor 'info.picocli:picocli-codegen:4.6.3'
+    implementation 'org.springframework.boot:spring-boot-starter'
+    testImplementation "org.springframework.boot:spring-boot-starter-test"
+
+    implementation 'info.picocli:picocli-spring-boot-starter:4.6.3'
+
+//    compile group: 'info.picocli', name: 'picocli', version: '4.6.3'
+//    annotationProcessor 'info.picocli:picocli-codegen:4.6.3'
 
     compile group: 'org.slf4j', name: 'slf4j-api', version: '2.0.3'
     compile group: 'org.slf4j', name: 'slf4j-simple', version: '2.0.3'
@@ -58,7 +67,7 @@ dependencies {
     compile group: 'org.eclipse.platform', name: 'org.eclipse.equinox.common', version: '3.16.0'
 
 
-    compile group: 'org.eclipse.jetty', name: 'jetty-client', version: '11.0.12'
+    compile group: 'org.eclipse.jetty', name: 'jetty-client', version: '9.4.29.v20200521'
 
     compile group: 'com.google.guava', name: 'guava', version: '31.1-jre'
 
@@ -85,7 +94,7 @@ dependencies {
     testCompile 'org.xmlunit:xmlunit-core:2.9.0'
     testCompile 'org.xmlunit:xmlunit-matchers:2.9.0'
     testCompile 'com.fasterxml.jackson.core:jackson-core:2.13.4'
-    testCompile 'com.fasterxml.jackson.core:jackson-databind:2.13.4'
+    testCompile 'com.fasterxml.jackson.core:jackson-databind:2.13.4.2'
 }
 
 tasks.withType(JavaCompile) {
@@ -94,9 +103,13 @@ tasks.withType(JavaCompile) {
     options.encoding = 'UTF-8'
 }
 
-run {
-    classpath += configurations.providedCompile
-}
+//run {
+//    classpath += configurations.providedCompile
+//}
+
+//bootRun{
+//    classpath += configurations.providedCompile
+//}
 
 test {
     finalizedBy jacocoTestReport

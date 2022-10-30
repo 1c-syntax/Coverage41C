@@ -22,10 +22,12 @@
 package com.clouds42.Commands;
 
 import com.clouds42.PipeMessages;
+import org.springframework.stereotype.Component;
 import picocli.CommandLine.Command;
 
 @Command(name = PipeMessages.CHECK_COMMAND,
         description = "Check is main application ready",
         sortOptions = false)
+@Component
 public class SendCheckMessageCommand extends SendMessageCommand {
 }

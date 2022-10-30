@@ -22,10 +22,12 @@
 package com.clouds42.Commands;
 
 import com.clouds42.PipeMessages;
+import org.springframework.stereotype.Component;
 import picocli.CommandLine.Command;
 
 @Command(name = PipeMessages.DUMP_COMMAND,
         description = "Save coverage data to file",
         sortOptions = false)
+@Component
 public class SendDumpMessageCommand extends SendMessageCommand {
 }

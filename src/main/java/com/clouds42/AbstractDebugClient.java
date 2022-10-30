@@ -22,22 +22,19 @@
 package com.clouds42;
 
 import com._1c.g5.v8.dt.debug.core.runtime.client.RuntimeDebugClientException;
-import com._1c.g5.v8.dt.debug.model.virtual.Exception;
 import com._1c.g5.v8.dt.internal.debug.core.model.RuntimePresentationConverter;
 import com._1c.g5.v8.dt.internal.debug.core.runtime.client.RuntimeDebugModelXmlSerializer;
 import org.eclipse.emf.ecore.EObject;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.client.api.ContentResponse;
 import org.eclipse.jetty.client.api.Request;
-import org.eclipse.jetty.client.dynamic.HttpClientTransportDynamic;
 import org.eclipse.jetty.client.util.FutureResponseListener;
-import org.eclipse.jetty.client.util.StringRequestContent;
+import org.eclipse.jetty.client.util.StringContentProvider;
 import org.eclipse.jetty.http.HttpField;
 import org.eclipse.jetty.http.HttpFields;
 import org.eclipse.jetty.http.HttpHeader;
 import org.eclipse.jetty.http.HttpMethod;
 import org.eclipse.jetty.http.HttpStatus;
-import org.eclipse.jetty.io.ClientConnector;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -72,11 +69,7 @@ public abstract class AbstractDebugClient {
     protected HttpClient createHttpClient(long idleTimeout) {
         SslContextFactory.Client sslContextFactory = new SslContextFactory.Client();
         sslContextFactory.setTrustAll(true);
-
-        ClientConnector clientConnector = new ClientConnector();
-        clientConnector.setSslContextFactory(sslContextFactory);
-
-        HttpClient httpClient = new HttpClient(new HttpClientTransportDynamic(clientConnector));
+        var httpClient = new HttpClient(sslContextFactory);
         httpClient.setFollowRedirects(true);
         httpClient.setUserAgentField(new HttpField("User-Agent", "1CV8"));
         httpClient.setIdleTimeout(idleTimeout);
@@ -86,12 +79,10 @@ public abstract class AbstractDebugClient {
     protected Request buildRequest(HttpClient httpClient, HttpMethod method, String componentUrl) {
         return httpClient.newRequest(this.toUri(componentUrl))
                 .method(method)
-                .headers(httpFields -> httpFields
-                        .add(HttpHeader.ACCEPT, "application/xml")
-                        .add(HttpHeader.CONNECTION, HttpHeader.KEEP_ALIVE.asString())
-                        .add(HttpHeader.CONTENT_TYPE, "application/xml")
-                        .add("1C-ApplicationName", "1C:Enterprise DT")
-                );
+                .header(HttpHeader.ACCEPT, "application/xml")
+                .header(HttpHeader.CONNECTION, HttpHeader.KEEP_ALIVE.asString())
+                .header(HttpHeader.CONTENT_TYPE, "application/xml")
+                .header("1C-ApplicationName", "1C:Enterprise DT");
     }
 
     protected String getComponentUrl(String debugServerUrl, String suffix) {
@@ -117,7 +108,7 @@ public abstract class AbstractDebugClient {
             if (requestContent != null) {
                 try {
                     String serializedRequest = abstractDebugClient.serializer.serialize(requestContent);
-                    request.body(new StringRequestContent(serializedRequest));
+                    request.content(new StringContentProvider(serializedRequest));
                 } catch (IOException e) {
                     throw new RuntimeDebugClientException("Error occurred while processing request", e);
                 }
@@ -130,7 +121,7 @@ public abstract class AbstractDebugClient {
             if (HttpStatus.isSuccess(status)) {
                 if (responseClass != null && status != 204) {
                     String type = response.getMediaType();
-                    if(!type.equalsIgnoreCase("application/xml")) {
+                    if (!type.equalsIgnoreCase("application/xml")) {
                         return null;
                     }
                     try {
@@ -149,8 +140,8 @@ public abstract class AbstractDebugClient {
                 String errorMessage = RuntimePresentationConverter.presentation(response.getContent());
 
                 try {
-                    Exception exception = abstractDebugClient.serializer.deserialize(errorMessage, Exception.class, "exception", "Exception");
-                    throw new RuntimeDebugClientException("Unsuccessful response from 1C:Enterprise" + exception.getDescr());
+                    Exception exception = (Exception) abstractDebugClient.serializer.deserialize(errorMessage, EObject.class, "exception", "Exception");
+                    throw new RuntimeDebugClientException("Unsuccessful response from 1C:Enterprise" + exception.getMessage());
                 } catch (IOException e) {
                     logger.debug("exception raw data `[{}]`", errorMessage);
                     throw new RuntimeDebugClientException("Error occurred while processing response", e);
@@ -163,15 +154,15 @@ public abstract class AbstractDebugClient {
         }
     }
 
-    private static String getStringFromContent(ContentResponse response) throws IOException{
+    private static String getStringFromContent(ContentResponse response) throws IOException {
         HttpFields headers = response.getHeaders();
         String charset = response.getEncoding();
         HttpField contentEncoding = headers.getField(HttpHeader.CONTENT_ENCODING);
         byte[] origContent = response.getContent();
         HttpField len = headers.getField(HttpHeader.CONTENT_LENGTH);
         int lenValue = len.getIntValue();
-        if(contentEncoding!=null && "deflate".equalsIgnoreCase(contentEncoding.getValue())) {
-            try(InputStream bis = new ByteArrayInputStream(origContent)) {
+        if (contentEncoding != null && "deflate".equalsIgnoreCase(contentEncoding.getValue())) {
+            try (InputStream bis = new ByteArrayInputStream(origContent)) {
                 try (InputStream in = new InflaterInputStream(bis, new Inflater(true))) {
                     origContent = in.readAllBytes();
                     lenValue = origContent.length;
@@ -179,26 +170,26 @@ public abstract class AbstractDebugClient {
             }
         }
         int offset = removeBOM(origContent);
-        for (int i = offset; i<lenValue; i++ ) {
-            if(origContent[i] == 0) {
+        for (int i = offset; i < lenValue; i++) {
+            if (origContent[i] == 0) {
                 lenValue = i;
                 break;
             }
         }
         byte[] content = new byte[lenValue - offset];
-        System.arraycopy(origContent, offset, content,0, content.length);
+        System.arraycopy(origContent, offset, content, 0, content.length);
         String contentString = new String(content, Charset.forName(charset))
-                .replaceFirst("^([\\W]+)<","<");
+                .replaceFirst("^([\\W]+)<", "<");
         contentString = Utils.normalizeXml(contentString);
         return contentString;
     }
 
     private static int removeBOM(byte[] origContent) {
         int offset = 0;
-        if(origContent.length > 2
-                && origContent[0] == (byte)-17
-                && origContent[1] == (byte)-69
-                && origContent[2] == (byte)-65) {
+        if (origContent.length > 2
+                && origContent[0] == (byte) -17
+                && origContent[1] == (byte) -69
+                && origContent[2] == (byte) -65) {
             offset = 3;
         }
         return offset;
@@ -218,7 +209,8 @@ public abstract class AbstractDebugClient {
                 portField.setAccessible(true);
                 portField.set(uri, url.getPort());
                 return uri;
-            } catch (IllegalArgumentException | IllegalAccessException | NoSuchFieldException | SecurityException | MalformedURLException var6) {
+            } catch (IllegalArgumentException | IllegalAccessException | NoSuchFieldException | SecurityException |
+                     MalformedURLException var6) {
                 throw new IllegalArgumentException(var6);
             }
         }
