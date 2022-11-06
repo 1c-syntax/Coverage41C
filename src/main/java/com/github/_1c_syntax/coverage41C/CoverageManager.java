@@ -14,7 +14,7 @@ public class CoverageManager {
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    private final DebugClientEDT debugClient;
+    private final IDebugClient debugClient;
 
     private final ConnectionOptions connectionOptions;
     private final DebuggerOptions debuggerOptions;
@@ -26,25 +26,22 @@ public class CoverageManager {
         this.connectionOptions = connectionOptions;
         this.debuggerOptions = debuggerOptions;
 
-        debugClient = new DebugClientEDT();
-        debugClient.setCollector(collector);
+        debugClient = new DebugClientEDT(collector,
+                connectionOptions.getDebugServerUrl(),
+                connectionOptions.getInfobaseAlias());
     }
 
     public void connect() throws DebugClientException {
-        debugClient.configure(
-                connectionOptions.getDebugServerUrl(),
-                connectionOptions.getInfobaseAlias());
 
         debugClient.connect(debuggerOptions.getPassword());
 
         ModuleDescriptor.Version apiver = ModuleDescriptor.Version.parse(debugClient.getApiVersion());
         var debugTargets = debuggerOptions.getAutoconnectTargets();
 
-        debugClient.setupSettings(
-                debuggerOptions.getDebugAreaNames(),
-                filterTargetsByApiVersion(debugTargets, apiver));
+        var areaNames = debuggerOptions.getDebugAreaNames();
+        var filteredTargets = filterTargetsByApiVersion(debugTargets, apiver);
 
-        debugClient.connectTargets(debuggerOptions);
+        debugClient.connectTargets(areaNames, filteredTargets);
     }
 
     public void disconnect() throws DebugClientException {

@@ -12,12 +12,12 @@ import com._1c.g5.v8.dt.debug.model.measure.PerformanceInfoLine;
 import com._1c.g5.v8.dt.debug.model.measure.PerformanceInfoMain;
 import com._1c.g5.v8.dt.debug.model.measure.PerformanceInfoModule;
 import com._1c.g5.v8.dt.internal.debug.core.runtime.client.RuntimeDebugModelXmlSerializer;
-import com.clouds42.CommandLineOptions.DebuggerOptions;
 import com.clouds42.DebugClient;
 import com.clouds42.MyRuntimeDebugModelXmlSerializer;
 import com.github._1c_syntax.coverage41C.CoverageCollector;
 import com.github._1c_syntax.coverage41C.DebugClientException;
 import com.github._1c_syntax.coverage41C.DebugTargetType;
+import com.github._1c_syntax.coverage41C.IDebugClient;
 import org.eclipse.emf.common.util.EList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,21 +28,21 @@ import java.net.URI;
 import java.util.*;
 import java.util.stream.Collectors;
 
-public class DebugClientEDT {
+public class DebugClientEDT implements IDebugClient {
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     private final DebugClient client;
 
-    private CoverageCollector collector;
+    private final CoverageCollector collector;
 
-    public DebugClientEDT() {
+    public DebugClientEDT(CoverageCollector collector, String debugServerUrl, String infobaseAlias) {
         RuntimeDebugModelXmlSerializer serializer = new MyRuntimeDebugModelXmlSerializer();
         client = new DebugClient(serializer);
-    }
 
-    public void setCollector(CoverageCollector collector) {
         this.collector = collector;
+
+        configure(debugServerUrl, infobaseAlias);
     }
 
     private void connectAllTargets(List<DebugTargetId> debugTargets) {
@@ -60,27 +60,35 @@ public class DebugClientEDT {
         });
     }
 
-    public void connectTargets(DebuggerOptions debuggerOptions) throws DebugClientException {
+    public void connectTargets(List<String> debugAreaNames, List<DebugTargetType> debugTargetTypes) throws DebugClientException {
+
+        setupSettings(debugAreaNames, debugTargetTypes);
+
+        var debugTargets = getCurrentTargets(debugAreaNames);
+
+        connectAllTargets(debugTargets);
+    }
+
+    private List<DebugTargetId> getCurrentTargets(List<String> debugAreaNames) throws DebugClientException {
         logger.info("Setup targets...");
         List<DebugTargetId> debugTargets;
-        if (debuggerOptions.getDebugAreaNames().isEmpty()) {
+        if (debugAreaNames.isEmpty()) {
             try {
-                debugTargets = client.getRuntimeDebugTargets(null);
+                return client.getRuntimeDebugTargets(null);
             } catch (RuntimeDebugClientException ex) {
                 throw new DebugClientException("Error calling getRuntimeDebugTargets", ex);
             }
         } else {
             debugTargets = new LinkedList<>();
-            debuggerOptions.getDebugAreaNames().forEach(areaName -> {
+            debugAreaNames.forEach(areaName -> {
                 try {
                     debugTargets.addAll(client.getRuntimeDebugTargets(areaName));
                 } catch (RuntimeDebugClientException ex) {
                     logger.error(ex.getLocalizedMessage());
                 }
             });
+            return debugTargets;
         }
-
-        connectAllTargets(debugTargets);
     }
 
     public void enableProfiling(UUID measureUuid) throws DebugClientException {
@@ -141,7 +149,7 @@ public class DebugClientEDT {
         try {
             return client.getApiVersion();
         } catch (RuntimeDebugClientException ex) {
-            throw new DebugClientException("Error on getApiVersion", ex);
+            throw new DebugClientException("Error getApiVersion", ex);
         }
     }
 
@@ -154,7 +162,7 @@ public class DebugClientEDT {
                     debugAreaNames,
                     convertDebugTargets(debugTargets));
         } catch (RuntimeDebugClientException ex) {
-            throw new DebugClientException("Error on setupSettings", ex);
+            throw new DebugClientException("Error setupSettings", ex);
         }
     }
 
