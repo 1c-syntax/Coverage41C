@@ -107,14 +107,14 @@ public abstract class CoverServer {
                     logger.info("Get command: {}", line);
                     switch (line) {
                         case PipeMessages.DUMP_COMMAND:
-                            getCollector().dumpCoverageFile(getMetadataOptions(), getOutputOptions());
+                            dumpCoverageData();
                             out.println(PipeMessages.OK_RESULT);
                             return true;
                         case PipeMessages.STATS_COMMAND:
                             out.println(PipeMessages.OK_RESULT);
                             return true;
                         case PipeMessages.CLEAN_COMMAND:
-                            getCollector().clean();
+                            cleanCoverageData();
                             out.println(PipeMessages.OK_RESULT);
                             return true;
                         case PipeMessages.CHECK_COMMAND:
@@ -142,11 +142,7 @@ public abstract class CoverServer {
 
     protected abstract void gracefulShutdown(PrintWriter out) throws IOException;
 
-    protected abstract MetadataOptions getMetadataOptions();
+    protected abstract void dumpCoverageData();
 
-    protected abstract CoverageCollector getCollector();
-
-    protected abstract OutputOptions getOutputOptions();
-
-
+    protected abstract void cleanCoverageData();
 }

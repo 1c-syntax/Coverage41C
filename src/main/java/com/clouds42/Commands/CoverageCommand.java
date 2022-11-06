@@ -25,9 +25,8 @@ import com.clouds42.CommandLineOptions.*;
 import com.clouds42.PipeMessages;
 import com.clouds42.Utils;
 import com.github._1c_syntax.coverage41C.CoverageCollector;
+import com.github._1c_syntax.coverage41C.CoverageManager;
 import com.github._1c_syntax.coverage41C.DebugClientException;
-import com.github._1c_syntax.coverage41C.DebugTargetType;
-import com.github._1c_syntax.coverage41C.EDT.DebugClientEDT;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
@@ -38,7 +37,6 @@ import picocli.CommandLine.Option;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.lang.invoke.MethodHandles;
-import java.lang.module.ModuleDescriptor.Version;
 import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -71,9 +69,8 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     @Option(names = {"--opid"}, description = "Owner process PID", defaultValue = "-1")
     Integer opid;
 
-    private DebugClientEDT client;
-
-    private final CoverageCollector collector = new CoverageCollector();
+    private CoverageManager coverageManager;
+    private CoverageCollector collector;
 
     private final AtomicBoolean stopExecution = new AtomicBoolean(false);
     private boolean systemStarted = false;
@@ -84,16 +81,10 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         int result = CommandLine.ExitCode.OK;
         getServerSocket();
 
-        collector.readMetadata(metadataOptions);
-        collector.setOptions(
-                metadataOptions.isRawMode(),
-                loggingOptions.isVerbose(),
-                filterOptions.getExtensionName(),
-                filterOptions.getExternalDataProcessorUrl()
-        );
+        collector = new CoverageCollector(metadataOptions, loggingOptions, filterOptions, outputOptions);
+        collector.readMetadata();
 
-        client = new DebugClientEDT();
-        client.setCollector(collector);
+        coverageManager = new CoverageManager(collector, connectionOptions, debuggerOptions);
 
         UUID measureUuid = UUID.randomUUID();
         try {
@@ -121,14 +112,14 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         return result;
     }
 
-    private void shutdown() throws IOException {
+    private void shutdown() throws IOException, DebugClientException {
         if (opid > 0 && !Utils.isProcessStillAlive(opid)) {
             logger.info("Owner process stopped: {}", opid);
         }
 
         gracefulShutdown(null);
 
-        client.disconnect();
+        coverageManager.disconnect();
         closeSocket();
 
         logger.info("Main thread finished");
@@ -139,7 +130,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             try {
                 shutdown();
-            } catch (IOException e) {
+            } catch (IOException | DebugClientException e) {
                 logger.info("Shutdown error.");
                 e.printStackTrace();
             }
@@ -148,39 +139,14 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
 
     private void mainLoop() throws DebugClientException {
         while (!stopExecution.get()) {
-            client.ping();
+            coverageManager.ping();
         }
     }
 
     private void startSystem(UUID measureUuid) throws DebugClientException {
-        client.configure(
-                connectionOptions.getDebugServerUrl(),
-                connectionOptions.getInfobaseAlias());
-
-        client.connect(debuggerOptions.getPassword());
-
-        Version apiver = Version.parse(client.getApiVersion());
-        var debugTargets = debuggerOptions.getAutoconnectTargets();
-
-        client.setupSettings(
-                debuggerOptions.getDebugAreaNames(),
-                filterTargetsByApiVersion(debugTargets, apiver));
-
-        client.connectTargets(debuggerOptions);
-        client.enableProfiling(measureUuid);
-
+        coverageManager.connect();
+        coverageManager.start(measureUuid);
         systemStarted = true;
-
-    }
-
-    private static List<DebugTargetType> filterTargetsByApiVersion(List<DebugTargetType> debugTargets, Version ApiVersion) {
-        List<DebugTargetType> debugTypes = new java.util.ArrayList<>(debugTargets);
-
-        if (Version.parse("8.3.16").compareTo(ApiVersion) > 0) {
-            debugTypes.remove(DebugTargetType.MOBILE_MANAGED_CLIENT);
-            logger.info("[{}] was removed", DebugTargetType.MOBILE_MANAGED_CLIENT);
-        }
-        return debugTypes;
     }
 
     protected void gracefulShutdown(PrintWriter serverPipeOut) {
@@ -188,9 +154,14 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
             return;
         }
 
-        client.disableProfiling();
+        try {
+            coverageManager.stop();
+        } catch (DebugClientException e) {
+            logger.error("Error gracefulShutdown", e);
+        }
 
-        collector.dumpCoverageFile(metadataOptions, outputOptions);
+        dumpCoverageData();
+
         if (serverPipeOut != null) {
             serverPipeOut.println(PipeMessages.OK_RESULT);
         }
@@ -200,18 +171,13 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     }
 
     @Override
-    protected MetadataOptions getMetadataOptions() {
-        return metadataOptions;
+    protected void dumpCoverageData() {
+        collector.dumpCoverageData();
     }
 
     @Override
-    protected CoverageCollector getCollector() {
-        return collector;
-    }
-
-    @Override
-    protected OutputOptions getOutputOptions() {
-        return outputOptions;
+    protected void cleanCoverageData() {
+        collector.cleanCoverageData();
     }
 
     @Override

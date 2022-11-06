@@ -93,12 +93,12 @@ public class DebugClientEDT {
         }
     }
 
-    public void disableProfiling() {
+    public void disableProfiling() throws DebugClientException {
         logger.info("Disabling profiling...");
         try {
             client.toggleProfiling(null);
         } catch (RuntimeDebugClientException e) {
-            logger.error(e.getLocalizedMessage());
+            throw new DebugClientException("Error disableProfiling", e);
         }
     }
 
@@ -127,13 +127,13 @@ public class DebugClientEDT {
         }
     }
 
-    public void disconnect() {
+    public void disconnect() throws DebugClientException {
         logger.info("Disconnecting from dbgs...");
         try {
             client.disconnect();
             client.dispose();
         } catch (RuntimeDebugClientException e) {
-            logger.error(e.getLocalizedMessage());
+            throw new DebugClientException("Error disconnect", e);
         }
     }
 

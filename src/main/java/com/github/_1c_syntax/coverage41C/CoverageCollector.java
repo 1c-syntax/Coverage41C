@@ -1,5 +1,7 @@
 package com.github._1c_syntax.coverage41C;
 
+import com.clouds42.CommandLineOptions.FilterOptions;
+import com.clouds42.CommandLineOptions.LoggingOptions;
 import com.clouds42.CommandLineOptions.MetadataOptions;
 import com.clouds42.CommandLineOptions.OutputOptions;
 import com.clouds42.Utils;
@@ -40,7 +42,26 @@ public class CoverageCollector {
     private String extensionName;
     private String externalDataProcessorUrl;
 
-    public void setOptions(boolean rawMode, boolean verbose, String extensionName, String externalDataProcessorUrl) {
+    private final MetadataOptions metadataOptions;
+    private final OutputOptions outputOptions;
+
+    public CoverageCollector(MetadataOptions metadataOptions,
+                             LoggingOptions loggingOptions,
+                             FilterOptions filterOptions,
+                             OutputOptions outputOptions) {
+
+        this.metadataOptions = metadataOptions;
+        this.outputOptions = outputOptions;
+
+        setOptions(
+                metadataOptions.isRawMode(),
+                loggingOptions.isVerbose(),
+                filterOptions.getExtensionName(),
+                filterOptions.getExternalDataProcessorUrl()
+        );
+    }
+
+    private void setOptions(boolean rawMode, boolean verbose, String extensionName, String externalDataProcessorUrl) {
         this.rawMode = rawMode;
         this.verbose = verbose;
         this.extensionName = extensionName;
@@ -91,11 +112,11 @@ public class CoverageCollector {
         }
     }
 
-    public void readMetadata(MetadataOptions metadataOptions) throws Exception {
+    public void readMetadata() throws Exception {
         uriListByKey = Utils.readMetadata(metadataOptions, coverageData);
     }
 
-    public void dumpCoverageFile(MetadataOptions metadataOptions, OutputOptions outputOptions) {
+    public void dumpCoverageData() {
         Utils.dumpCoverageFile(coverageData, metadataOptions, outputOptions);
     }
 
@@ -113,7 +134,7 @@ public class CoverageCollector {
 
     }
 
-    public void clean() {
+    public void cleanCoverageData() {
         coverageData.forEach((uri, bigDecimalIntegerMap) ->
                 bigDecimalIntegerMap.replaceAll((k, v) -> 0));
     }
