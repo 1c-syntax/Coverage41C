@@ -5,9 +5,8 @@ import com._1c.g5.v8.dt.debug.model.base.data.AttachDebugUIResult;
 import com._1c.g5.v8.dt.debug.model.base.data.BSLModuleIdInternal;
 import com._1c.g5.v8.dt.debug.model.base.data.DebugTargetId;
 import com._1c.g5.v8.dt.debug.model.dbgui.commands.DBGUIExtCmdInfoBase;
-import com._1c.g5.v8.dt.debug.model.dbgui.commands.DBGUIExtCmds;
-import com._1c.g5.v8.dt.debug.model.dbgui.commands.impl.DBGUIExtCmdInfoMeasureImpl;
-import com._1c.g5.v8.dt.debug.model.dbgui.commands.impl.DBGUIExtCmdInfoStartedImpl;
+import com._1c.g5.v8.dt.debug.model.dbgui.commands.DBGUIExtCmdInfoMeasure;
+import com._1c.g5.v8.dt.debug.model.dbgui.commands.DBGUIExtCmdInfoStarted;
 import com._1c.g5.v8.dt.debug.model.measure.PerformanceInfoLine;
 import com._1c.g5.v8.dt.debug.model.measure.PerformanceInfoMain;
 import com._1c.g5.v8.dt.debug.model.measure.PerformanceInfoModule;
@@ -178,7 +177,7 @@ public class DebugClientEDT implements IDebugClient {
         return F.valueOf(fClass, e.name());
     }
 
-    private void targetStarted(DBGUIExtCmdInfoStartedImpl command) {
+    private void targetStarted(DBGUIExtCmdInfoStarted command) {
         DebugTargetId targetId = command.getTargetID();
         try {
             client.attachRuntimeDebugTargets(Collections.singletonList(UUID.fromString(targetId.getId())));
@@ -201,15 +200,15 @@ public class DebugClientEDT implements IDebugClient {
         logger.info("Ping result commands size: {}", commandsList.size());
         commandsList.forEach(command -> {
             logger.info("Command: {}", command.getCmdID().getName());
-            if (command.getCmdID() == DBGUIExtCmds.MEASURE_RESULT_PROCESSING) {
-                measureResultProcessing((DBGUIExtCmdInfoMeasureImpl) command);
-            } else if (command.getCmdID() == DBGUIExtCmds.TARGET_STARTED) {
-                targetStarted((DBGUIExtCmdInfoStartedImpl) command);
+            if (command instanceof DBGUIExtCmdInfoMeasure) {
+                measureResultProcessing((DBGUIExtCmdInfoMeasure)command);
+            } else if (command instanceof DBGUIExtCmdInfoStarted) {
+                targetStarted((DBGUIExtCmdInfoStarted) command);
             }
         });
     }
 
-    private void measureResultProcessing(DBGUIExtCmdInfoMeasureImpl command) {
+    private void measureResultProcessing(DBGUIExtCmdInfoMeasure command) {
         logger.info("Found MEASURE_RESULT_PROCESSING command");
 
         PerformanceInfoMain measure = command.getMeasure();
