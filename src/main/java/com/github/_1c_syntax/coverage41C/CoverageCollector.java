@@ -37,10 +37,10 @@ public class CoverageCollector {
     private Map<String, URI> uriListByKey;
     Set<String> externalDataProcessorsUriSet = new HashSet<>();
 
-    private boolean rawMode;
-    private boolean verbose;
-    private String extensionName;
-    private String externalDataProcessorUrl;
+    private final boolean rawMode;
+    private final boolean verbose;
+    private final String extensionName;
+    private final String externalDataProcessorUrl;
 
     private final MetadataOptions metadataOptions;
     private final OutputOptions outputOptions;
@@ -53,19 +53,10 @@ public class CoverageCollector {
         this.metadataOptions = metadataOptions;
         this.outputOptions = outputOptions;
 
-        setOptions(
-                metadataOptions.isRawMode(),
-                loggingOptions.isVerbose(),
-                filterOptions.getExtensionName(),
-                filterOptions.getExternalDataProcessorUrl()
-        );
-    }
-
-    private void setOptions(boolean rawMode, boolean verbose, String extensionName, String externalDataProcessorUrl) {
-        this.rawMode = rawMode;
-        this.verbose = verbose;
-        this.extensionName = extensionName;
-        this.externalDataProcessorUrl = externalDataProcessorUrl;
+        this.rawMode = metadataOptions.isRawMode();
+        this.verbose = loggingOptions.isVerbose();
+        this.extensionName = filterOptions.getExtensionName();
+        this.externalDataProcessorUrl = filterOptions.getExternalDataProcessorUrl();
     }
 
     @CheckForNull
