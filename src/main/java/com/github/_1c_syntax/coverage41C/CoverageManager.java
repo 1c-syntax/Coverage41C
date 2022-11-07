@@ -16,14 +16,12 @@ public class CoverageManager {
 
     private final IDebugClient debugClient;
 
-    private final ConnectionOptions connectionOptions;
     private final DebuggerOptions debuggerOptions;
 
     public CoverageManager(CoverageCollector collector,
                            ConnectionOptions connectionOptions,
                            DebuggerOptions debuggerOptions) {
 
-        this.connectionOptions = connectionOptions;
         this.debuggerOptions = debuggerOptions;
 
         debugClient = new DebugClientEDT(collector,
@@ -35,13 +33,9 @@ public class CoverageManager {
 
         debugClient.connect(debuggerOptions.getPassword());
 
-        ModuleDescriptor.Version apiver = ModuleDescriptor.Version.parse(debugClient.getApiVersion());
-        var debugTargets = debuggerOptions.getAutoconnectTargets();
-
         var areaNames = debuggerOptions.getDebugAreaNames();
-        var filteredTargets = filterTargetsByApiVersion(debugTargets, apiver);
-
-        debugClient.connectTargets(areaNames, filteredTargets);
+        var debugTargets = debuggerOptions.getAutoconnectTargets();
+        debugClient.connectTargets(areaNames, debugTargets);
     }
 
     public void disconnect() throws DebugClientException {
@@ -58,15 +52,5 @@ public class CoverageManager {
 
     public void ping() throws DebugClientException {
         debugClient.ping();
-    }
-
-    private static List<DebugTargetType> filterTargetsByApiVersion(List<DebugTargetType> debugTargets, ModuleDescriptor.Version ApiVersion) {
-        List<DebugTargetType> debugTypes = new java.util.ArrayList<>(debugTargets);
-
-        if (ModuleDescriptor.Version.parse("8.3.16").compareTo(ApiVersion) > 0) {
-            debugTypes.remove(DebugTargetType.MOBILE_MANAGED_CLIENT);
-            logger.info("[{}] was removed", DebugTargetType.MOBILE_MANAGED_CLIENT);
-        }
-        return debugTypes;
     }
 }

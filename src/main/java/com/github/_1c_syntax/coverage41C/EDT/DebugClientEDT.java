@@ -23,6 +23,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.invoke.MethodHandles;
+import java.lang.module.ModuleDescriptor;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.util.*;
@@ -62,10 +63,11 @@ public class DebugClientEDT implements IDebugClient {
 
     public void connectTargets(List<String> debugAreaNames, List<DebugTargetType> debugTargetTypes) throws DebugClientException {
 
-        setupSettings(debugAreaNames, debugTargetTypes);
+        var apiver = ModuleDescriptor.Version.parse(getApiVersion());
+        var filteredTargets = filterTargetsByApiVersion(debugTargetTypes, apiver);
+        setupSettings(debugAreaNames, filteredTargets);
 
         var debugTargets = getCurrentTargets(debugAreaNames);
-
         connectAllTargets(debugTargets);
     }
 
@@ -153,7 +155,7 @@ public class DebugClientEDT implements IDebugClient {
         }
     }
 
-    public void setupSettings(List<String> debugAreaNames,  List<DebugTargetType> debugTargets) throws DebugClientException {
+    private void setupSettings(List<String> debugAreaNames,  List<DebugTargetType> debugTargets) throws DebugClientException {
         logger.info("Setup settings...");
 
         try {
@@ -234,5 +236,15 @@ public class DebugClientEDT implements IDebugClient {
                 }
             }
         });
+    }
+
+    private static List<DebugTargetType> filterTargetsByApiVersion(List<DebugTargetType> debugTargets, ModuleDescriptor.Version ApiVersion) {
+        List<DebugTargetType> debugTypes = new java.util.ArrayList<>(debugTargets);
+
+        if (ModuleDescriptor.Version.parse("8.3.16").compareTo(ApiVersion) > 0) {
+            debugTypes.remove(DebugTargetType.MOBILE_MANAGED_CLIENT);
+            logger.info("[{}] was removed", DebugTargetType.MOBILE_MANAGED_CLIENT);
+        }
+        return debugTypes;
     }
 }
