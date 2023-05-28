@@ -74,13 +74,15 @@ public class SendMessageCommand implements Callable<Integer> {
             logger.info("Try: {}", i);
             try {
                 result = pipeIn.readLine();
-                break;
+                if (result != null) {
+                    break;
+                }
             } catch (IOException e) {
                 logger.info("Can't read answer from main app...");
                 Thread.sleep(10);
             }
         }
-        if (result.equals(PipeMessages.OK_RESULT)) {
+        if (result != null && result.equals(PipeMessages.OK_RESULT)) {
             logger.info("Command success: {}", commandText);
             client.close();
             return CommandLine.ExitCode.OK;
