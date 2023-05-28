@@ -82,8 +82,8 @@ public class SendMessageCommand implements Callable<Integer> {
                 Thread.sleep(10);
             }
         }
-        if (result.equals(PipeMessages.OK_RESULT)) {
-            logger.info("Command success: {}", commandText);
+        if (result != null && result.equals(PipeMessages.OK_RESULT)) {
+            logger.info("Command success: {}" + commandText);
             client.close();
             return CommandLine.ExitCode.OK;
         } else {
