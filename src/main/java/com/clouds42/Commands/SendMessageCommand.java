@@ -83,7 +83,7 @@ public class SendMessageCommand implements Callable<Integer> {
             }
         }
         if (result != null && result.equals(PipeMessages.OK_RESULT)) {
-            logger.info("Command success: {}" + commandText);
+            logger.info("Command success: {}", commandText);
             client.close();
             return CommandLine.ExitCode.OK;
         } else {
