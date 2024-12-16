@@ -1,7 +1,7 @@
 /*
  * This file is a part of Coverage41C.
  *
- * Copyright (c) 2020-2022
+ * Copyright (c) 2020-2024
  * Kosolapov Stanislav aka proDOOMman <prodoomman@gmail.com> and contributors
  *
  * SPDX-License-Identifier: LGPL-3.0-or-later
@@ -28,6 +28,7 @@ import com.clouds42.PipeMessages;
 import com.clouds42.Utils;
 import org.scalasbt.ipcsocket.UnixDomainServerSocket;
 import org.scalasbt.ipcsocket.Win32NamedPipeServerSocket;
+import org.scalasbt.ipcsocket.Win32SecurityLevel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
