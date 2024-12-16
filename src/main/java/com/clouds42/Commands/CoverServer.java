@@ -65,7 +65,7 @@ public abstract class CoverServer {
         String pipeName = Utils.getPipeName(getConnectionOptions());
         if(serverSocket == null) {
             if (isWindows) {
-                serverSocket = new Win32NamedPipeServerSocket(pipeName);
+                serverSocket = new Win32NamedPipeServerSocket(pipeName, false, Win32SecurityLevel.OWNER_DACL);
             } else {
                 serverSocket = new UnixDomainServerSocket(pipeName);
             }
