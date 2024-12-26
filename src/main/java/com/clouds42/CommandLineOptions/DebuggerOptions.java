@@ -21,13 +21,13 @@
  */
 package com.clouds42.CommandLineOptions;
 
-import com._1c.g5.v8.dt.debug.model.base.data.DebugTargetType;
+
+import com.github._1c_syntax.coverage41C.DebugTargetType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine.Option;
 
 import java.lang.invoke.MethodHandles;
-import java.lang.module.ModuleDescriptor;
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
@@ -93,22 +93,9 @@ public class DebuggerOptions {
 
     public List<DebugTargetType> getAutoconnectTargets() {
         if (autoconnectTargets == null || autoconnectTargets.isEmpty()) {
-            autoconnectTargets = new LinkedList<DebugTargetType>();
-            autoconnectTargets.addAll(DebugTargetType.VALUES);
-            autoconnectTargets.remove(DebugTargetType.UNKNOWN);
-
+            autoconnectTargets = new LinkedList<>();
+            autoconnectTargets.addAll(DebugTargetType.getAutoconnectTargets());
         }
         return autoconnectTargets;
     }
-
-    public List<DebugTargetType> getFilteredAutoconnectTargets(ModuleDescriptor.Version ApiVersion) {
-        List<DebugTargetType> debugTypes = getAutoconnectTargets();
-
-        if (ModuleDescriptor.Version.parse("8.3.16").compareTo(ApiVersion) > 0) {
-            debugTypes.remove(DebugTargetType.MOBILE_MANAGED_CLIENT);
-            logger.info("[{}] was removed", DebugTargetType.MOBILE_MANAGED_CLIENT);
-        }
-        return debugTypes;
-    }
-
 }
