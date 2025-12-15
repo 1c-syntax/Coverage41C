@@ -22,7 +22,7 @@ repositories {
 }
 
 group = "com.clouds42"
-version = "2.7.3.1"
+version = "2.7.4"
 
 java {
     sourceCompatibility = JavaVersion.VERSION_17
