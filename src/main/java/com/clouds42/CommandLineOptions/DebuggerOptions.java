@@ -93,7 +93,7 @@ public class DebuggerOptions {
 
     public List<DebugTargetType> getAutoconnectTargets() {
         if (autoconnectTargets == null || autoconnectTargets.isEmpty()) {
-            autoconnectTargets = new LinkedList<DebugTargetType>();
+            autoconnectTargets = new LinkedList<>();
             autoconnectTargets.addAll(DebugTargetType.VALUES);
             autoconnectTargets.remove(DebugTargetType.UNKNOWN);
 

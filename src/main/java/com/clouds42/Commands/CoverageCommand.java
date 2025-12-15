@@ -259,10 +259,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                                     try {
                                         Stream<String> all_lines = Files.lines(Paths.get(uri));
                                         Optional<String> first = all_lines.skip(lineNo.longValue() - 1).findFirst();
-                                        if (first.isPresent()) {
-                                            String specific_line_n = first.get();
-                                            logger.info(">>> {}", specific_line_n);
-                                        }
+                                      first.ifPresent(specific_line_n -> logger.info(">>> {}", specific_line_n));
                                     } catch (Exception e) {
                                         logger.error(e.getLocalizedMessage());
                                     }

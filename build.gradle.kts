@@ -41,48 +41,50 @@ dependencies {
         }
     )
 
-    implementation("info.picocli:picocli:4.6.3")
+    implementation("info.picocli:picocli:4.7.7")
 
-    implementation("org.slf4j:slf4j-api:2.0.3")
-    implementation("org.slf4j:slf4j-simple:2.0.3")
+    implementation("org.slf4j:slf4j-api:2.0.17")
+    implementation("org.slf4j:slf4j-simple:2.0.17")
 
-    implementation("org.scala-sbt.ipcsocket:ipcsocket:1.5.0")
+    implementation("org.scala-sbt.ipcsocket:ipcsocket:1.6.3")
 
-    implementation("org.eclipse.emf:org.eclipse.emf.common:2.25.0")
-    implementation("org.eclipse.emf:org.eclipse.emf.ecore.xmi:2.16.0")
-    implementation("org.eclipse.emf:org.eclipse.emf.ecore.xcore.lib:1.6.0")
+    implementation("org.eclipse.emf:org.eclipse.emf.common:2.44.0")
+    implementation("org.eclipse.emf:org.eclipse.emf.ecore.xmi:2.39.0")
+    implementation("org.eclipse.emf:org.eclipse.emf.ecore.xcore.lib:1.7.1")
 
-    implementation("org.eclipse.platform:org.eclipse.osgi:3.17.200")
-    implementation("org.eclipse.platform:org.eclipse.core.runtime:3.24.100")
-    implementation("org.eclipse.platform:org.eclipse.osgi.services:3.10.200")
-    implementation("org.eclipse.platform:org.eclipse.equinox.common:3.16.0")
+    implementation("org.eclipse.platform:org.eclipse.osgi:3.24.0")
+    implementation("org.eclipse.platform:org.eclipse.core.runtime:3.34.100")
+    implementation("org.eclipse.platform:org.eclipse.osgi.services:3.12.300")
+    implementation("org.eclipse.platform:org.eclipse.equinox.common:3.20.300")
 
-    implementation("org.eclipse.jetty:jetty-client:11.0.12")
+    implementation("org.eclipse.jetty:jetty-client:11.0.26")
 
-    implementation("com.google.guava:guava:31.1-jre")
-    implementation("com.google.inject:guice:5.1.0")
+    implementation("com.google.guava:guava:33.5.0-jre")
+    implementation("com.google.inject:guice:7.0.0")
 
-    implementation("de.vandermeer:asciitable:0.3.2")
-
-    implementation("io.github.1c-syntax:bsl-common-library:0.3.0")
-
-    implementation("com.github.1c-syntax:mdclasses:0.10.3")
-    implementation("com.github.1c-syntax:bsl-parser:0.21.0") {
-        exclude("com.tunnelvisionlabs:antlr4-annotations")
-        exclude("com.ibm.icu:*")
-        exclude("org.antlr:ST4")
-        exclude("org.antlr:antlr-runtime")
+    implementation("de.vandermeer:asciitable:0.3.2") {
+        exclude("org.apache.commons:commons-lang3")
     }
 
-    annotationProcessor("info.picocli:picocli-codegen:4.6.3")
+    implementation("io.github.1c-syntax:bsl-common-library:0.9.0")
+    implementation("io.github.1c-syntax:utils:0.6.6")
 
-    testImplementation("org.xmlunit:xmlunit-core:2.9.0")
-    testImplementation("org.xmlunit:xmlunit-matchers:2.9.0")
-    testImplementation("com.fasterxml.jackson.core:jackson-core:2.13.4")
-    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.13.4")
+    implementation("io.github.1c-syntax:mdclasses:0.17.0")
+    implementation("io.github.1c-syntax:bsl-parser:0.29.0") {
+        exclude("com.ibm.icu", "*")
+        exclude("org.antlr", "ST4")
+        exclude("org.antlr", "antlr-runtime")
+    }
 
-    testImplementation("org.junit.jupiter:junit-jupiter-api:5.9.0")
-    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.9.0")
+    annotationProcessor("info.picocli:picocli-codegen:4.7.7")
+
+    testImplementation("org.xmlunit:xmlunit-core:2.11.0")
+    testImplementation("org.xmlunit:xmlunit-matchers:2.11.0")
+    testImplementation("com.fasterxml.jackson.core:jackson-core:2.20.1")
+    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.20.1")
+
+    testImplementation("org.junit.jupiter:junit-jupiter-api:5.11.4")
+    testImplementation("org.junit.jupiter:junit-jupiter-engine:5.11.4")
 }
 
 buildConfig {
@@ -90,6 +92,10 @@ buildConfig {
     packageName("com.clouds42")
     buildConfigField("String", "APP_VERSION", "\"${project.version}\"")
     buildConfigField("long", "BUILD_TIME", "${System.currentTimeMillis()}L")
+}
+
+tasks.generateBuildConfig {
+    dependsOn(tasks.licenseMain)
 }
 
 tasks.named("startScripts", CreateStartScripts::class) {
@@ -150,6 +156,7 @@ license {
     exclude("**/*.java.orig")
     exclude("**/*.impl")
     exclude("**/BuildConfig.java")
+    exclude("**/test/resources/**/*")
 }
 
 tasks.named("run", JavaExec::class) {

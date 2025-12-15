@@ -105,6 +105,10 @@
         <lineToCover covered="true" lineNumber="4"/>
         <lineToCover covered="true" lineNumber="3"/>
     </file>
+    <file path="src/test/resources/configuration/Constants/Константа1/Ext/ManagerModule.bsl">
+        <lineToCover covered="false" lineNumber="4"/>
+        <lineToCover covered="false" lineNumber="3"/>
+    </file>
     <file path="src/test/resources/configuration/DataProcessors/Обработка1/Ext/ManagerModule.bsl">
         <lineToCover covered="true" lineNumber="4"/>
         <lineToCover covered="true" lineNumber="3"/>

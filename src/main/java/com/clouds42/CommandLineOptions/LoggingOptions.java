@@ -35,7 +35,7 @@ public class LoggingOptions {
     private Boolean verbose;
 
     public Boolean isVerbose() {
-        return verbose.booleanValue();
+        return verbose;
     }
 
     public void setVerbose(Boolean verbose) {

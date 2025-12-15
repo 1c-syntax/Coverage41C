@@ -23,7 +23,6 @@ package com.clouds42;
 
 import com.github._1c_syntax.bsl.parser.BSLLexer;
 import com.github._1c_syntax.bsl.parser.BSLParser;
-import com.github._1c_syntax.bsl.parser.BSLParserRuleContext;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.antlr.v4.runtime.tree.TerminalNode;
@@ -33,102 +32,102 @@ import java.util.Set;
 
 public class LinesToCoverage {
 
-    private static final Set<Class<? extends BSLParserRuleContext>> contexts = Set.of(
-            BSLParser.AssignmentContext.class,
-            BSLParser.CallStatementContext.class,
-            BSLParser.GotoStatementContext.class,
-            BSLParser.ReturnStatementContext.class,
-            BSLParser.BreakStatementContext.class,
-            BSLParser.ContinueStatementContext.class,
-            BSLParser.IfStatementContext.class,
-            BSLParser.ElsifBranchContext.class,
-            BSLParser.RaiseStatementContext.class,
-            BSLParser.ForEachStatementContext.class,
-            BSLParser.ForStatementContext.class,
-            BSLParser.WhileStatementContext.class,
-            BSLParser.GlobalMethodCallContext.class,
-            BSLParser.MethodCallContext.class,
-            BSLParser.ExecuteStatementContext.class,
-            BSLParser.AddHandlerStatementContext.class,
-            BSLParser.RemoveHandlerStatementContext.class
-    );
+  private static final Set<Class<? extends ParserRuleContext>> contexts = Set.of(
+    BSLParser.AssignmentContext.class,
+    BSLParser.CallStatementContext.class,
+    BSLParser.GotoStatementContext.class,
+    BSLParser.ReturnStatementContext.class,
+    BSLParser.BreakStatementContext.class,
+    BSLParser.ContinueStatementContext.class,
+    BSLParser.IfStatementContext.class,
+    BSLParser.ElsifBranchContext.class,
+    BSLParser.RaiseStatementContext.class,
+    BSLParser.ForEachStatementContext.class,
+    BSLParser.ForStatementContext.class,
+    BSLParser.WhileStatementContext.class,
+    BSLParser.GlobalMethodCallContext.class,
+    BSLParser.MethodCallContext.class,
+    BSLParser.ExecuteStatementContext.class,
+    BSLParser.AddHandlerStatementContext.class,
+    BSLParser.RemoveHandlerStatementContext.class
+  );
 
-    private static final Set<Integer> tokenTypes = Set.of(
-            BSLLexer.ENDDO_KEYWORD,
-            BSLLexer.ENDFUNCTION_KEYWORD,
-            BSLLexer.ENDPROCEDURE_KEYWORD,
-            BSLLexer.ENDTRY_KEYWORD,
-            BSLLexer.ENDIF_KEYWORD,
-            BSLLexer.DO_KEYWORD
-    );
+  private static final Set<Integer> tokenTypes = Set.of(
+    BSLLexer.ENDDO_KEYWORD,
+    BSLLexer.ENDFUNCTION_KEYWORD,
+    BSLLexer.ENDPROCEDURE_KEYWORD,
+    BSLLexer.ENDTRY_KEYWORD,
+    BSLLexer.ENDIF_KEYWORD,
+    BSLLexer.DO_KEYWORD
+  );
 
-    static int[] getLines(BSLParserRuleContext ast) {
+  static int[] getLines(ParserRuleContext ast) {
 
-        return Trees.getDescendants(ast).stream()
-                .filter(LinesToCoverage::mustCovered)
-                .filter(GlobalCallsFilter::filterByName)
-                .mapToInt(LinesToCoverage::getLine)
-                .filter(lineNumber -> lineNumber != 0)
-                .distinct().toArray();
+    return Trees.getDescendants(ast).stream()
+      .filter(LinesToCoverage::mustCovered)
+      .filter(GlobalCallsFilter::filterByName)
+      .mapToInt(LinesToCoverage::getLine)
+      .filter(lineNumber -> lineNumber != 0)
+      .distinct().toArray();
+  }
+
+  static boolean mustCovered(ParseTree node) {
+
+    if (node instanceof ParserRuleContext) {
+      return contexts.contains(node.getClass());
+    } else if (node instanceof TerminalNode) {
+      return tokenTypes.contains(
+        ((TerminalNode) node).getSymbol().getType()
+      );
     }
 
-    static boolean mustCovered(ParseTree node) {
+    throw new IllegalArgumentException();
+  }
 
-        if (node instanceof ParserRuleContext) {
-            return contexts.contains(node.getClass());
-        } else if (node instanceof TerminalNode) {
-            return tokenTypes.contains(
-                    ((TerminalNode) node).getSymbol().getType()
-            );
-        }
+  private static int getLine(ParseTree node) {
 
-        throw new IllegalArgumentException();
+    if (node instanceof ParserRuleContext) {
+      if (!(node instanceof BSLParser.MethodCallContext)) {
+        return ((ParserRuleContext) node).getStart().getLine();
+      }
+      var methodCall = getRootParent((ParserRuleContext) node, BSLParser.RULE_complexIdentifier);
+      if (methodCall != null) {
+        return methodCall.getStart().getLine();
+      }
+    } else if (node instanceof TerminalNode) {
+      return ((TerminalNode) node).getSymbol().getLine();
     }
 
-    private static int getLine(ParseTree node) {
+    return 0;
+  }
 
-        if (node instanceof ParserRuleContext) {
-            if (!(node instanceof BSLParser.MethodCallContext)) {
-                return ((ParserRuleContext) node).getStart().getLine();
-            }
-            var methodCall = getRootParent((BSLParserRuleContext) node, BSLParser.RULE_complexIdentifier);
-            if (methodCall != null) {
-                return methodCall.getStart().getLine();
-            }
-        } else if (node instanceof TerminalNode) {
-            return ((TerminalNode) node).getSymbol().getLine();
-        }
+  // Удалить после переноса хелпера в парсер
 
-        return 0;
+  /**
+   * Рекурсивно находит самого верхнего родителя текущей ноды нужного типа
+   *
+   * @param tnc       - нода, для которой ищем родителя
+   * @param ruleindex - BSLParser.RULE_*
+   * @return tnc - если родитель не найден, вернет null
+   */
+  public static ParserRuleContext getRootParent(ParserRuleContext tnc, int ruleindex) {
+    final var parent = tnc.getParent();
+    if (parent == null) {
+      return null;
     }
 
-    // Удалить после переноса хелпера в парсер
-
-    /**
-     * Рекурсивно находит самого верхнего родителя текущей ноды нужного типа
-     *
-     * @param tnc       - нода, для которой ищем родителя
-     * @param ruleindex - BSLParser.RULE_*
-     * @return tnc - если родитель не найден, вернет null
-     */
-    public static BSLParserRuleContext getRootParent(BSLParserRuleContext tnc, int ruleindex) {
-        final var parent = tnc.getParent();
-        if (parent == null) {
-            return null;
-        }
-
-        if (getRuleIndex(parent) == ruleindex) {
-            return (BSLParserRuleContext) parent;
-        } else {
-            return getRootParent((BSLParserRuleContext) parent, ruleindex);
-        }
+    if (getRuleIndex(parent) == ruleindex) {
+      return parent;
+    } else {
+      return getRootParent(parent, ruleindex);
     }
+  }
 
-    private static int getRuleIndex(ParseTree node) {
-        if (node instanceof TerminalNode) {
-            return ((TerminalNode) node).getSymbol().getType();
-        } else {
-            return ((BSLParserRuleContext) node).getRuleIndex();
-        }
+  private static int getRuleIndex(ParseTree node) {
+    if (node instanceof TerminalNode terminalNode) {
+      return terminalNode.getSymbol().getType();
+    } else {
+      return ((ParserRuleContext) node).getRuleIndex();
     }
+  }
 }
