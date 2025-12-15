@@ -6,7 +6,7 @@ plugins {
     jacoco
     id("com.github.breadmoirai.github-release") version "2.5.2"
     id("com.github.jarmstrong.buildconfig") version "1.9.0"
-    id("com.github.hierynomus.license") version "0.15.0"
+    id("cloud.rio.license") version "0.18.0"
 }
 
 val edtLocation = file(project.properties["EDT_LOCATION"] as String)
@@ -134,6 +134,7 @@ tasks.jacocoTestReport {
 
 license {
     header = rootProject.file("HEADER.txt")
+    skipExistingHeaders = false
     strictCheck = true
     mapping("java", "SLASHSTAR_STYLE")
 
