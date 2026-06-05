@@ -1,7 +1,7 @@
 /*
  * This file is a part of Coverage41C.
  *
- * Copyright (c) 2020-2024
+ * Copyright (c) 2020-2025
  * Kosolapov Stanislav aka proDOOMman <prodoomman@gmail.com> and contributors
  *
  * SPDX-License-Identifier: LGPL-3.0-or-later
@@ -35,7 +35,7 @@ public class LoggingOptions {
     private Boolean verbose;
 
     public Boolean isVerbose() {
-        return verbose.booleanValue();
+        return verbose;
     }
 
     public void setVerbose(Boolean verbose) {
