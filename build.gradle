@@ -20,7 +20,7 @@ repositories {
 
 
 configurations {
-    providedCompile
+    providedRuntime
 }
 
 dependencies {
@@ -78,7 +78,7 @@ dependencies {
         exclude group: "org.glassfish", module: "javax.json"
     }
 
-    providedCompile fileTree(edtLocation) { include 'com._1c.g5.v8.dt.debug.*.jar' }
+    providedRuntime fileTree(edtLocation) { include 'com._1c.g5.v8.dt.debug.*.jar' }
 
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.9.0'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.9.0'
@@ -89,18 +89,18 @@ dependencies {
 }
 
 tasks.withType(JavaCompile) {
-    sourceSets.main.compileClasspath += configurations.providedCompile
+    sourceSets.main.compileClasspath += configurations.providedRuntime
     options.compilerArgs += ["-Aproject=${project.group}/${project.name}"]
     options.encoding = 'UTF-8'
 }
 
 run {
-    classpath += configurations.providedCompile
+    classpath += configurations.providedRuntime
 }
 
 test {
     finalizedBy jacocoTestReport
-    classpath += configurations.providedCompile
+    classpath += configurations.providedRuntime
     useJUnitPlatform()
     testLogging.showStandardStreams = true
 }

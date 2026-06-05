@@ -332,11 +332,20 @@ public class DebugClient extends AbstractDebugClient{
     public void setAutoconnectDebugTargets(List<String> debugAreaNames, List<DebugTargetType> debugTargets) throws RuntimeDebugClientException {
         RDBGSetAutoAttachSettingsRequest requestContent = ResponseFactory.eINSTANCE.createRDBGSetAutoAttachSettingsRequest();
         DebugAutoAttachSettings settings = AttachFactory.eINSTANCE.createDebugAutoAttachSettings();
-        settings.getTargetType().addAll(debugTargets);
+
+        List<com._1c.g5.v8.dt.debug.model.base.data.DebugTargetType> v8debugTypes = debugTargets.stream()
+                .map(type -> castByName(type, com._1c.g5.v8.dt.debug.model.base.data.DebugTargetType.class))
+                .collect(Collectors.toList());
+
+        settings.getTargetType().addAll(v8debugTypes);
         settings.getAreaName().addAll(debugAreaNames);
         requestContent.setAutoAttachSettings(settings);
         Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "setAutoAttachSettings");
         this.performRuntimeHttpRequest(request, this.initRequest(requestContent));
+    }
+
+    public <F extends Enum<F>> F castByName(final Enum<?> e, final Class<F> fClass) {
+        return F.valueOf(fClass, e.name());
     }
 
     public void toggleProfiling(UUID uuid) throws RuntimeDebugClientException {
