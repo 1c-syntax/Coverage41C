@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<coverage version="1">
+    <file extension="Доработки" path="/9b82e19b-3e2e-4eb2-9fac-70cde85488e7/d5963243-262e-4398-b4d7-fb16d06484f6">
+        <lineToCover covered="true" lineNumber="2"/>
+    </file>
+    <file extension="Второе" path="/9b82e19b-3e2e-4eb2-9fac-70cde85488e7/d5963243-262e-4398-b4d7-fb16d06484f6">
+        <lineToCover covered="true" lineNumber="6"/>
+    </file>
+    <file path="/9b82e19b-3e2e-4eb2-9fac-70cde85488e7/d5963243-262e-4398-b4d7-fb16d06484f6">
+        <lineToCover covered="true" lineNumber="7"/>
+    </file>
+</coverage>

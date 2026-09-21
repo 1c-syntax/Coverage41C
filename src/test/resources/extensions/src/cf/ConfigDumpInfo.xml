@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<ConfigDumpInfo xmlns="http://v8.1c.ru/8.3/xcf/dumpinfo" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" format="Hierarchical" version="2.20">
+	<ConfigVersions>
+		<Metadata name="CommonModule.Калькулятор" id="d146ada8-6684-4685-914e-ddc591b3f739" configVersion="419d4dacb235ed46adaf02f87c79081d00000000"/>
+		<Metadata name="CommonModule.Калькулятор.Module" id="d146ada8-6684-4685-914e-ddc591b3f739.0" configVersion="1507f166bd8e20419eea7d4a496f409700000000"/>
+		<Metadata name="CommonModule.ТестыСервер" id="c6a096ca-fdb6-4ab4-bb2a-0e4d55bded0c" configVersion="eb5417cac886fc41a2193b9653fe51ae00000000"/>
+		<Metadata name="CommonModule.ТестыСервер.Module" id="c6a096ca-fdb6-4ab4-bb2a-0e4d55bded0c.0" configVersion="ddfa4cf8ca5e084d85192e39b5f795cf00000000"/>
+		<Metadata name="Configuration.Конфигурация" id="5f6c7b03-e6cb-4948-b50a-8bf09bef120d" configVersion="7b1125fa05a97f4cb2374e3d07c3209a00000000"/>
+		<Metadata name="Configuration.Конфигурация.ManagedApplicationModule" id="01021fbb-f8da-4559-b875-216ccfb4deec.6" configVersion="b7bcc881a996fc41a3bb5308932cd5ba00000000"/>
+		<Metadata name="DataProcessor.Обработчик" id="26f07e93-3909-453e-ba36-f30b22c1036f" configVersion="b7bdf080bb041248bae09a7d5773c97500000000"/>
+		<Metadata name="DataProcessor.Обработчик.ManagerModule" id="26f07e93-3909-453e-ba36-f30b22c1036f.2" configVersion="2cf710bc8aef624aa0a70775c32c92b300000000"/>
+		<Metadata name="Language.Русский" id="88394d02-995f-49eb-8a4a-a76e1a1720d5" configVersion="c571a922d5b3074eb5eee027429f3f5100000000"/>
+	</ConfigVersions>
+</ConfigDumpInfo>

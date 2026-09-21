@@ -69,9 +69,15 @@ public class ConvertCommand implements Callable<Integer> {
     @Override
     public Integer call() throws Exception {
 
+        metadataOptions.validate("");
+
         Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<URI,Map<BigDecimal, Integer>>();
 
-        Map<String, URI> uriListByKey = Utils.readMetadata(metadataOptions, coverageData);
+        Map<String, URI> uriListByKey = Utils.readMetadata(metadataOptions, "", coverageData);
+
+        // without --extension the extension attribute is ignored: -s may point to sources of any extension, as before
+        boolean matchExtensions = !metadataOptions.getExtensionSources().isEmpty();
+        boolean rawFileHasExtensions = false;
 
         FileInputStream fileIS = new FileInputStream(convertOptions.getInputRawXmlFile());
         DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
@@ -84,6 +90,16 @@ public class ConvertCommand implements Callable<Integer> {
             if (fileKey.startsWith("/")) {
                 fileKey = fileKey.substring(1);
             }
+            // no attribute - configuration (and raw files of previous versions)
+            Node extensionNode = fileNode.getAttributes().getNamedItem("extension");
+            String extensionName = "";
+            if (extensionNode != null) {
+                rawFileHasExtensions = true;
+                if (matchExtensions) {
+                    extensionName = extensionNode.getTextContent();
+                }
+            }
+            fileKey = Utils.getExtensionUriKey(extensionName, fileKey);
             URI fileUri = uriListByKey.get(fileKey);
             if (fileUri == null) {
                 logger.error("Can't find file key: {}", fileKey);
@@ -117,6 +133,10 @@ public class ConvertCommand implements Callable<Integer> {
                     }
                 }
             }
+        }
+        if (matchExtensions && !rawFileHasExtensions) {
+            logger.warn("RAW file doesn't contain modules of extensions: it was made by previous version" +
+                    " or extensions code wasn't executed. All modules are treated as configuration modules");
         }
         Utils.dumpCoverageFile(coverageData, metadataOptions, outputOptions);
         logger.info("Convert done");

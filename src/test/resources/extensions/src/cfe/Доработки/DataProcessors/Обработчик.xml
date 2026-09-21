@@ -1,0 +1,26 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<DataProcessor uuid="599f2c45-37b4-4836-ba41-6b1d99111d46">
+		<InternalInfo>
+			<xr:GeneratedType name="DataProcessorObject.Обработчик" category="Object">
+				<xr:TypeId>19e9f565-c517-4830-9d94-8f014d17aa9d</xr:TypeId>
+				<xr:ValueId>eab29454-83d2-47c4-b162-8d193324b640</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="DataProcessorManager.Обработчик" category="Manager">
+				<xr:TypeId>4ac03db8-247f-4767-81c6-2229cc29fdea</xr:TypeId>
+				<xr:ValueId>009ff172-1b5d-4a10-9312-48fd00e193b6</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:PropertyState>
+				<xr:Property>ManagerModule</xr:Property>
+				<xr:State>Extended</xr:State>
+			</xr:PropertyState>
+		</InternalInfo>
+		<Properties>
+			<ObjectBelonging>Adopted</ObjectBelonging>
+			<Name>Обработчик</Name>
+			<Comment/>
+			<ExtendedConfigurationObject>26f07e93-3909-453e-ba36-f30b22c1036f</ExtendedConfigurationObject>
+		</Properties>
+		<ChildObjects/>
+	</DataProcessor>
+</MetaDataObject>

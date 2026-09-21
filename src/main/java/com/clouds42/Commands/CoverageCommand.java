@@ -125,6 +125,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     public Integer call() throws Exception {
 
         int result = CommandLine.ExitCode.OK;
+        metadataOptions.validate(filterOptions.getExtensionName());
         getServerSocket();
 
 
@@ -135,7 +136,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
 
         rawMode = metadataOptions.isRawMode();
 
-        Map<String, URI> uriListByKey = Utils.readMetadata(metadataOptions, coverageData);
+        Map<String, URI> uriListByKey = Utils.readMetadata(metadataOptions, filterOptions.getExtensionName(), coverageData);
 
         try {
             startSystem(measureUuid);
@@ -231,22 +232,24 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                 logger.info("Found external data processor: {}", moduleUrl);
                 externalDataProcessorsUriSet.add(moduleUrl);
             }
-            String moduleExtensionName = moduleId.getExtensionName();
+            String moduleExtensionName = Objects.requireNonNullElse(moduleId.getExtensionName(), "");
             if (rawMode
                     || (filterOptions.getExtensionName().equals(moduleExtensionName)
-                    && filterOptions.getExternalDataProcessorUrl().equals(moduleUrl))) {
+                    && filterOptions.getExternalDataProcessorUrl().equals(moduleUrl))
+                    || (moduleUrl.isEmpty() && metadataOptions.hasExtensionSources(moduleExtensionName))) {
                 String objectId = moduleId.getObjectID();
                 String propertyId = moduleId.getPropertyID();
                 String key = Utils.getUriKey(objectId, propertyId);
 
                 URI uri;
                 if (!rawMode) {
-                    uri = uriListByKey.get(key);
+                    uri = uriListByKey.get(Utils.getExtensionUriKey(moduleExtensionName, key));
                 } else {
-                    uri = URI.create("file:///" + key);
+                    uri = Utils.getRawUri(moduleExtensionName, key);
                 }
                 if (uri == null) {
-                    logger.info("Couldn't find object id {}, property id {} in sources!", objectId, propertyId);
+                    logger.info("Couldn't find object id {}, property id {} in sources{}!", objectId, propertyId,
+                            moduleExtensionName.isEmpty() ? "" : " of extension " + moduleExtensionName);
                 } else {
                     EList<PerformanceInfoLine> lineInfoList = moduleInfo.getLineInfo();
                     lineInfoList.forEach(lineInfo -> {

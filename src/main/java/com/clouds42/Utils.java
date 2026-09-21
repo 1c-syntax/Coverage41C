@@ -22,6 +22,7 @@
 package com.clouds42;
 
 import com.clouds42.CommandLineOptions.ConnectionOptions;
+import com.clouds42.CommandLineOptions.ExtensionSource;
 import com.clouds42.CommandLineOptions.MetadataOptions;
 import com.clouds42.CommandLineOptions.OutputOptions;
 import com.github._1c_syntax.bsl.mdo.ModuleOwner;
@@ -60,6 +61,7 @@ import java.io.*;
 import java.lang.invoke.MethodHandles;
 import java.math.BigDecimal;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -117,6 +119,40 @@ public class Utils {
 
     public static String getUriKey(String objectId, String propertyId) {
         return objectId + "/" + propertyId;
+    }
+
+    /**
+     * Ключ модуля с учётом расширения: модуль сопоставляется только с деревом исходников своего расширения
+     *
+     * @param extensionName - имя расширения, пустое - конфигурация (или внешняя обработка)
+     * @param uriKey        - ключ модуля из {@link #getUriKey(String, String)}
+     * @return для конфигурации - uriKey без изменений, для расширения - uriKey с именем расширения
+     */
+    public static String getExtensionUriKey(String extensionName, String uriKey) {
+        if (extensionName.isEmpty()) {
+            return uriKey;
+        }
+        return extensionName + "/" + uriKey;
+    }
+
+    /**
+     * URI модуля в RAW режиме: file:///objectId/propertyId, имя расширения хранится во фрагменте URI.
+     * Путь без фрагмента пишется в атрибут path сырого файла, как и раньше
+     */
+    public static URI getRawUri(String extensionName, String uriKey) {
+        if (extensionName.isEmpty()) {
+            return URI.create("file:///" + uriKey);
+        }
+        try {
+            return new URI("file", "", "/" + uriKey, null, extensionName);
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException(e);
+        }
+    }
+
+    public static String getRawExtensionName(URI rawUri) {
+        String extensionName = rawUri.getFragment();
+        return extensionName == null ? "" : extensionName;
     }
 
 
@@ -201,7 +237,14 @@ public class Utils {
         coverageData.put(uri, coverMap);
     }
 
+    /**
+     * Читает исходники основного дерева (-P/-s) и деревьев расширений (--extension)
+     *
+     * @param srcDirExtensionName - расширение, которому принадлежит основное дерево (-e), пустое - конфигурация
+     * @return URI модулей по ключу {@link #getExtensionUriKey(String, String)}
+     */
     public static Map<String, URI> readMetadata(MetadataOptions metadataOptions,
+                                                String srcDirExtensionName,
                                                 Map<URI, Map<BigDecimal, Integer>> coverageData) throws Exception {
 
         boolean rawMode = false;
@@ -216,133 +259,155 @@ public class Utils {
 
         if (!rawMode) {
 
-            Path rootPath = Path.of(metadataOptions.getProjectDirName())
-                    .resolve(metadataOptions.getSrcDirName());
-            logger.info("Reading configuration sources from root path: {}", rootPath.toAbsolutePath());
-
-            if (Files.isDirectory(rootPath)) {
-
-                Configuration conf = Configuration.create(rootPath);
-
-                for (MDOModule module : conf.getModules()) {
-                    ModuleOwner mdObj = module.getOwner();
-
-                    String mdObjUuid = mdObj.getUuid();
-
-                    uriListByKey.put(getUriKey(mdObjUuid, module.getModuleType(), mdObj), module.getUri());
-
-                    if (metadataOptions.getRemoveSupport() != SupportVariant.NONE) {
-                        SupportVariant moduleSupportVariant = conf.getModuleSupport(module.getUri()).values().stream()
-                                .min(Comparator.naturalOrder())
-                                .orElse(SupportVariant.NONE);
-                        if (moduleSupportVariant.compareTo(metadataOptions.getRemoveSupport()) <= 0) {
-                            coverageData.put(module.getUri(), new HashMap<>());
-                            continue;
-                        }
-                    }
-
-                    addCoverageData(coverageData, module.getUri());
-
-                }
-
-            } else {
-
-                File externalDataprocessorRootXmlFile = rootPath.toFile();
-
-                XPath xPath = XPathFactory.newInstance().newXPath();
-                FileInputStream fileIS = new FileInputStream(externalDataprocessorRootXmlFile);
-                DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
-                DocumentBuilder builder = builderFactory.newDocumentBuilder();
-                Document xmlDocument = builder.parse(fileIS);
-                String documentRootTagName = xmlDocument.getDocumentElement().getTagName();
-                if (documentRootTagName.equals("MetaDataObject")) {
-                    // CONFIGURATOR
-                    String uuidExpression = "/MetaDataObject/ExternalDataProcessor/@uuid";
-                    String externalDataProcessorName = com.google.common.io.Files.getNameWithoutExtension(rootPath.toString());
-                    String externalDataProcessorUuid = (String) xPath.compile(uuidExpression).evaluate(xmlDocument,
-                            XPathConstants.STRING);
-                    uriListByKey.put(getUriKey(externalDataProcessorUuid, ModuleType.ObjectModule, null),
-                            Paths.get(externalDataprocessorRootXmlFile.getParent(),
-                                    externalDataProcessorName, "Ext", "ObjectModule.bsl").toUri());
-
-                    var externalDataProcessorPath = Paths.get(
-                            externalDataprocessorRootXmlFile.getParent(),
-                            externalDataProcessorName, "Forms");
-                    try (Stream<Path> walk = Files.list(externalDataProcessorPath)) {
-
-                        List<String> result = walk.map(Path::toString)
-                                .filter(f -> f.endsWith(".xml")).collect(Collectors.toList());
-
-                        XPath formXPath = XPathFactory.newInstance().newXPath();
-                        String formUuidExpression = "/MetaDataObject/Form/@uuid";
-                        String formNameExpression = "/MetaDataObject/Form/Properties/Name/text()";
-
-                        result.forEach(formXmlFileName -> {
-                            try {
-                                FileInputStream formFileIS = new FileInputStream(formXmlFileName);
-                                Document formXmlDocument = builder.parse(formFileIS);
-                                String formUuid = (String) formXPath.compile(formUuidExpression).evaluate(formXmlDocument,
-                                        XPathConstants.STRING);
-                                String formName = (String) formXPath.compile(formNameExpression).evaluate(formXmlDocument,
-                                        XPathConstants.STRING);
-                                uriListByKey.put(getUriKey(formUuid, ModuleType.FormModule, null),
-                                        Paths.get(externalDataProcessorPath.toString(),
-                                                formName, "Ext", "Form", "Module.bsl").toUri());
-                            } catch (Exception e) {
-                                logger.error("Can't read form xml: {}", e.getLocalizedMessage());
-                            }
-                        });
-
-
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                } else if (documentRootTagName.equals("mdclass:ExternalDataProcessor")) {
-                    // EDT
-                    var externalDataProcessorPath = Paths.get(
-                            externalDataprocessorRootXmlFile.getParent(),
-                            "Forms");
-                    String uuidExpression = "/ExternalDataProcessor/@uuid";
-                    String externalDataProcessorUuid = (String) xPath.compile(uuidExpression).evaluate(xmlDocument,
-                            XPathConstants.STRING);
-                    uriListByKey.put(getUriKey(externalDataProcessorUuid, ModuleType.ObjectModule, null),
-                            Paths.get(externalDataprocessorRootXmlFile.getParent(),
-                                    "ObjectModule.bsl").toUri());
-                    String formUuidExpression = "/ExternalDataProcessor/forms";
-                    NodeList externalDataProcessorFormsNodeList = (NodeList) xPath.compile(formUuidExpression).evaluate(xmlDocument,
-                            XPathConstants.NODESET);
-                    for (int nodeNumber = 0; nodeNumber < externalDataProcessorFormsNodeList.getLength(); nodeNumber++) {
-                        Node externalDataProcessorFormsNode = externalDataProcessorFormsNodeList.item(nodeNumber);
-                        String formUuid = externalDataProcessorFormsNode.getAttributes().getNamedItem("uuid").getTextContent();
-                        String formName = "";
-                        NodeList childNodes = externalDataProcessorFormsNode.getChildNodes();
-                        for (int childNodeNumber = 0; childNodeNumber < childNodes.getLength(); childNodeNumber++) {
-                            Node childNode = childNodes.item(childNodeNumber);
-                            if (childNode.getNodeName().equals("name")) {
-                                formName = childNode.getTextContent();
-                                break;
-                            }
-                        }
-                        if (formName.isEmpty()) {
-                            logger.error("Can't find form name: {}", formUuid);
-                            continue;
-                        }
-                        uriListByKey.put(getUriKey(formUuid, ModuleType.FormModule, null),
-                                Paths.get(externalDataProcessorPath.toString(),
-                                        formName, "Module.bsl").toUri());
-                    }
-                } else {
-                    throw new Exception("Unknown source format");
-                }
-
-                uriListByKey.forEach((s, uri) -> addCoverageData(coverageData, uri));
-
+            Path projectPath = Path.of(metadataOptions.getProjectDirName());
+            readSources(projectPath.resolve(metadataOptions.getSrcDirName()), srcDirExtensionName,
+                    metadataOptions, uriListByKey, coverageData);
+            for (ExtensionSource extensionSource : metadataOptions.getExtensionSources()) {
+                readSources(projectPath.resolve(extensionSource.getPath()), extensionSource.getName(),
+                        metadataOptions, uriListByKey, coverageData);
             }
 
             logger.info("Configuration sources reading DONE");
         }
 
         return uriListByKey;
+    }
+
+    private static void readSources(Path rootPath,
+                                    String extensionName,
+                                    MetadataOptions metadataOptions,
+                                    Map<String, URI> uriListByKey,
+                                    Map<URI, Map<BigDecimal, Integer>> coverageData) throws Exception {
+
+        if (extensionName.isEmpty()) {
+            logger.info("Reading configuration sources from root path: {}", rootPath.toAbsolutePath());
+        } else {
+            logger.info("Reading extension {} sources from root path: {}", extensionName, rootPath.toAbsolutePath());
+        }
+
+        if (Files.isDirectory(rootPath)) {
+
+            Configuration conf = Configuration.create(rootPath);
+
+            for (MDOModule module : conf.getModules()) {
+                ModuleOwner mdObj = module.getOwner();
+
+                String mdObjUuid = mdObj.getUuid();
+
+                uriListByKey.put(getExtensionUriKey(extensionName, getUriKey(mdObjUuid, module.getModuleType(), mdObj)),
+                        module.getUri());
+
+                if (metadataOptions.getRemoveSupport() != SupportVariant.NONE) {
+                    SupportVariant moduleSupportVariant = conf.getModuleSupport(module.getUri()).values().stream()
+                            .min(Comparator.naturalOrder())
+                            .orElse(SupportVariant.NONE);
+                    if (moduleSupportVariant.compareTo(metadataOptions.getRemoveSupport()) <= 0) {
+                        coverageData.put(module.getUri(), new HashMap<>());
+                        continue;
+                    }
+                }
+
+                addCoverageData(coverageData, module.getUri());
+
+            }
+
+        } else {
+
+            Map<String, URI> externalDataProcessorUriListByKey = new HashMap<>();
+            File externalDataprocessorRootXmlFile = rootPath.toFile();
+
+            XPath xPath = XPathFactory.newInstance().newXPath();
+            FileInputStream fileIS = new FileInputStream(externalDataprocessorRootXmlFile);
+            DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
+            DocumentBuilder builder = builderFactory.newDocumentBuilder();
+            Document xmlDocument = builder.parse(fileIS);
+            String documentRootTagName = xmlDocument.getDocumentElement().getTagName();
+            if (documentRootTagName.equals("MetaDataObject")) {
+                // CONFIGURATOR
+                String uuidExpression = "/MetaDataObject/ExternalDataProcessor/@uuid";
+                String externalDataProcessorName = com.google.common.io.Files.getNameWithoutExtension(rootPath.toString());
+                String externalDataProcessorUuid = (String) xPath.compile(uuidExpression).evaluate(xmlDocument,
+                        XPathConstants.STRING);
+                externalDataProcessorUriListByKey.put(getUriKey(externalDataProcessorUuid, ModuleType.ObjectModule, null),
+                        Paths.get(externalDataprocessorRootXmlFile.getParent(),
+                                externalDataProcessorName, "Ext", "ObjectModule.bsl").toUri());
+
+                var externalDataProcessorPath = Paths.get(
+                        externalDataprocessorRootXmlFile.getParent(),
+                        externalDataProcessorName, "Forms");
+                try (Stream<Path> walk = Files.list(externalDataProcessorPath)) {
+
+                    List<String> result = walk.map(Path::toString)
+                            .filter(f -> f.endsWith(".xml")).collect(Collectors.toList());
+
+                    XPath formXPath = XPathFactory.newInstance().newXPath();
+                    String formUuidExpression = "/MetaDataObject/Form/@uuid";
+                    String formNameExpression = "/MetaDataObject/Form/Properties/Name/text()";
+
+                    result.forEach(formXmlFileName -> {
+                        try {
+                            FileInputStream formFileIS = new FileInputStream(formXmlFileName);
+                            Document formXmlDocument = builder.parse(formFileIS);
+                            String formUuid = (String) formXPath.compile(formUuidExpression).evaluate(formXmlDocument,
+                                    XPathConstants.STRING);
+                            String formName = (String) formXPath.compile(formNameExpression).evaluate(formXmlDocument,
+                                    XPathConstants.STRING);
+                            externalDataProcessorUriListByKey.put(getUriKey(formUuid, ModuleType.FormModule, null),
+                                    Paths.get(externalDataProcessorPath.toString(),
+                                            formName, "Ext", "Form", "Module.bsl").toUri());
+                        } catch (Exception e) {
+                            logger.error("Can't read form xml: {}", e.getLocalizedMessage());
+                        }
+                    });
+
+
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            } else if (documentRootTagName.equals("mdclass:ExternalDataProcessor")) {
+                // EDT
+                var externalDataProcessorPath = Paths.get(
+                        externalDataprocessorRootXmlFile.getParent(),
+                        "Forms");
+                String uuidExpression = "/ExternalDataProcessor/@uuid";
+                String externalDataProcessorUuid = (String) xPath.compile(uuidExpression).evaluate(xmlDocument,
+                        XPathConstants.STRING);
+                externalDataProcessorUriListByKey.put(getUriKey(externalDataProcessorUuid, ModuleType.ObjectModule, null),
+                        Paths.get(externalDataprocessorRootXmlFile.getParent(),
+                                "ObjectModule.bsl").toUri());
+                String formUuidExpression = "/ExternalDataProcessor/forms";
+                NodeList externalDataProcessorFormsNodeList = (NodeList) xPath.compile(formUuidExpression).evaluate(xmlDocument,
+                        XPathConstants.NODESET);
+                for (int nodeNumber = 0; nodeNumber < externalDataProcessorFormsNodeList.getLength(); nodeNumber++) {
+                    Node externalDataProcessorFormsNode = externalDataProcessorFormsNodeList.item(nodeNumber);
+                    String formUuid = externalDataProcessorFormsNode.getAttributes().getNamedItem("uuid").getTextContent();
+                    String formName = "";
+                    NodeList childNodes = externalDataProcessorFormsNode.getChildNodes();
+                    for (int childNodeNumber = 0; childNodeNumber < childNodes.getLength(); childNodeNumber++) {
+                        Node childNode = childNodes.item(childNodeNumber);
+                        if (childNode.getNodeName().equals("name")) {
+                            formName = childNode.getTextContent();
+                            break;
+                        }
+                    }
+                    if (formName.isEmpty()) {
+                        logger.error("Can't find form name: {}", formUuid);
+                        continue;
+                    }
+                    externalDataProcessorUriListByKey.put(getUriKey(formUuid, ModuleType.FormModule, null),
+                            Paths.get(externalDataProcessorPath.toString(),
+                                    formName, "Module.bsl").toUri());
+                }
+            } else {
+                throw new Exception("Unknown source format");
+            }
+
+            externalDataProcessorUriListByKey.forEach((key, uri) -> {
+                uriListByKey.put(getExtensionUriKey(extensionName, key), uri);
+                addCoverageData(coverageData, uri);
+            });
+
+        }
     }
 
     public static void dumpCoverageFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
@@ -488,6 +553,11 @@ public class Utils {
                 }
                 Element fileElement = doc.createElement("file");
                 fileElement.setAttribute("path", projectUri.relativize(uri).getPath());
+                String extensionName = getRawExtensionName(uri);
+                if (!extensionName.isEmpty()) {
+                    // RAW mode: module of extension, no attribute - configuration
+                    fileElement.setAttribute("extension", extensionName);
+                }
                 bigDecimalsMap.forEach((bigDecimal, integer) -> {
                     if (integer >= 0) {
                         Element lineElement = doc.createElement("lineToCover");
