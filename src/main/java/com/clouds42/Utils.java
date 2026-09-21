@@ -291,8 +291,8 @@ public class Utils {
 
             Map<URI, MD> moduleOwners = conf.getModulesByObject();
             for (Module module : conf.getAllModules()) {
-                if (!Files.exists(Path.of(module.getUri()))) {
-                    // empty module isn't exported to file
+                if (module.isProtected() || !Files.exists(Path.of(module.getUri()))) {
+                    // no source code: module is protected with password (Module.bin) or empty (not exported)
                     continue;
                 }
                 MD mdObj = moduleOwners.get(module.getUri());
