@@ -23,7 +23,7 @@ package com.clouds42;
 
 import com.github._1c_syntax.bsl.parser.BSLLexer;
 import com.github._1c_syntax.bsl.parser.BSLParser;
-import com.github._1c_syntax.bsl.parser.BSLParserRuleContext;
+import com.github._1c_syntax.bsl.parser.BSLTokenizer;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.antlr.v4.runtime.tree.TerminalNode;
@@ -33,7 +33,7 @@ import java.util.Set;
 
 public class LinesToCoverage {
 
-    private static final Set<Class<? extends BSLParserRuleContext>> contexts = Set.of(
+    private static final Set<Class<? extends ParserRuleContext>> contexts = Set.of(
             BSLParser.AssignmentContext.class,
             BSLParser.CallStatementContext.class,
             BSLParser.GotoStatementContext.class,
@@ -62,7 +62,11 @@ public class LinesToCoverage {
             BSLLexer.DO_KEYWORD
     );
 
-    static int[] getLines(BSLParserRuleContext ast) {
+    static BSLTokenizer createTokenizer(String content) {
+        return new BSLTokenizer(content, new TrailingDotLexer());
+    }
+
+    static int[] getLines(ParserRuleContext ast) {
 
         return Trees.getDescendants(ast).stream()
                 .filter(LinesToCoverage::mustCovered)
@@ -91,7 +95,7 @@ public class LinesToCoverage {
             if (!(node instanceof BSLParser.MethodCallContext)) {
                 return ((ParserRuleContext) node).getStart().getLine();
             }
-            var methodCall = getRootParent((BSLParserRuleContext) node, BSLParser.RULE_complexIdentifier);
+            var methodCall = getRootParent((ParserRuleContext) node, BSLParser.RULE_complexIdentifier);
             if (methodCall != null) {
                 return methodCall.getStart().getLine();
             }
@@ -111,16 +115,16 @@ public class LinesToCoverage {
      * @param ruleindex - BSLParser.RULE_*
      * @return tnc - если родитель не найден, вернет null
      */
-    public static BSLParserRuleContext getRootParent(BSLParserRuleContext tnc, int ruleindex) {
+    public static ParserRuleContext getRootParent(ParserRuleContext tnc, int ruleindex) {
         final var parent = tnc.getParent();
         if (parent == null) {
             return null;
         }
 
         if (getRuleIndex(parent) == ruleindex) {
-            return (BSLParserRuleContext) parent;
+            return (ParserRuleContext) parent;
         } else {
-            return getRootParent((BSLParserRuleContext) parent, ruleindex);
+            return getRootParent((ParserRuleContext) parent, ruleindex);
         }
     }
 
@@ -128,7 +132,7 @@ public class LinesToCoverage {
         if (node instanceof TerminalNode) {
             return ((TerminalNode) node).getSymbol().getType();
         } else {
-            return ((BSLParserRuleContext) node).getRuleIndex();
+            return ((ParserRuleContext) node).getRuleIndex();
         }
     }
 }

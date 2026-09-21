@@ -27,11 +27,11 @@ import com._1c.g5.v8.dt.internal.debug.core.model.RuntimePresentationConverter;
 import com._1c.g5.v8.dt.internal.debug.core.runtime.client.RuntimeDebugModelXmlSerializer;
 import org.eclipse.emf.ecore.EObject;
 import org.eclipse.jetty.client.HttpClient;
-import org.eclipse.jetty.client.api.ContentResponse;
-import org.eclipse.jetty.client.api.Request;
-import org.eclipse.jetty.client.dynamic.HttpClientTransportDynamic;
-import org.eclipse.jetty.client.util.FutureResponseListener;
-import org.eclipse.jetty.client.util.StringRequestContent;
+import org.eclipse.jetty.client.CompletableResponseListener;
+import org.eclipse.jetty.client.ContentResponse;
+import org.eclipse.jetty.client.Request;
+import org.eclipse.jetty.client.StringRequestContent;
+import org.eclipse.jetty.client.transport.HttpClientTransportDynamic;
 import org.eclipse.jetty.http.HttpField;
 import org.eclipse.jetty.http.HttpFields;
 import org.eclipse.jetty.http.HttpHeader;
@@ -123,9 +123,8 @@ public abstract class AbstractDebugClient {
                 }
             }
 
-            FutureResponseListener listener = new FutureResponseListener(request, 2147483647);
-            request.send(listener);
-            ContentResponse response = listener.get(60L, TimeUnit.SECONDS);
+            CompletableResponseListener listener = new CompletableResponseListener(request, 2147483647);
+            ContentResponse response = listener.send().get(60L, TimeUnit.SECONDS);
             int status = response.getStatus();
             if (HttpStatus.isSuccess(status)) {
                 if (responseClass != null && status != 204) {

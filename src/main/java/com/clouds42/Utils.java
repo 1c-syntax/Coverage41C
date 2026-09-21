@@ -25,15 +25,13 @@ import com.clouds42.CommandLineOptions.ConnectionOptions;
 import com.clouds42.CommandLineOptions.ExtensionSource;
 import com.clouds42.CommandLineOptions.MetadataOptions;
 import com.clouds42.CommandLineOptions.OutputOptions;
-import com.github._1c_syntax.bsl.mdo.ModuleOwner;
+import com.github._1c_syntax.bsl.mdclasses.CF;
+import com.github._1c_syntax.bsl.mdclasses.MDClasses;
+import com.github._1c_syntax.bsl.mdo.MD;
+import com.github._1c_syntax.bsl.mdo.Module;
+import com.github._1c_syntax.bsl.mdo.SettingsStorage;
 import com.github._1c_syntax.bsl.parser.BSLLexer;
 import com.github._1c_syntax.bsl.parser.BSLTokenizer;
-import com.github._1c_syntax.bsl.parser.Tokenizer;
-import com.github._1c_syntax.mdclasses.Configuration;
-import com.github._1c_syntax.mdclasses.mdo.AbstractMDObjectBSL;
-//import com.github._1c_syntax.mdclasses.mdo.MDOHasModule;
-import com.github._1c_syntax.mdclasses.mdo.MDSettingsStorage;
-import com.github._1c_syntax.mdclasses.mdo.support.MDOModule;
 import com.github._1c_syntax.bsl.types.ModuleType;
 import com.github._1c_syntax.bsl.support.SupportVariant;
 import de.vandermeer.asciitable.AsciiTable;
@@ -77,13 +75,13 @@ public class Utils {
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    public static String getModuleTypeUuid(ModuleType moduleType, ModuleOwner mdObject) {
+    public static String getModuleTypeUuid(ModuleType moduleType, MD mdObject) {
         if (moduleType == ModuleType.CommandModule) {
             return "078a6af8-d22c-4248-9c33-7e90075a3d2c";
         } else if (moduleType == ModuleType.ObjectModule) {
             return "a637f77f-3840-441d-a1c3-699c8c5cb7e0";
         } else if (moduleType == ModuleType.ManagerModule) {
-            if (mdObject instanceof MDSettingsStorage) {
+            if (mdObject instanceof SettingsStorage) {
                 return "0c8cad23-bf8c-468e-b49e-12f1927c048b";
             } else {
                 return "d1b64a2c-8078-4982-8190-8f81aefda192";
@@ -113,7 +111,7 @@ public class Utils {
         return "UNKNOWN";
     }
 
-    private static String getUriKey(String mdObjUuid, ModuleType moduleType, ModuleOwner mdObj) {
+    private static String getUriKey(String mdObjUuid, ModuleType moduleType, MD mdObj) {
         return mdObjUuid + "/" + getModuleTypeUuid(moduleType, mdObj);
     }
 
@@ -169,9 +167,9 @@ public class Utils {
     );
 
     private static void addCoverageData(Map<URI, Map<BigDecimal, Integer>> coverageData, URI uri) {
-        Tokenizer tokenizer;
+        BSLTokenizer tokenizer;
         try {
-            tokenizer = new BSLTokenizer(Files.readString(Path.of(uri)));
+            tokenizer = LinesToCoverage.createTokenizer(Files.readString(Path.of(uri)));
         } catch (IOException e) {
             logger.error(e.getLocalizedMessage());
             return;
@@ -204,10 +202,10 @@ public class Utils {
                         Matcher onMatcher = COVER_ON.matcher(comment.getText());
                         if (onMatcher.find()) {
                             while (!coverageIgnoranceStartStack.empty()) {
-                                coverageIgnorance.add(Range.between(coverageIgnoranceStartStack.pop(), commentLine));
+                                coverageIgnorance.add(Range.of(coverageIgnoranceStartStack.pop(), commentLine));
                             }
                             while (!coverageAutoIgnoranceStartStack.empty()) {
-                                coverageAutoIgnorance.add(Range.between(coverageAutoIgnoranceStartStack.pop(), commentLine));
+                                coverageAutoIgnorance.add(Range.of(coverageAutoIgnoranceStartStack.pop(), commentLine));
                             }
                         }
                     }
@@ -215,11 +213,11 @@ public class Utils {
             }
             while (!coverageIgnoranceStartStack.empty()) {
                 coverageIgnorance.add(
-                        Range.between(coverageIgnoranceStartStack.pop(), linesToCover[linesToCover.length - 1]));
+                        Range.of(coverageIgnoranceStartStack.pop(), linesToCover[linesToCover.length - 1]));
             }
             while (!coverageAutoIgnoranceStartStack.empty()) {
                 coverageAutoIgnorance.add(
-                        Range.between(coverageAutoIgnoranceStartStack.pop(), linesToCover[linesToCover.length - 1]));
+                        Range.of(coverageAutoIgnoranceStartStack.pop(), linesToCover[linesToCover.length - 1]));
             }
 
             linesToCover = Arrays.stream(linesToCover).filter(i ->
@@ -287,10 +285,17 @@ public class Utils {
 
         if (Files.isDirectory(rootPath)) {
 
-            Configuration conf = Configuration.create(rootPath);
+            if (!(MDClasses.createConfiguration(rootPath) instanceof CF conf)) {
+                throw new Exception("Unknown source format");
+            }
 
-            for (MDOModule module : conf.getModules()) {
-                ModuleOwner mdObj = module.getOwner();
+            Map<URI, MD> moduleOwners = conf.getModulesByObject();
+            for (Module module : conf.getAllModules()) {
+                if (!Files.exists(Path.of(module.getUri()))) {
+                    // empty module isn't exported to file
+                    continue;
+                }
+                MD mdObj = moduleOwners.get(module.getUri());
 
                 String mdObjUuid = mdObj.getUuid();
 
@@ -298,9 +303,7 @@ public class Utils {
                         module.getUri());
 
                 if (metadataOptions.getRemoveSupport() != SupportVariant.NONE) {
-                    SupportVariant moduleSupportVariant = conf.getModuleSupport(module.getUri()).values().stream()
-                            .min(Comparator.naturalOrder())
-                            .orElse(SupportVariant.NONE);
+                    SupportVariant moduleSupportVariant = module.getSupportVariant();
                     if (moduleSupportVariant.compareTo(metadataOptions.getRemoveSupport()) <= 0) {
                         coverageData.put(module.getUri(), new HashMap<>());
                         continue;

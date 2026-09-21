@@ -6,7 +6,7 @@ https://42clouds.com/ru-ru/techdocs/raschyot-pokrytiya-koda-1C-testami.html
 Сценарий использования:
 
 0) Устанавливаем EDT (для работы программы нужны как минимум его библиотеки ```com._1c.g5.v8.dt.debug.core_*.jar```, ```com._1c.g5.v8.dt.debug.model_*.jar```). Если держать EDT на данной машине затруднительно, их можно скопировать в любую папку, установить параметр окружения EDT_LOCATION в данную папку и удалить EDT.
-1) Скачиваем последнюю версию со страницы https://github.com/proDOOMman/Coverage41C/releases
+1) Скачиваем последнюю версию со страницы https://github.com/proDOOMman/Coverage41C/releases. Для работы нужна Java 21 или новее
 2) Включаем http-отладку 
 * клиент-серверный сценарий: 
     

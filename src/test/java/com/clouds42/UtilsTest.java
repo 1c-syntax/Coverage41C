@@ -130,4 +130,17 @@ class UtilsTest {
         assertEquals("6", lineByExtension.get("Доработки"));
         assertFalse(lineByExtension.containsKey("Второе"));
     }
+
+    @Test
+    void printCoverageStats() {
+        Map<URI, Map<BigDecimal, Integer>> coverageData = new LinkedHashMap<>();
+        coverageData.put(new File("src/cf/CommonModules/Модуль/Ext/Module.bsl").getAbsoluteFile().toURI(),
+                new HashMap<>(Map.of(new BigDecimal(2), 1, new BigDecimal(3), 0)));
+
+        MetadataOptions metadataOptions = new MetadataOptions();
+        metadataOptions.setSrcDirName("");
+        metadataOptions.setProjectDirName(new File(".").getAbsolutePath());
+
+        Utils.printCoverageStats(coverageData, metadataOptions);
+    }
 }
