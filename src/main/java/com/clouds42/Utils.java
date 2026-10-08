@@ -78,39 +78,26 @@ public class Utils {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     public static String getModuleTypeUuid(ModuleType moduleType, MD mdObject) {
-        if (moduleType == ModuleType.CommandModule) {
-            return "078a6af8-d22c-4248-9c33-7e90075a3d2c";
-        } else if (moduleType == ModuleType.ObjectModule) {
-            return "a637f77f-3840-441d-a1c3-699c8c5cb7e0";
-        } else if (moduleType == ModuleType.ManagerModule) {
-            if (mdObject instanceof SettingsStorage) {
-                return "0c8cad23-bf8c-468e-b49e-12f1927c048b";
-            } else {
-                return "d1b64a2c-8078-4982-8190-8f81aefda192";
+        return switch (moduleType) {
+            case CommandModule -> "078a6af8-d22c-4248-9c33-7e90075a3d2c";
+            case ObjectModule -> "a637f77f-3840-441d-a1c3-699c8c5cb7e0";
+            case ManagerModule -> mdObject instanceof SettingsStorage
+                    ? "0c8cad23-bf8c-468e-b49e-12f1927c048b"
+                    : "d1b64a2c-8078-4982-8190-8f81aefda192";
+            case FormModule -> "32e087ab-1491-49b6-aba7-43571b41ac2b";
+            case RecordSetModule -> "9f36fd70-4bf4-47f6-b235-935f73aab43f";
+            case ValueManagerModule -> "3e58c91f-9aaa-4f42-8999-4baf33907b75";
+            case ManagedApplicationModule -> "d22e852a-cf8a-4f77-8ccb-3548e7792bea";
+            case SessionModule -> "9b7bbbae-9771-46f2-9e4d-2489e0ffc702";
+            case ExternalConnectionModule -> "a4a9c1e2-1e54-4c7f-af06-4ca341198fac";
+            case OrdinaryApplicationModule -> "a78d9ce3-4e0c-48d5-9863-ae7342eedf94";
+            case HTTPServiceModule, WEBServiceModule, CommonModule -> "d5963243-262e-4398-b4d7-fb16d06484f6";
+            case ApplicationModule, UNKNOWN -> {
+                logger.info("Couldn't find UUID for module type: {} for object {}", moduleType, mdObject.getName());
+                yield "UNKNOWN";
             }
-        } else if (moduleType == ModuleType.FormModule) {
-            return "32e087ab-1491-49b6-aba7-43571b41ac2b";
-        } else if (moduleType == ModuleType.RecordSetModule) {
-            return "9f36fd70-4bf4-47f6-b235-935f73aab43f";
-        } else if (moduleType == ModuleType.ValueManagerModule) {
-            return "3e58c91f-9aaa-4f42-8999-4baf33907b75";
-        } else if (moduleType == ModuleType.ManagedApplicationModule) {
-            return "d22e852a-cf8a-4f77-8ccb-3548e7792bea";
-        } else if (moduleType == ModuleType.SessionModule) {
-            return "9b7bbbae-9771-46f2-9e4d-2489e0ffc702";
-        } else if (moduleType == ModuleType.ExternalConnectionModule) {
-            return "a4a9c1e2-1e54-4c7f-af06-4ca341198fac";
-        } else if (moduleType == ModuleType.OrdinaryApplicationModule) {
-            return "a78d9ce3-4e0c-48d5-9863-ae7342eedf94";
-        } else if (moduleType == ModuleType.HTTPServiceModule
-                || moduleType == ModuleType.WEBServiceModule
-                || moduleType == ModuleType.CommonModule) {
-            return "d5963243-262e-4398-b4d7-fb16d06484f6";
-        } else if (moduleType == ModuleType.ApplicationModule
-                || moduleType == ModuleType.UNKNOWN) {
-            logger.info("Couldn't find UUID for module type: {} for object {}", moduleType, mdObject.getName());
-        }
-        return "UNKNOWN";
+            default -> "UNKNOWN";
+        };
     }
 
     private static String getUriKey(String mdObjUuid, ModuleType moduleType, MD mdObj) {
