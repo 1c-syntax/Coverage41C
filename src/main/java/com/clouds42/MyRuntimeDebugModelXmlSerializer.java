@@ -100,7 +100,7 @@ public class MyRuntimeDebugModelXmlSerializer extends RuntimeDebugModelXmlSerial
         XMLResourceImpl resource = new XMLResourceImpl();
         resource.setEncoding(ENCODING.name());
         resource.load(new InputSource(new StringReader(xmlString)), loadOptions);
-        return (EObject)resource.getContents().get(0);
+        return resource.getContents().get(0);
     }
 
     protected String convertToXml(EObject eObject) throws IOException {

@@ -80,9 +80,9 @@ public class LinesToCoverage {
 
         if (node instanceof ParserRuleContext) {
             return contexts.contains(node.getClass());
-        } else if (node instanceof TerminalNode) {
+        } else if (node instanceof TerminalNode terminalNode) {
             return tokenTypes.contains(
-                    ((TerminalNode) node).getSymbol().getType()
+                    terminalNode.getSymbol().getType()
             );
         }
 
@@ -91,16 +91,16 @@ public class LinesToCoverage {
 
     private static int getLine(ParseTree node) {
 
-        if (node instanceof ParserRuleContext) {
+        if (node instanceof ParserRuleContext parserRuleContext) {
             if (!(node instanceof BSLParser.MethodCallContext)) {
-                return ((ParserRuleContext) node).getStart().getLine();
+                return parserRuleContext.getStart().getLine();
             }
-            var methodCall = getRootParent((ParserRuleContext) node, BSLParser.RULE_complexIdentifier);
+            var methodCall = getRootParent(parserRuleContext, BSLParser.RULE_complexIdentifier);
             if (methodCall != null) {
                 return methodCall.getStart().getLine();
             }
-        } else if (node instanceof TerminalNode) {
-            return ((TerminalNode) node).getSymbol().getLine();
+        } else if (node instanceof TerminalNode terminalNode) {
+            return terminalNode.getSymbol().getLine();
         }
 
         return 0;
@@ -122,15 +122,15 @@ public class LinesToCoverage {
         }
 
         if (getRuleIndex(parent) == ruleindex) {
-            return (ParserRuleContext) parent;
+            return parent;
         } else {
-            return getRootParent((ParserRuleContext) parent, ruleindex);
+            return getRootParent(parent, ruleindex);
         }
     }
 
     private static int getRuleIndex(ParseTree node) {
-        if (node instanceof TerminalNode) {
-            return ((TerminalNode) node).getSymbol().getType();
+        if (node instanceof TerminalNode terminalNode) {
+            return terminalNode.getSymbol().getType();
         } else {
             return ((ParserRuleContext) node).getRuleIndex();
         }

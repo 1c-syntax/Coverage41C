@@ -46,10 +46,6 @@ public class SendMessageCommand implements Callable<Integer> {
     @Mixin
     private ConnectionOptions connectionOptions;
 
-    private String getCommandName() {
-        return null;
-    }
-
     @Override
     public Integer call() throws Exception {
 

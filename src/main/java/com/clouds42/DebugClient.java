@@ -90,7 +90,7 @@ public class DebugClient extends AbstractDebugClient{
             this.debugServerUuid = debugServerUuid;
             this.debugComponentUrl = this.getComponentUrl(debugServerUrl, "e1crdbg/rdbg");
             this.infobaseAlias = infobaseAlias;
-            logger.info(String.format("Configured 1C:Enterprise Runtime debug HTTP client: %s : %s : %s", debugServerUrl, debugServerUuid, this.infobaseAlias));
+            logger.info("Configured 1C:Enterprise Runtime debug HTTP client: {} : {} : {}", debugServerUrl, debugServerUuid, this.infobaseAlias);
         }
     }
 
