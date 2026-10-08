@@ -30,7 +30,6 @@ import picocli.CommandLine.ParameterException;
 import picocli.CommandLine.Spec;
 
 import java.lang.invoke.MethodHandles;
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -88,7 +87,7 @@ public class MetadataOptions {
 
     public List<ExtensionSource> getExtensionSources() {
         if (extensionSources == null) {
-            return new ArrayList<>();
+            return List.of();
         } else {
             return extensionSources;
         }

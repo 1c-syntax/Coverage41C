@@ -56,6 +56,7 @@ import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
 import javax.xml.xpath.XPath;
 import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathExpression;
 import javax.xml.xpath.XPathExpressionException;
 import javax.xml.xpath.XPathFactory;
 import java.io.*;
@@ -356,31 +357,25 @@ public class Utils {
                 parentPath.resolve(Paths.get(externalDataProcessorName, "Ext", "ObjectModule.bsl")).toUri());
 
         Path formsPath = parentPath.resolve(Paths.get(externalDataProcessorName, "Forms"));
+        XPathExpression formUuidExpression = xPath.compile("/MetaDataObject/Form/@uuid");
+        XPathExpression formNameExpression = xPath.compile("/MetaDataObject/Form/Properties/Name/text()");
         try (Stream<Path> walk = Files.list(formsPath)) {
             walk.filter(formXmlFile -> formXmlFile.toString().endsWith(".xml"))
-                    .forEach(formXmlFile -> readConfiguratorForm(formXmlFile, formsPath, builder, uriListByKey));
+                    .forEach(formXmlFile -> {
+                        try {
+                            Document formXmlDocument = builder.parse(formXmlFile.toFile());
+                            String formUuid = (String) formUuidExpression.evaluate(formXmlDocument, XPathConstants.STRING);
+                            String formName = (String) formNameExpression.evaluate(formXmlDocument, XPathConstants.STRING);
+                            uriListByKey.put(getUriKey(formUuid, ModuleType.FormModule, null),
+                                    formsPath.resolve(Paths.get(formName, "Ext", "Form", "Module.bsl")).toUri());
+                        } catch (Exception e) {
+                            logger.error("Can't read form xml: {}", e.getLocalizedMessage());
+                        }
+                    });
         } catch (IOException e) {
             logger.error("Can't read forms of external data processor: {}", e.getLocalizedMessage());
         }
         return uriListByKey;
-    }
-
-    private static void readConfiguratorForm(Path formXmlFile,
-                                             Path formsPath,
-                                             DocumentBuilder builder,
-                                             Map<String, URI> uriListByKey) {
-        try {
-            XPath formXPath = XPathFactory.newInstance().newXPath();
-            Document formXmlDocument = builder.parse(formXmlFile.toFile());
-            String formUuid = (String) formXPath.compile("/MetaDataObject/Form/@uuid")
-                    .evaluate(formXmlDocument, XPathConstants.STRING);
-            String formName = (String) formXPath.compile("/MetaDataObject/Form/Properties/Name/text()")
-                    .evaluate(formXmlDocument, XPathConstants.STRING);
-            uriListByKey.put(getUriKey(formUuid, ModuleType.FormModule, null),
-                    formsPath.resolve(Paths.get(formName, "Ext", "Form", "Module.bsl")).toUri());
-        } catch (Exception e) {
-            logger.error("Can't read form xml: {}", e.getLocalizedMessage());
-        }
     }
 
     private static Map<String, URI> readEdtExternalDataProcessor(Path rootPath, Document xmlDocument)

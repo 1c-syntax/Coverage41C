@@ -146,6 +146,18 @@ public class ConvertTest {
     }
 
     @Test
+    void testRawFileOfPreviousVersionWithExtensionName() {
+        // сырой файл 2.7.3 без атрибута extension и -e: все модули относятся к дереву -s, как без -e
+        String outputXmlFileName = "build/genericCoverageCnvPreviousVersionExtensionName.xml";
+
+        int result = convertExtensions("internal-2.7.3.xml", outputXmlFileName,
+                "-e", "Доработки",
+                "-s", "src/cfe/Доработки");
+        assertEquals(0, result);
+        TestUtils.assertCoverageEqual(EXTENSIONS_COVERAGE_DIR + "Доработки.xml", outputXmlFileName);
+    }
+
+    @Test
     void testSameObjectIdInExtensions() {
         // один и тот же идентификатор объекта в расширениях Доработки, Второе и в конфигурации:
         // покрытие попадает только в модуль своего расширения
