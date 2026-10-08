@@ -1,7 +1,7 @@
 /*
  * This file is a part of Coverage41C.
  *
- * Copyright (c) 2020-2024
+ * Copyright (c) 2020-2026
  * Kosolapov Stanislav aka proDOOMman <prodoomman@gmail.com> and contributors
  *
  * SPDX-License-Identifier: LGPL-3.0-or-later
@@ -43,7 +43,9 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.stream.Stream;
 
@@ -69,24 +71,49 @@ public class ConvertCommand implements Callable<Integer> {
     @Override
     public Integer call() throws Exception {
 
+        String srcDirExtensionName = convertOptions.getExtensionName();
+        metadataOptions.validate(srcDirExtensionName);
+
         Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<URI,Map<BigDecimal, Integer>>();
 
-        Map<String, URI> uriListByKey = Utils.readMetadata(metadataOptions, coverageData);
+        Map<String, URI> uriListByKey = Utils.readMetadata(metadataOptions, srcDirExtensionName, coverageData);
 
         FileInputStream fileIS = new FileInputStream(convertOptions.getInputRawXmlFile());
         DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
         DocumentBuilder builder = builderFactory.newDocumentBuilder();
         Document xmlDocument = builder.parse(fileIS);
         NodeList fileNodeList = xmlDocument.getElementsByTagName("file");
+
+        // without -e and --extension the extension attribute is ignored: -s may point to sources of any extension, as before
+        boolean matchExtensions = !srcDirExtensionName.isEmpty() || !metadataOptions.getExtensionSources().isEmpty();
+        if (matchExtensions && !hasExtensionAttribute(fileNodeList)) {
+            logger.warn("RAW file doesn't contain modules of extensions: it was made by previous version" +
+                    " or extensions code wasn't executed. All modules are treated as modules of --srcDir sources");
+            matchExtensions = false;
+        }
+
+        // configuration and extensions with sources, other modules are skipped
+        Set<String> sourcesExtensionNames = new HashSet<>();
+        sourcesExtensionNames.add(srcDirExtensionName);
+        metadataOptions.getExtensionSources().forEach(source -> sourcesExtensionNames.add(source.getName()));
+        int skippedModulesCount = 0;
+
         for(int fileNodeNumber = 0; fileNodeNumber < fileNodeList.getLength(); fileNodeNumber++) {
             Node fileNode = fileNodeList.item(fileNodeNumber);
             String fileKey = fileNode.getAttributes().getNamedItem("path").getTextContent();
             if (fileKey.startsWith("/")) {
                 fileKey = fileKey.substring(1);
             }
-            URI fileUri = uriListByKey.get(fileKey);
+            String extensionName = matchExtensions ? getExtensionName(fileNode) : srcDirExtensionName;
+            boolean hasSources = sourcesExtensionNames.contains(extensionName);
+            fileKey = Utils.getExtensionUriKey(extensionName, fileKey);
+            URI fileUri = hasSources ? uriListByKey.get(fileKey) : null;
             if (fileUri == null) {
-                logger.error("Can't find file key: {}", fileKey);
+                if (hasSources) {
+                    logger.error("Can't find file key: {}", fileKey);
+                } else {
+                    skippedModulesCount++;
+                }
                 continue;
             }
             Map<BigDecimal, Integer> coverMap = coverageData.get(fileUri);
@@ -118,9 +145,27 @@ public class ConvertCommand implements Callable<Integer> {
                 }
             }
         }
+        if (skippedModulesCount > 0) {
+            logger.info("Skipped {} modules of configuration or extensions without sources", skippedModulesCount);
+        }
         Utils.dumpCoverageFile(coverageData, metadataOptions, outputOptions);
         logger.info("Convert done");
 
         return CommandLine.ExitCode.OK;
+    }
+
+    private static boolean hasExtensionAttribute(NodeList fileNodeList) {
+        for (int fileNodeNumber = 0; fileNodeNumber < fileNodeList.getLength(); fileNodeNumber++) {
+            if (fileNodeList.item(fileNodeNumber).getAttributes().getNamedItem("extension") != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // no attribute - configuration
+    private static String getExtensionName(Node fileNode) {
+        Node extensionNode = fileNode.getAttributes().getNamedItem("extension");
+        return extensionNode == null ? "" : extensionNode.getTextContent();
     }
 }

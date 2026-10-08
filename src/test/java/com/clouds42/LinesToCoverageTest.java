@@ -1,7 +1,7 @@
 /*
  * This file is a part of Coverage41C.
  *
- * Copyright (c) 2020-2024
+ * Copyright (c) 2020-2026
  * Kosolapov Stanislav aka proDOOMman <prodoomman@gmail.com> and contributors
  *
  * SPDX-License-Identifier: LGPL-3.0-or-later
@@ -37,7 +37,7 @@ class LinesToCoverageTest {
     void ToCoverTest() throws IOException {
 
         var file = new File("src/test/resources/linestocoverage/tocover.bsl");
-        BSLTokenizer tokenizer = new BSLTokenizer(Files.readString(file.toPath()));
+        BSLTokenizer tokenizer = LinesToCoverage.createTokenizer(Files.readString(file.toPath()));
 
         int[] linesToCover = LinesToCoverage.getLines(tokenizer.getAst());
 
@@ -55,7 +55,7 @@ class LinesToCoverageTest {
     void ParseErrorTest() throws IOException {
 
         var file = new File("src/test/resources/linestocoverage/error.bsl");
-        BSLTokenizer tokenizer = new BSLTokenizer(Files.readString(file.toPath()));
+        BSLTokenizer tokenizer = LinesToCoverage.createTokenizer(Files.readString(file.toPath()));
 
         int[] linesToCover = LinesToCoverage.getLines(tokenizer.getAst());
 
@@ -67,7 +67,7 @@ class LinesToCoverageTest {
     void SimpleTest() throws IOException {
 
         var file = new File("src/test/resources/linestocoverage/simple.bsl");
-        BSLTokenizer tokenizer = new BSLTokenizer(Files.readString(file.toPath()));
+        BSLTokenizer tokenizer = LinesToCoverage.createTokenizer(Files.readString(file.toPath()));
 
         int[] linesToCover = LinesToCoverage.getLines(tokenizer.getAst());
 
@@ -82,7 +82,7 @@ class LinesToCoverageTest {
     void IfTest() throws IOException {
 
         var file = new File("src/test/resources/linestocoverage/if.bsl");
-        BSLTokenizer tokenizer = new BSLTokenizer(Files.readString(file.toPath()));
+        BSLTokenizer tokenizer = LinesToCoverage.createTokenizer(Files.readString(file.toPath()));
 
         int[] linesToCover = LinesToCoverage.getLines(tokenizer.getAst());
 
@@ -94,7 +94,7 @@ class LinesToCoverageTest {
     void AssigmentTest() throws IOException {
 
         var file = new File("src/test/resources/linestocoverage/assigment.bsl");
-        BSLTokenizer tokenizer = new BSLTokenizer(Files.readString(file.toPath()));
+        BSLTokenizer tokenizer = LinesToCoverage.createTokenizer(Files.readString(file.toPath()));
 
         int[] linesToCover = LinesToCoverage.getLines(tokenizer.getAst());
 
@@ -109,7 +109,7 @@ class LinesToCoverageTest {
     void DoTest() throws IOException {
 
         var file = new File("src/test/resources/linestocoverage/do.bsl");
-        BSLTokenizer tokenizer = new BSLTokenizer(Files.readString(file.toPath()));
+        BSLTokenizer tokenizer = LinesToCoverage.createTokenizer(Files.readString(file.toPath()));
 
         int[] linesToCover = LinesToCoverage.getLines(tokenizer.getAst());
 
@@ -128,7 +128,7 @@ class LinesToCoverageTest {
     void otherTest() throws IOException {
 
         var file = new File("src/test/resources/linestocoverage/other.bsl");
-        BSLTokenizer tokenizer = new BSLTokenizer(Files.readString(file.toPath()));
+        BSLTokenizer tokenizer = LinesToCoverage.createTokenizer(Files.readString(file.toPath()));
 
         int[] linesToCover = LinesToCoverage.getLines(tokenizer.getAst());
 
@@ -145,7 +145,7 @@ class LinesToCoverageTest {
     void NotCoveredTest() throws IOException {
 
         var file = new File("src/test/resources/linestocoverage/notcovered.bsl");
-        BSLTokenizer tokenizer = new BSLTokenizer(Files.readString(file.toPath()));
+        BSLTokenizer tokenizer = LinesToCoverage.createTokenizer(Files.readString(file.toPath()));
 
         int[] linesToCover = LinesToCoverage.getLines(tokenizer.getAst());
 
@@ -164,7 +164,7 @@ class LinesToCoverageTest {
     void FilterTest() throws IOException {
 
         var file = new File("src/test/resources/linestocoverage/filtered.bsl");
-        BSLTokenizer tokenizer = new BSLTokenizer(Files.readString(file.toPath()));
+        BSLTokenizer tokenizer = LinesToCoverage.createTokenizer(Files.readString(file.toPath()));
 
         int[] linesToCover = LinesToCoverage.getLines(tokenizer.getAst());
 
@@ -179,7 +179,7 @@ class LinesToCoverageTest {
     void opcodesTest() throws IOException {
 
         var file = new File("src/test/resources/linestocoverage/opcode.bsl");
-        BSLTokenizer tokenizer = new BSLTokenizer(Files.readString(file.toPath()));
+        BSLTokenizer tokenizer = LinesToCoverage.createTokenizer(Files.readString(file.toPath()));
 
         int[] linesToCover = LinesToCoverage.getLines(tokenizer.getAst());
 
@@ -187,6 +187,21 @@ class LinesToCoverageTest {
         // 10, 8, 3, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72, 74, 76, 78, 80, 82, 84, 86, 88, 90, 92, 94, 96, 98, 100, 102, 104, 106, 108, 111, 113, 115, 117, 119, 121, 123, 125, 127, 129, 131, 133, 135, 137, 139, 141, 143, 145, 147, 149, 152, 153, 155, 156, 159, 161
         var expected = new int[]{3, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72, 74, 76, 78, 80, 82, 84, 86, 88, 90, 92, 94, 96, 98, 100, 102, 104, 106, 108, 111, 113, 115, 117, 119, 121, 123, 125, 127, 129, 131, 133, 135, 137, 139, 141, 143, 145, 147, 149, 152, 153, 155, 156, 159, 161};
 
+        assertThat(linesToCover, equalTo(expected));
+    }
+
+    @Test
+    void TrailingDotTest() throws IOException {
+
+        // перенос строки после точки (как в БСП): обращение продолжается на следующей строке,
+        // в том числе когда имя совпадает с ключевым словом (Выполнить)
+        var file = new File("src/test/resources/linestocoverage/trailingdot.bsl");
+        BSLTokenizer tokenizer = LinesToCoverage.createTokenizer(Files.readString(file.toPath()));
+
+        int[] linesToCover = LinesToCoverage.getLines(tokenizer.getAst());
+
+        // bsl-parser 0.21 (Coverage41C 2.7.3) терял строку 7: комментарий после точки ломал разбор
+        var expected = new int[]{3, 5, 7, 11, 13};
         assertThat(linesToCover, equalTo(expected));
     }
 

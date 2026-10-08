@@ -1,7 +1,7 @@
 /*
  * This file is a part of Coverage41C.
  *
- * Copyright (c) 2020-2024
+ * Copyright (c) 2020-2026
  * Kosolapov Stanislav aka proDOOMman <prodoomman@gmail.com> and contributors
  *
  * SPDX-License-Identifier: LGPL-3.0-or-later
@@ -45,10 +45,6 @@ public class SendMessageCommand implements Callable<Integer> {
 
     @Mixin
     private ConnectionOptions connectionOptions;
-
-    private String getCommandName() {
-        return null;
-    }
 
     @Override
     public Integer call() throws Exception {

@@ -6,7 +6,7 @@ https://42clouds.com/ru-ru/techdocs/raschyot-pokrytiya-koda-1C-testami.html
 Сценарий использования:
 
 0) Устанавливаем EDT (для работы программы нужны как минимум его библиотеки ```com._1c.g5.v8.dt.debug.core_*.jar```, ```com._1c.g5.v8.dt.debug.model_*.jar```). Если держать EDT на данной машине затруднительно, их можно скопировать в любую папку, установить параметр окружения EDT_LOCATION в данную папку и удалить EDT.
-1) Скачиваем последнюю версию со страницы https://github.com/proDOOMman/Coverage41C/releases
+1) Скачиваем последнюю версию со страницы https://github.com/proDOOMman/Coverage41C/releases. Для работы нужна Java 21 или новее
 2) Включаем http-отладку 
 * клиент-серверный сценарий: 
     
@@ -20,7 +20,7 @@ https://42clouds.com/ru-ru/techdocs/raschyot-pokrytiya-koda-1C-testami.html
 
 3) Проверяем что сервер отладки dbgs.exe (https://its.1c.ru/db/edtdoc/content/197/hdoc/_top/dbgs) запустился и работает. Для этого в браузере открываем его, адрес по умолчанию http://127.0.0.1:1550/. В случае успеха вы должны увидеть сообщение "... it works!".
 4) Выгружаем исходники конфигурации, расширения или внешние обработки в файлы (если у вас проекта EDT, то этот шаг пропускаем - он и так хранится в файлах)
-5) Запускаем анализ покрытия командой ```Coverage41C start -i <ИмяИнформационнойБазыВКластере> -P <ПутьКПроекту> -s <ПутьКИсходникам> -o <ИмяВыходногоФайлаПокрытия> -e <ИмяРасширения>```. Для файловой базы нужно указать адрес отладчика и предопределённое имя информационной базы ```Coverage41C start -i DefAlias -u http://127.0.0.1:<Порт> -P <ПутьКПроектуEDT>``` или ```Coverage41C start -i DefAlias -u http://127.0.0.1:<Порт> -s <ПутьКИсходникам>```
+5) Запускаем анализ покрытия командой ```Coverage41C start -i <ИмяИнформационнойБазыВКластере> -P <ПутьКПроекту> -s <ПутьКИсходникам> -o <ИмяВыходногоФайлаПокрытия> -e <ИмяРасширения>```. Для файловой базы нужно указать адрес отладчика и предопределённое имя информационной базы ```Coverage41C start -i DefAlias -u http://127.0.0.1:<Порт> -P <ПутьКПроектуEDT>``` или ```Coverage41C start -i DefAlias -u http://127.0.0.1:<Порт> -s <ПутьКИсходникам>```. Чтобы за один прогон снять покрытие конфигурации и расширений, добавьте для каждого расширения опцию ```--extension <ИмяРасширения>=<ПутьКИсходникамРасширения>``` (см. [ниже](#конфигурация-и-расширения-за-один-прогон))
 6) (Опционально, полезно для конвейера) Проверяем статус программы командой ```Coverage41C check -i <ИмяИнформационнойБазыВКластере>``` или ```Coverage41C check -i DefAlias -u http://127.0.0.1:1550``` для файловой.
 7) Выполняем тесты
 8) Останавливаем программу нажатием Ctrl+C в окне терминала или командой ```Coverage41C stop -i <ИмяИнформационнойБазыВКластере> -u http://127.0.0.1:<Порт>```. Также возможна запись файла покрытия без остановки замеров командой ```dump```.
@@ -32,6 +32,25 @@ https://42clouds.com/ru-ru/techdocs/raschyot-pokrytiya-koda-1C-testami.html
 ```cmd
 Coverage41C start -i DefAlias -u http://127.0.0.1:1550 -P C:\path\to\sources\ -o genericCoverage.xml
 ```
+### Конфигурация и расширения за один прогон
+
+Исходники конфигурации задаются как обычно (`-P`, `-s`), исходники каждого расширения - повторяемой опцией `--extension <ИмяРасширения>=<Путь>`. Имя - имя расширения в информационной базе, путь - относительно каталога проекта `-P` (с `--extension` он обязателен):
+```cmd
+Coverage41C start -i DefAlias -u http://127.0.0.1:1550 -P . -s src/cf --extension Доработки=src/cfe/Доработки --extension Интеграция=src/cfe/Интеграция -o genericCoverage.xml
+```
+В одном файле покрытия окажутся модули конфигурации и всех перечисленных расширений, пути - относительно `-P` (например `src/cfe/Доработки/CommonModules/ОбщийМодуль/Ext/Module.bsl`). Модули расширений, для которых не передан путь, в замер не попадают.
+
+То же умеет `convert`: замер без исходников (RAW режим) сохраняет для модулей расширений имя расширения в атрибуте `extension` (нет атрибута - модуль конфигурации), поэтому один сырой файл раскладывается по всем деревьям сразу:
+```cmd
+Coverage41C start -i DefAlias -u http://127.0.0.1:1550 -o internal.xml
+Coverage41C convert -c internal.xml -P . -s src/cf --extension Доработки=src/cfe/Доработки --extension Интеграция=src/cfe/Интеграция -o genericCoverage.xml
+```
+Если основное дерево `-s` - тоже расширение, укажите его имя опцией `-e` (у `start` и `convert` одинаково), остальные расширения - через `--extension`:
+```cmd
+Coverage41C convert -c internal.xml -P . -e Доработки -s src/cfe/Доработки --extension Интеграция=src/cfe/Интеграция -o genericCoverage.xml
+```
+Прежние сценарии работают как раньше: `-e <ИмяРасширения> -s <ПутьКИсходникамРасширения>` для одного расширения, `convert -s <ПутьКИсходникам>` без `-e` и `--extension` (атрибут `extension` при этом не учитывается), сырые файлы предыдущих версий.
+
 При завершении работы создаётся файл покрытия вида:
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
@@ -70,7 +89,8 @@ Usage: Coverage41C start [-hV] [-p] [--verbose] [-e=<extensionName>]
                          [-r=<removeSupport>] [-s=<srcDirName>]
                          [-t=<pingTimeout>] [-u=<debugServerUrl>] [-u:
                          file=<debugServerUrlFileName>]
-                         [-x=<externalDataProcessorUrl>] [-a
+                         [-x=<externalDataProcessorUrl>]
+                         [--extension=<extensionName>=<path>]... [-a
                          [=<autoconnectTargets>...]]... [-n
                          [=<debugAreaNames>...]]...
 Start measure and save coverage data to file
@@ -93,6 +113,10 @@ Start measure and save coverage data to file
                            Remove support values: NOT_EDITABLE,
                              EDITABLE_SUPPORT_ENABLED, NOT_SUPPORTED, NONE.
                              Default - NONE
+      --extension=<extensionName>=<path>
+                           Extension name and directory with its sources
+                             exported to xml (relative to project directory).
+                             Can be repeated. Requires --projectDir
   -o, --out=<outputFile>   Output file name
   -p, --password           Dbgs password
       -p:env, --password:env=<passwordEnv>

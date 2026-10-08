@@ -280,4 +280,8 @@
     <file path="src/test/resources/edt/pc/src/CommonModules/ОбщийМодульКлиентСервер/Module.bsl">
         <lineToCover covered="true" lineNumber="3"/>
     </file>
+    <file path="src/test/resources/edt/pc/src/Constants/Константа1/ManagerModule.bsl">
+        <lineToCover covered="false" lineNumber="4"/>
+        <lineToCover covered="false" lineNumber="3"/>
+    </file>
 </coverage>

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<coverage version="1">
+    <file path="src/cf/DataProcessors/Обработчик/Ext/ManagerModule.bsl">
+        <lineToCover covered="true" lineNumber="3"/>
+        <lineToCover covered="true" lineNumber="2"/>
+    </file>
+    <file path="src/cf/CommonModules/Калькулятор/Ext/Module.bsl">
+        <lineToCover covered="false" lineNumber="15"/>
+        <lineToCover covered="false" lineNumber="14"/>
+        <lineToCover covered="true" lineNumber="11"/>
+        <lineToCover covered="true" lineNumber="10"/>
+        <lineToCover covered="false" lineNumber="7"/>
+        <lineToCover covered="false" lineNumber="6"/>
+        <lineToCover covered="false" lineNumber="5"/>
+        <lineToCover covered="false" lineNumber="4"/>
+        <lineToCover covered="false" lineNumber="3"/>
+        <lineToCover covered="false" lineNumber="2"/>
+    </file>
+    <file path="src/cf/CommonModules/ТестыСервер/Ext/Module.bsl">
+        <lineToCover covered="true" lineNumber="5"/>
+        <lineToCover covered="true" lineNumber="4"/>
+        <lineToCover covered="true" lineNumber="3"/>
+        <lineToCover covered="true" lineNumber="2"/>
+    </file>
+    <file path="src/cf/Ext/ManagedApplicationModule.bsl">
+        <lineToCover covered="true" lineNumber="14"/>
+        <lineToCover covered="true" lineNumber="13"/>
+        <lineToCover covered="true" lineNumber="10"/>
+        <lineToCover covered="true" lineNumber="9"/>
+        <lineToCover covered="true" lineNumber="8"/>
+        <lineToCover covered="true" lineNumber="5"/>
+        <lineToCover covered="true" lineNumber="4"/>
+        <lineToCover covered="true" lineNumber="3"/>
+        <lineToCover covered="true" lineNumber="2"/>
+    </file>
+</coverage>

@@ -1,7 +1,7 @@
 /*
  * This file is a part of Coverage41C.
  *
- * Copyright (c) 2020-2024
+ * Copyright (c) 2020-2026
  * Kosolapov Stanislav aka proDOOMman <prodoomman@gmail.com> and contributors
  *
  * SPDX-License-Identifier: LGPL-3.0-or-later
@@ -53,7 +53,7 @@ import org.eclipse.emf.ecore.xml.type.SimpleAnyType;
 import org.eclipse.emf.ecore.xml.type.XMLTypeFactory;
 import org.eclipse.emf.ecore.xml.type.XMLTypePackage;
 import org.eclipse.jetty.client.HttpClient;
-import org.eclipse.jetty.client.api.Request;
+import org.eclipse.jetty.client.Request;
 import org.eclipse.jetty.http.HttpMethod;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -90,7 +90,7 @@ public class DebugClient extends AbstractDebugClient{
             this.debugServerUuid = debugServerUuid;
             this.debugComponentUrl = this.getComponentUrl(debugServerUrl, "e1crdbg/rdbg");
             this.infobaseAlias = infobaseAlias;
-            logger.info(String.format("Configured 1C:Enterprise Runtime debug HTTP client: %s : %s : %s", debugServerUrl, debugServerUuid, this.infobaseAlias));
+            logger.info("Configured 1C:Enterprise Runtime debug HTTP client: {} : {} : {}", debugServerUrl, debugServerUuid, this.infobaseAlias);
         }
     }
 

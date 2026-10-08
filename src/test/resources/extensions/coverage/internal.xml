@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<coverage version="1">
+    <file path="/c6a096ca-fdb6-4ab4-bb2a-0e4d55bded0c/d5963243-262e-4398-b4d7-fb16d06484f6">
+        <lineToCover covered="true" lineNumber="5"/>
+        <lineToCover covered="true" lineNumber="4"/>
+        <lineToCover covered="true" lineNumber="3"/>
+        <lineToCover covered="true" lineNumber="2"/>
+    </file>
+    <file extension="Второе" path="/438692a6-efc4-4076-b754-2fac8cfb9ac4/d5963243-262e-4398-b4d7-fb16d06484f6">
+        <lineToCover covered="true" lineNumber="4"/>
+        <lineToCover covered="true" lineNumber="3"/>
+        <lineToCover covered="true" lineNumber="2"/>
+    </file>
+    <file path="/26f07e93-3909-453e-ba36-f30b22c1036f/d1b64a2c-8078-4982-8190-8f81aefda192">
+        <lineToCover covered="true" lineNumber="3"/>
+        <lineToCover covered="true" lineNumber="2"/>
+    </file>
+    <file extension="Второе" path="/a8dead97-f4a2-4aa7-aa5b-5104372edeb1/d5963243-262e-4398-b4d7-fb16d06484f6">
+        <lineToCover covered="true" lineNumber="4"/>
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="/5f6c7b03-e6cb-4948-b50a-8bf09bef120d/d22e852a-cf8a-4f77-8ccb-3548e7792bea">
+        <lineToCover covered="true" lineNumber="14"/>
+        <lineToCover covered="true" lineNumber="13"/>
+        <lineToCover covered="true" lineNumber="10"/>
+        <lineToCover covered="true" lineNumber="9"/>
+        <lineToCover covered="true" lineNumber="8"/>
+        <lineToCover covered="true" lineNumber="5"/>
+        <lineToCover covered="true" lineNumber="4"/>
+        <lineToCover covered="true" lineNumber="3"/>
+        <lineToCover covered="true" lineNumber="2"/>
+    </file>
+    <file extension="Доработки" path="/599f2c45-37b4-4836-ba41-6b1d99111d46/d1b64a2c-8078-4982-8190-8f81aefda192">
+        <lineToCover covered="true" lineNumber="5"/>
+        <lineToCover covered="true" lineNumber="4"/>
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file path="/d146ada8-6684-4685-914e-ddc591b3f739/d5963243-262e-4398-b4d7-fb16d06484f6">
+        <lineToCover covered="true" lineNumber="11"/>
+        <lineToCover covered="true" lineNumber="10"/>
+    </file>
+    <file extension="Доработки" path="/888c0948-df1b-462b-809c-2a3dbef0b13f/d5963243-262e-4398-b4d7-fb16d06484f6">
+        <lineToCover covered="true" lineNumber="12"/>
+        <lineToCover covered="true" lineNumber="11"/>
+        <lineToCover covered="true" lineNumber="10"/>
+        <lineToCover covered="true" lineNumber="8"/>
+        <lineToCover covered="true" lineNumber="6"/>
+        <lineToCover covered="true" lineNumber="5"/>
+        <lineToCover covered="true" lineNumber="3"/>
+    </file>
+    <file extension="Доработки" path="/9b82e19b-3e2e-4eb2-9fac-70cde85488e7/d5963243-262e-4398-b4d7-fb16d06484f6">
+        <lineToCover covered="true" lineNumber="3"/>
+        <lineToCover covered="true" lineNumber="2"/>
+    </file>
+</coverage>

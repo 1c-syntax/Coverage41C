@@ -1,7 +1,7 @@
 /*
  * This file is a part of Coverage41C.
  *
- * Copyright (c) 2020-2024
+ * Copyright (c) 2020-2026
  * Kosolapov Stanislav aka proDOOMman <prodoomman@gmail.com> and contributors
  *
  * SPDX-License-Identifier: LGPL-3.0-or-later
@@ -22,17 +22,16 @@
 package com.clouds42;
 
 import com.clouds42.CommandLineOptions.ConnectionOptions;
+import com.clouds42.CommandLineOptions.ExtensionSource;
 import com.clouds42.CommandLineOptions.MetadataOptions;
 import com.clouds42.CommandLineOptions.OutputOptions;
-import com.github._1c_syntax.bsl.mdo.ModuleOwner;
+import com.github._1c_syntax.bsl.mdclasses.CF;
+import com.github._1c_syntax.bsl.mdclasses.MDClasses;
+import com.github._1c_syntax.bsl.mdo.MD;
+import com.github._1c_syntax.bsl.mdo.Module;
+import com.github._1c_syntax.bsl.mdo.SettingsStorage;
 import com.github._1c_syntax.bsl.parser.BSLLexer;
 import com.github._1c_syntax.bsl.parser.BSLTokenizer;
-import com.github._1c_syntax.bsl.parser.Tokenizer;
-import com.github._1c_syntax.mdclasses.Configuration;
-import com.github._1c_syntax.mdclasses.mdo.AbstractMDObjectBSL;
-//import com.github._1c_syntax.mdclasses.mdo.MDOHasModule;
-import com.github._1c_syntax.mdclasses.mdo.MDSettingsStorage;
-import com.github._1c_syntax.mdclasses.mdo.support.MDOModule;
 import com.github._1c_syntax.bsl.types.ModuleType;
 import com.github._1c_syntax.bsl.support.SupportVariant;
 import de.vandermeer.asciitable.AsciiTable;
@@ -45,9 +44,11 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
+import org.xml.sax.SAXException;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.transform.OutputKeys;
 import javax.xml.transform.Transformer;
 import javax.xml.transform.TransformerFactory;
@@ -55,11 +56,14 @@ import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
 import javax.xml.xpath.XPath;
 import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathExpression;
+import javax.xml.xpath.XPathExpressionException;
 import javax.xml.xpath.XPathFactory;
 import java.io.*;
 import java.lang.invoke.MethodHandles;
 import java.math.BigDecimal;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -68,55 +72,75 @@ import java.time.Instant;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class Utils {
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    public static String getModuleTypeUuid(ModuleType moduleType, ModuleOwner mdObject) {
-        if (moduleType == ModuleType.CommandModule) {
-            return "078a6af8-d22c-4248-9c33-7e90075a3d2c";
-        } else if (moduleType == ModuleType.ObjectModule) {
-            return "a637f77f-3840-441d-a1c3-699c8c5cb7e0";
-        } else if (moduleType == ModuleType.ManagerModule) {
-            if (mdObject instanceof MDSettingsStorage) {
-                return "0c8cad23-bf8c-468e-b49e-12f1927c048b";
-            } else {
-                return "d1b64a2c-8078-4982-8190-8f81aefda192";
+    public static String getModuleTypeUuid(ModuleType moduleType, MD mdObject) {
+        return switch (moduleType) {
+            case CommandModule -> "078a6af8-d22c-4248-9c33-7e90075a3d2c";
+            case ObjectModule -> "a637f77f-3840-441d-a1c3-699c8c5cb7e0";
+            case ManagerModule -> mdObject instanceof SettingsStorage
+                    ? "0c8cad23-bf8c-468e-b49e-12f1927c048b"
+                    : "d1b64a2c-8078-4982-8190-8f81aefda192";
+            case FormModule -> "32e087ab-1491-49b6-aba7-43571b41ac2b";
+            case RecordSetModule -> "9f36fd70-4bf4-47f6-b235-935f73aab43f";
+            case ValueManagerModule -> "3e58c91f-9aaa-4f42-8999-4baf33907b75";
+            case ManagedApplicationModule -> "d22e852a-cf8a-4f77-8ccb-3548e7792bea";
+            case SessionModule -> "9b7bbbae-9771-46f2-9e4d-2489e0ffc702";
+            case ExternalConnectionModule -> "a4a9c1e2-1e54-4c7f-af06-4ca341198fac";
+            case OrdinaryApplicationModule -> "a78d9ce3-4e0c-48d5-9863-ae7342eedf94";
+            case HTTPServiceModule, WEBServiceModule, CommonModule -> "d5963243-262e-4398-b4d7-fb16d06484f6";
+            case ApplicationModule, UNKNOWN -> {
+                logger.info("Couldn't find UUID for module type: {} for object {}", moduleType, mdObject.getName());
+                yield "UNKNOWN";
             }
-        } else if (moduleType == ModuleType.FormModule) {
-            return "32e087ab-1491-49b6-aba7-43571b41ac2b";
-        } else if (moduleType == ModuleType.RecordSetModule) {
-            return "9f36fd70-4bf4-47f6-b235-935f73aab43f";
-        } else if (moduleType == ModuleType.ValueManagerModule) {
-            return "3e58c91f-9aaa-4f42-8999-4baf33907b75";
-        } else if (moduleType == ModuleType.ManagedApplicationModule) {
-            return "d22e852a-cf8a-4f77-8ccb-3548e7792bea";
-        } else if (moduleType == ModuleType.SessionModule) {
-            return "9b7bbbae-9771-46f2-9e4d-2489e0ffc702";
-        } else if (moduleType == ModuleType.ExternalConnectionModule) {
-            return "a4a9c1e2-1e54-4c7f-af06-4ca341198fac";
-        } else if (moduleType == ModuleType.OrdinaryApplicationModule) {
-            return "a78d9ce3-4e0c-48d5-9863-ae7342eedf94";
-        } else if (moduleType == ModuleType.HTTPServiceModule
-                || moduleType == ModuleType.WEBServiceModule
-                || moduleType == ModuleType.CommonModule) {
-            return "d5963243-262e-4398-b4d7-fb16d06484f6";
-        } else if (moduleType == ModuleType.ApplicationModule
-                || moduleType == ModuleType.UNKNOWN) {
-            logger.info("Couldn't find UUID for module type: {} for object {}", moduleType, mdObject.getName());
-        }
-        return "UNKNOWN";
+            default -> "UNKNOWN";
+        };
     }
 
-    private static String getUriKey(String mdObjUuid, ModuleType moduleType, ModuleOwner mdObj) {
+    private static String getUriKey(String mdObjUuid, ModuleType moduleType, MD mdObj) {
         return mdObjUuid + "/" + getModuleTypeUuid(moduleType, mdObj);
     }
 
     public static String getUriKey(String objectId, String propertyId) {
         return objectId + "/" + propertyId;
+    }
+
+    /**
+     * Ключ модуля с учётом расширения: модуль сопоставляется только с деревом исходников своего расширения
+     *
+     * @param extensionName - имя расширения, пустое - конфигурация (или внешняя обработка)
+     * @param uriKey        - ключ модуля из {@link #getUriKey(String, String)}
+     * @return для конфигурации - uriKey без изменений, для расширения - uriKey с именем расширения
+     */
+    public static String getExtensionUriKey(String extensionName, String uriKey) {
+        if (extensionName.isEmpty()) {
+            return uriKey;
+        }
+        return extensionName + "/" + uriKey;
+    }
+
+    /**
+     * URI модуля в RAW режиме: file:///objectId/propertyId, имя расширения хранится во фрагменте URI.
+     * Путь без фрагмента пишется в атрибут path сырого файла, как и раньше
+     */
+    public static URI getRawUri(String extensionName, String uriKey) {
+        if (extensionName.isEmpty()) {
+            return URI.create("file:///" + uriKey);
+        }
+        try {
+            return new URI("file", "", "/" + uriKey, null, extensionName);
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException(e);
+        }
+    }
+
+    public static String getRawExtensionName(URI rawUri) {
+        String extensionName = rawUri.getFragment();
+        return extensionName == null ? "" : extensionName;
     }
 
 
@@ -133,9 +157,9 @@ public class Utils {
     );
 
     private static void addCoverageData(Map<URI, Map<BigDecimal, Integer>> coverageData, URI uri) {
-        Tokenizer tokenizer;
+        BSLTokenizer tokenizer;
         try {
-            tokenizer = new BSLTokenizer(Files.readString(Path.of(uri)));
+            tokenizer = LinesToCoverage.createTokenizer(Files.readString(Path.of(uri)));
         } catch (IOException e) {
             logger.error(e.getLocalizedMessage());
             return;
@@ -153,7 +177,7 @@ public class Utils {
             List<Token> allTokens = tokenizer.getTokens();
             List<Token> comments = allTokens.stream()
                     .filter(token -> token.getType() == BSLLexer.LINE_COMMENT)
-                    .collect(Collectors.toList());
+                    .toList();
 
             for (Token comment : comments) {
                 int commentLine = comment.getLine();
@@ -168,10 +192,10 @@ public class Utils {
                         Matcher onMatcher = COVER_ON.matcher(comment.getText());
                         if (onMatcher.find()) {
                             while (!coverageIgnoranceStartStack.empty()) {
-                                coverageIgnorance.add(Range.between(coverageIgnoranceStartStack.pop(), commentLine));
+                                coverageIgnorance.add(Range.of(coverageIgnoranceStartStack.pop(), commentLine));
                             }
                             while (!coverageAutoIgnoranceStartStack.empty()) {
-                                coverageAutoIgnorance.add(Range.between(coverageAutoIgnoranceStartStack.pop(), commentLine));
+                                coverageAutoIgnorance.add(Range.of(coverageAutoIgnoranceStartStack.pop(), commentLine));
                             }
                         }
                     }
@@ -179,11 +203,11 @@ public class Utils {
             }
             while (!coverageIgnoranceStartStack.empty()) {
                 coverageIgnorance.add(
-                        Range.between(coverageIgnoranceStartStack.pop(), linesToCover[linesToCover.length - 1]));
+                        Range.of(coverageIgnoranceStartStack.pop(), linesToCover[linesToCover.length - 1]));
             }
             while (!coverageAutoIgnoranceStartStack.empty()) {
                 coverageAutoIgnorance.add(
-                        Range.between(coverageAutoIgnoranceStartStack.pop(), linesToCover[linesToCover.length - 1]));
+                        Range.of(coverageAutoIgnoranceStartStack.pop(), linesToCover[linesToCover.length - 1]));
             }
 
             linesToCover = Arrays.stream(linesToCover).filter(i ->
@@ -201,8 +225,16 @@ public class Utils {
         coverageData.put(uri, coverMap);
     }
 
+    /**
+     * Читает исходники основного дерева (-P/-s) и деревьев расширений (--extension)
+     *
+     * @param srcDirExtensionName - расширение, которому принадлежит основное дерево (-e), пустое - конфигурация
+     * @return URI модулей по ключу {@link #getExtensionUriKey(String, String)}
+     */
     public static Map<String, URI> readMetadata(MetadataOptions metadataOptions,
-                                                Map<URI, Map<BigDecimal, Integer>> coverageData) throws Exception {
+                                                String srcDirExtensionName,
+                                                Map<URI, Map<BigDecimal, Integer>> coverageData)
+            throws IOException, ParserConfigurationException, SAXException, XPathExpressionException {
 
         boolean rawMode = false;
         if (metadataOptions.isRawMode()) {
@@ -216,133 +248,173 @@ public class Utils {
 
         if (!rawMode) {
 
-            Path rootPath = Path.of(metadataOptions.getProjectDirName())
-                    .resolve(metadataOptions.getSrcDirName());
-            logger.info("Reading configuration sources from root path: {}", rootPath.toAbsolutePath());
-
-            if (Files.isDirectory(rootPath)) {
-
-                Configuration conf = Configuration.create(rootPath);
-
-                for (MDOModule module : conf.getModules()) {
-                    ModuleOwner mdObj = module.getOwner();
-
-                    String mdObjUuid = mdObj.getUuid();
-
-                    uriListByKey.put(getUriKey(mdObjUuid, module.getModuleType(), mdObj), module.getUri());
-
-                    if (metadataOptions.getRemoveSupport() != SupportVariant.NONE) {
-                        SupportVariant moduleSupportVariant = conf.getModuleSupport(module.getUri()).values().stream()
-                                .min(Comparator.naturalOrder())
-                                .orElse(SupportVariant.NONE);
-                        if (moduleSupportVariant.compareTo(metadataOptions.getRemoveSupport()) <= 0) {
-                            coverageData.put(module.getUri(), new HashMap<>());
-                            continue;
-                        }
-                    }
-
-                    addCoverageData(coverageData, module.getUri());
-
-                }
-
-            } else {
-
-                File externalDataprocessorRootXmlFile = rootPath.toFile();
-
-                XPath xPath = XPathFactory.newInstance().newXPath();
-                FileInputStream fileIS = new FileInputStream(externalDataprocessorRootXmlFile);
-                DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
-                DocumentBuilder builder = builderFactory.newDocumentBuilder();
-                Document xmlDocument = builder.parse(fileIS);
-                String documentRootTagName = xmlDocument.getDocumentElement().getTagName();
-                if (documentRootTagName.equals("MetaDataObject")) {
-                    // CONFIGURATOR
-                    String uuidExpression = "/MetaDataObject/ExternalDataProcessor/@uuid";
-                    String externalDataProcessorName = com.google.common.io.Files.getNameWithoutExtension(rootPath.toString());
-                    String externalDataProcessorUuid = (String) xPath.compile(uuidExpression).evaluate(xmlDocument,
-                            XPathConstants.STRING);
-                    uriListByKey.put(getUriKey(externalDataProcessorUuid, ModuleType.ObjectModule, null),
-                            Paths.get(externalDataprocessorRootXmlFile.getParent(),
-                                    externalDataProcessorName, "Ext", "ObjectModule.bsl").toUri());
-
-                    var externalDataProcessorPath = Paths.get(
-                            externalDataprocessorRootXmlFile.getParent(),
-                            externalDataProcessorName, "Forms");
-                    try (Stream<Path> walk = Files.list(externalDataProcessorPath)) {
-
-                        List<String> result = walk.map(Path::toString)
-                                .filter(f -> f.endsWith(".xml")).collect(Collectors.toList());
-
-                        XPath formXPath = XPathFactory.newInstance().newXPath();
-                        String formUuidExpression = "/MetaDataObject/Form/@uuid";
-                        String formNameExpression = "/MetaDataObject/Form/Properties/Name/text()";
-
-                        result.forEach(formXmlFileName -> {
-                            try {
-                                FileInputStream formFileIS = new FileInputStream(formXmlFileName);
-                                Document formXmlDocument = builder.parse(formFileIS);
-                                String formUuid = (String) formXPath.compile(formUuidExpression).evaluate(formXmlDocument,
-                                        XPathConstants.STRING);
-                                String formName = (String) formXPath.compile(formNameExpression).evaluate(formXmlDocument,
-                                        XPathConstants.STRING);
-                                uriListByKey.put(getUriKey(formUuid, ModuleType.FormModule, null),
-                                        Paths.get(externalDataProcessorPath.toString(),
-                                                formName, "Ext", "Form", "Module.bsl").toUri());
-                            } catch (Exception e) {
-                                logger.error("Can't read form xml: {}", e.getLocalizedMessage());
-                            }
-                        });
-
-
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                } else if (documentRootTagName.equals("mdclass:ExternalDataProcessor")) {
-                    // EDT
-                    var externalDataProcessorPath = Paths.get(
-                            externalDataprocessorRootXmlFile.getParent(),
-                            "Forms");
-                    String uuidExpression = "/ExternalDataProcessor/@uuid";
-                    String externalDataProcessorUuid = (String) xPath.compile(uuidExpression).evaluate(xmlDocument,
-                            XPathConstants.STRING);
-                    uriListByKey.put(getUriKey(externalDataProcessorUuid, ModuleType.ObjectModule, null),
-                            Paths.get(externalDataprocessorRootXmlFile.getParent(),
-                                    "ObjectModule.bsl").toUri());
-                    String formUuidExpression = "/ExternalDataProcessor/forms";
-                    NodeList externalDataProcessorFormsNodeList = (NodeList) xPath.compile(formUuidExpression).evaluate(xmlDocument,
-                            XPathConstants.NODESET);
-                    for (int nodeNumber = 0; nodeNumber < externalDataProcessorFormsNodeList.getLength(); nodeNumber++) {
-                        Node externalDataProcessorFormsNode = externalDataProcessorFormsNodeList.item(nodeNumber);
-                        String formUuid = externalDataProcessorFormsNode.getAttributes().getNamedItem("uuid").getTextContent();
-                        String formName = "";
-                        NodeList childNodes = externalDataProcessorFormsNode.getChildNodes();
-                        for (int childNodeNumber = 0; childNodeNumber < childNodes.getLength(); childNodeNumber++) {
-                            Node childNode = childNodes.item(childNodeNumber);
-                            if (childNode.getNodeName().equals("name")) {
-                                formName = childNode.getTextContent();
-                                break;
-                            }
-                        }
-                        if (formName.isEmpty()) {
-                            logger.error("Can't find form name: {}", formUuid);
-                            continue;
-                        }
-                        uriListByKey.put(getUriKey(formUuid, ModuleType.FormModule, null),
-                                Paths.get(externalDataProcessorPath.toString(),
-                                        formName, "Module.bsl").toUri());
-                    }
-                } else {
-                    throw new Exception("Unknown source format");
-                }
-
-                uriListByKey.forEach((s, uri) -> addCoverageData(coverageData, uri));
-
+            Path projectPath = Path.of(metadataOptions.getProjectDirName());
+            readSources(projectPath.resolve(metadataOptions.getSrcDirName()), srcDirExtensionName,
+                    metadataOptions, uriListByKey, coverageData);
+            for (ExtensionSource extensionSource : metadataOptions.getExtensionSources()) {
+                readSources(projectPath.resolve(extensionSource.getPath()), extensionSource.getName(),
+                        metadataOptions, uriListByKey, coverageData);
             }
 
             logger.info("Configuration sources reading DONE");
         }
 
         return uriListByKey;
+    }
+
+    private static void readSources(Path rootPath,
+                                    String extensionName,
+                                    MetadataOptions metadataOptions,
+                                    Map<String, URI> uriListByKey,
+                                    Map<URI, Map<BigDecimal, Integer>> coverageData)
+            throws IOException, ParserConfigurationException, SAXException, XPathExpressionException {
+
+        if (extensionName.isEmpty()) {
+            logger.info("Reading configuration sources from root path: {}", rootPath.toAbsolutePath());
+        } else {
+            logger.info("Reading extension {} sources from root path: {}", extensionName, rootPath.toAbsolutePath());
+        }
+
+        if (Files.isDirectory(rootPath)) {
+            readConfigurationSources(rootPath, extensionName, metadataOptions.getRemoveSupport(),
+                    uriListByKey, coverageData);
+        } else {
+            readExternalDataProcessorSources(rootPath, extensionName, uriListByKey, coverageData);
+        }
+    }
+
+    private static void readConfigurationSources(Path rootPath,
+                                                 String extensionName,
+                                                 SupportVariant removeSupport,
+                                                 Map<String, URI> uriListByKey,
+                                                 Map<URI, Map<BigDecimal, Integer>> coverageData) {
+
+        if (!(MDClasses.createConfiguration(rootPath) instanceof CF conf)) {
+            throw new IllegalArgumentException("Unknown source format: " + rootPath);
+        }
+
+        Map<URI, MD> moduleOwners = conf.getModulesByObject();
+        for (Module module : conf.getAllModules()) {
+            if (module.isProtected() || !Files.exists(Path.of(module.getUri()))) {
+                // no source code: module is protected with password (Module.bin) or empty (not exported)
+                continue;
+            }
+            MD mdObj = moduleOwners.get(module.getUri());
+
+            uriListByKey.put(getExtensionUriKey(extensionName, getUriKey(mdObj.getUuid(), module.getModuleType(), mdObj)),
+                    module.getUri());
+
+            if (isSupportRemoved(module, removeSupport)) {
+                coverageData.put(module.getUri(), new HashMap<>());
+            } else {
+                addCoverageData(coverageData, module.getUri());
+            }
+        }
+    }
+
+    private static boolean isSupportRemoved(Module module, SupportVariant removeSupport) {
+        return removeSupport != SupportVariant.NONE
+                && module.getSupportVariant().compareTo(removeSupport) <= 0;
+    }
+
+    private static void readExternalDataProcessorSources(Path rootPath,
+                                                         String extensionName,
+                                                         Map<String, URI> uriListByKey,
+                                                         Map<URI, Map<BigDecimal, Integer>> coverageData)
+            throws IOException, ParserConfigurationException, SAXException, XPathExpressionException {
+
+        DocumentBuilder builder = DocumentBuilderFactory.newInstance().newDocumentBuilder();
+        Document xmlDocument = builder.parse(rootPath.toFile());
+        String documentRootTagName = xmlDocument.getDocumentElement().getTagName();
+
+        Map<String, URI> externalDataProcessorUriListByKey;
+        if (documentRootTagName.equals("MetaDataObject")) {
+            externalDataProcessorUriListByKey = readConfiguratorExternalDataProcessor(rootPath, xmlDocument, builder);
+        } else if (documentRootTagName.equals("mdclass:ExternalDataProcessor")) {
+            externalDataProcessorUriListByKey = readEdtExternalDataProcessor(rootPath, xmlDocument);
+        } else {
+            throw new IllegalArgumentException("Unknown source format: " + rootPath);
+        }
+
+        externalDataProcessorUriListByKey.forEach((key, uri) -> {
+            uriListByKey.put(getExtensionUriKey(extensionName, key), uri);
+            addCoverageData(coverageData, uri);
+        });
+    }
+
+    private static Map<String, URI> readConfiguratorExternalDataProcessor(Path rootPath,
+                                                                          Document xmlDocument,
+                                                                          DocumentBuilder builder)
+            throws XPathExpressionException {
+
+        Map<String, URI> uriListByKey = new HashMap<>();
+        XPath xPath = XPathFactory.newInstance().newXPath();
+        Path parentPath = rootPath.toAbsolutePath().getParent();
+        String externalDataProcessorName = com.google.common.io.Files.getNameWithoutExtension(rootPath.toString());
+        String externalDataProcessorUuid = (String) xPath.compile("/MetaDataObject/ExternalDataProcessor/@uuid")
+                .evaluate(xmlDocument, XPathConstants.STRING);
+        uriListByKey.put(getUriKey(externalDataProcessorUuid, ModuleType.ObjectModule, null),
+                parentPath.resolve(Paths.get(externalDataProcessorName, "Ext", "ObjectModule.bsl")).toUri());
+
+        Path formsPath = parentPath.resolve(Paths.get(externalDataProcessorName, "Forms"));
+        XPathExpression formUuidExpression = xPath.compile("/MetaDataObject/Form/@uuid");
+        XPathExpression formNameExpression = xPath.compile("/MetaDataObject/Form/Properties/Name/text()");
+        try (Stream<Path> walk = Files.list(formsPath)) {
+            walk.filter(formXmlFile -> formXmlFile.toString().endsWith(".xml"))
+                    .forEach(formXmlFile -> {
+                        try {
+                            Document formXmlDocument = builder.parse(formXmlFile.toFile());
+                            String formUuid = (String) formUuidExpression.evaluate(formXmlDocument, XPathConstants.STRING);
+                            String formName = (String) formNameExpression.evaluate(formXmlDocument, XPathConstants.STRING);
+                            uriListByKey.put(getUriKey(formUuid, ModuleType.FormModule, null),
+                                    formsPath.resolve(Paths.get(formName, "Ext", "Form", "Module.bsl")).toUri());
+                        } catch (Exception e) {
+                            logger.error("Can't read form xml: {}", e.getLocalizedMessage());
+                        }
+                    });
+        } catch (IOException e) {
+            logger.error("Can't read forms of external data processor: {}", e.getLocalizedMessage());
+        }
+        return uriListByKey;
+    }
+
+    private static Map<String, URI> readEdtExternalDataProcessor(Path rootPath, Document xmlDocument)
+            throws XPathExpressionException {
+
+        Map<String, URI> uriListByKey = new HashMap<>();
+        XPath xPath = XPathFactory.newInstance().newXPath();
+        Path parentPath = rootPath.toAbsolutePath().getParent();
+        String externalDataProcessorUuid = (String) xPath.compile("/ExternalDataProcessor/@uuid")
+                .evaluate(xmlDocument, XPathConstants.STRING);
+        uriListByKey.put(getUriKey(externalDataProcessorUuid, ModuleType.ObjectModule, null),
+                parentPath.resolve("ObjectModule.bsl").toUri());
+
+        Path formsPath = parentPath.resolve("Forms");
+        NodeList formsNodeList = (NodeList) xPath.compile("/ExternalDataProcessor/forms")
+                .evaluate(xmlDocument, XPathConstants.NODESET);
+        for (int nodeNumber = 0; nodeNumber < formsNodeList.getLength(); nodeNumber++) {
+            Node formsNode = formsNodeList.item(nodeNumber);
+            String formUuid = formsNode.getAttributes().getNamedItem("uuid").getTextContent();
+            String formName = getEdtFormName(formsNode);
+            if (formName.isEmpty()) {
+                logger.error("Can't find form name: {}", formUuid);
+                continue;
+            }
+            uriListByKey.put(getUriKey(formUuid, ModuleType.FormModule, null),
+                    formsPath.resolve(Paths.get(formName, "Module.bsl")).toUri());
+        }
+        return uriListByKey;
+    }
+
+    private static String getEdtFormName(Node formsNode) {
+        NodeList childNodes = formsNode.getChildNodes();
+        for (int childNodeNumber = 0; childNodeNumber < childNodes.getLength(); childNodeNumber++) {
+            Node childNode = childNodes.item(childNodeNumber);
+            if (childNode.getNodeName().equals("name")) {
+                return childNode.getTextContent();
+            }
+        }
+        return "";
     }
 
     public static void dumpCoverageFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
@@ -488,6 +560,11 @@ public class Utils {
                 }
                 Element fileElement = doc.createElement("file");
                 fileElement.setAttribute("path", projectUri.relativize(uri).getPath());
+                String extensionName = getRawExtensionName(uri);
+                if (!extensionName.isEmpty()) {
+                    // RAW mode: module of extension, no attribute - configuration
+                    fileElement.setAttribute("extension", extensionName);
+                }
                 bigDecimalsMap.forEach((bigDecimal, integer) -> {
                     if (integer >= 0) {
                         Element lineElement = doc.createElement("lineToCover");
@@ -649,16 +726,16 @@ public class Utils {
         boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
 
         URI debugUri = URI.create(connectionOptions.getDebugServerUrl());
+        String pipeId = connectionOptions.getInfobaseAlias() + "_"
+                + debugUri.toString().replaceAll("[^a-zA-Z0-9-_.]", "_");
         String pipeName;
         if (isWindows) {
-            pipeName = String.format("\\\\.\\pipe\\COVER_%s_%s", connectionOptions.getInfobaseAlias(),
-                    debugUri.toString().replaceAll("[^a-zA-Z0-9-_.]", "_"));
+            pipeName = "\\\\.\\pipe\\COVER_" + pipeId;
         } else {
             File tempDirFile = new File("/tmp/coverage41c/");
             tempDirFile.mkdirs();
             Path tempDir = tempDirFile.toPath();
-            Path sock = tempDir.resolve(String.format("%s_%s.sock", connectionOptions.getInfobaseAlias(),
-                    debugUri.toString().replaceAll("[^a-zA-Z0-9-_.]", "_")));
+            Path sock = tempDir.resolve(pipeId + ".sock");
             pipeName = sock.toString();
         }
         return pipeName;

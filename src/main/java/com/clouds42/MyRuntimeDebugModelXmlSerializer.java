@@ -1,7 +1,7 @@
 /*
  * This file is a part of Coverage41C.
  *
- * Copyright (c) 2020-2024
+ * Copyright (c) 2020-2026
  * Kosolapov Stanislav aka proDOOMman <prodoomman@gmail.com> and contributors
  *
  * SPDX-License-Identifier: LGPL-3.0-or-later
@@ -100,7 +100,7 @@ public class MyRuntimeDebugModelXmlSerializer extends RuntimeDebugModelXmlSerial
         XMLResourceImpl resource = new XMLResourceImpl();
         resource.setEncoding(ENCODING.name());
         resource.load(new InputSource(new StringReader(xmlString)), loadOptions);
-        return (EObject)resource.getContents().get(0);
+        return resource.getContents().get(0);
     }
 
     protected String convertToXml(EObject eObject) throws IOException {

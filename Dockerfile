@@ -1,6 +1,6 @@
 ARG DOCKER_USERNAME=library
-ARG BASE_IMAGE=adoptopenjdk
-ARG BASE_TAG=14-hotspot
+ARG BASE_IMAGE=eclipse-temurin
+ARG BASE_TAG=21-jre
 
 FROM ${DOCKER_USERNAME}/${BASE_IMAGE}:${BASE_TAG}
 
