@@ -45,7 +45,11 @@ Coverage41C start -i DefAlias -u http://127.0.0.1:1550 -P . -s src/cf --extensio
 Coverage41C start -i DefAlias -u http://127.0.0.1:1550 -o internal.xml
 Coverage41C convert -c internal.xml -P . -s src/cf --extension Доработки=src/cfe/Доработки --extension Интеграция=src/cfe/Интеграция -o genericCoverage.xml
 ```
-Прежние сценарии работают как раньше: `-e <ИмяРасширения> -s <ПутьКИсходникамРасширения>` для одного расширения, `convert -s <ПутьКИсходникам>` без `--extension` (атрибут `extension` при этом не учитывается), сырые файлы предыдущих версий.
+Если основное дерево `-s` - тоже расширение, укажите его имя опцией `-e` (у `start` и `convert` одинаково), остальные расширения - через `--extension`:
+```cmd
+Coverage41C convert -c internal.xml -P . -e Доработки -s src/cfe/Доработки --extension Интеграция=src/cfe/Интеграция -o genericCoverage.xml
+```
+Прежние сценарии работают как раньше: `-e <ИмяРасширения> -s <ПутьКИсходникамРасширения>` для одного расширения, `convert -s <ПутьКИсходникам>` без `-e` и `--extension` (атрибут `extension` при этом не учитывается), сырые файлы предыдущих версий.
 
 При завершении работы создаётся файл покрытия вида:
 ```xml

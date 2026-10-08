@@ -35,11 +35,23 @@ public class ConvertOptions {
     @Option(names = {"-c", "--convertFile"}, description = "Input file name with RAW xml coverage data", required = true)
     private File inputRawXmlFile;
 
+    @Option(names = {"-e", "--extensionName"},
+            description = "Extension name of sources from --srcDir. Empty - configuration", defaultValue = "")
+    private String extensionName;
+
     public File getInputRawXmlFile() {
         return inputRawXmlFile;
     }
 
     public void setInputRawXmlFile(File inputRawXmlFile) {
         this.inputRawXmlFile = inputRawXmlFile;
+    }
+
+    public String getExtensionName() {
+        return extensionName;
+    }
+
+    public void setExtensionName(String extensionName) {
+        this.extensionName = extensionName;
     }
 }

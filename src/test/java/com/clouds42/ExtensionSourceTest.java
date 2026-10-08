@@ -108,4 +108,16 @@ class ExtensionSourceTest {
                 "--extension", "Доработки=src/cfe/Доработки"};
         assertEquals(CommandLine.ExitCode.USAGE, Coverage41C.getCommandLine().execute(arguments));
     }
+
+    @Test
+    void extensionOfSrcDirIsNotRepeatedOnConvert() {
+        String[] arguments = {
+                PipeMessages.CONVERT_COMMAND,
+                "-P", "src/test/resources/extensions",
+                "-s", "src/cfe/Доработки",
+                "-e", "Доработки",
+                "--extension", "Доработки=src/cfe/Доработки",
+                "-c", "src/test/resources/extensions/coverage/internal.xml"};
+        assertEquals(CommandLine.ExitCode.USAGE, Coverage41C.getCommandLine().execute(arguments));
+    }
 }

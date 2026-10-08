@@ -114,6 +114,20 @@ public class ConvertTest {
     }
 
     @Test
+    void testExtensionAsSrcDirWithExtensions() {
+        // -s указывает на расширение (-e), остальные расширения - через --extension, конфигурации нет
+        String outputXmlFileName = "build/genericCoverageCnvExtensionSrcDirWithExtensions.xml";
+
+        int result = convertExtensions("internal.xml", outputXmlFileName,
+                "-e", "Доработки",
+                "-s", "src/cfe/Доработки",
+                "--extension", "Второе=src/cfe/Второе");
+        assertEquals(0, result);
+
+        TestUtils.assertCoverageEqual(EXTENSIONS_COVERAGE_DIR + "extensions.xml", outputXmlFileName);
+    }
+
+    @Test
     void testRawFileOfPreviousVersion() {
         // сырой файл 2.7.3 без атрибута extension: все модули считаются модулями конфигурации
         String outputXmlFileName = "build/genericCoverageCnvPreviousVersion.xml";

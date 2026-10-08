@@ -69,14 +69,15 @@ public class ConvertCommand implements Callable<Integer> {
     @Override
     public Integer call() throws Exception {
 
-        metadataOptions.validate("");
+        String srcDirExtensionName = convertOptions.getExtensionName();
+        metadataOptions.validate(srcDirExtensionName);
 
         Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<URI,Map<BigDecimal, Integer>>();
 
-        Map<String, URI> uriListByKey = Utils.readMetadata(metadataOptions, "", coverageData);
+        Map<String, URI> uriListByKey = Utils.readMetadata(metadataOptions, srcDirExtensionName, coverageData);
 
-        // without --extension the extension attribute is ignored: -s may point to sources of any extension, as before
-        boolean matchExtensions = !metadataOptions.getExtensionSources().isEmpty();
+        // without -e and --extension the extension attribute is ignored: -s may point to sources of any extension, as before
+        boolean matchExtensions = !srcDirExtensionName.isEmpty() || !metadataOptions.getExtensionSources().isEmpty();
         boolean rawFileHasExtensions = false;
 
         FileInputStream fileIS = new FileInputStream(convertOptions.getInputRawXmlFile());
