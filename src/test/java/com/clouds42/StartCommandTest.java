@@ -232,6 +232,46 @@ class StartCommandTest {
     }
 
     @Test
+    void malformedMeasurementInFlightWhenStopBeginsFailsWhileSavingGoodMeasurements() throws Exception {
+        Future<Integer> collector = start();
+        dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
+        DBGUIExtCmdInfoMeasure mixed = FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 4, 1);
+        mixed.getMeasure().getModuleData().getFirst().setModuleID(null);
+        mixed.getMeasure().getModuleData().add(
+                FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 7, 1).getMeasure().getModuleData().getFirst());
+
+        dbgs.pause("pingDebugUIParams");
+        dbgs.pause("setMeasureMode");
+        Future<Integer> stop;
+        try {
+            dbgs.awaitPaused("pingDebugUIParams");
+            stop = executor.submit(() -> send(PipeMessages.EXIT_COMMAND));
+            dbgs.awaitPaused("setMeasureMode");
+            dbgs.queueEvents(mixed, FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 10, 1));
+            dbgs.resume("pingDebugUIParams");
+            dbgs.awaitEventProcessing();
+        } finally {
+            dbgs.resume("pingDebugUIParams");
+            dbgs.resume("setMeasureMode");
+        }
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, stop.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(Map.of(2, true, 7, true, 10, true, 11, false), coverage());
+    }
+
+    @Test
+    void stopRejectsProxyReplyToProfilingDisableAndSavesPartialCoverage() throws Exception {
+        Future<Integer> collector = start();
+        dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
+        dbgs.sendProxyReplyWhenProfilingIsDisabled();
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(Map.of(2, true, 10, false, 11, false), coverage());
+    }
+
+    @Test
     void stopFailsAndWritesPartialCoverageWhenProfilingCannotBeDisabled() throws Exception {
         Future<Integer> start = start();
         dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
@@ -477,6 +517,33 @@ class StartCommandTest {
 
         assertEquals(CommandLine.ExitCode.OK, start.get(TIMEOUT, TimeUnit.SECONDS));
         assertEquals(Map.of(5, true), coverage("/" + OBJECT_ID + "/" + PROPERTY_ID));
+    }
+
+    @Test
+    void rawLiveMeasureWithoutLineNumberKeepsValidLines() throws Exception {
+        Future<Integer> collector = startRaw();
+        dbgs.deliver(measureWithMissingLineNumber(7));
+
+        assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(Map.of(7, true), coverage("/" + OBJECT_ID + "/" + PROPERTY_ID));
+    }
+
+    @Test
+    void rawFinalMeasureWithoutLineNumberFailsAndKeepsValidLines() throws Exception {
+        Future<Integer> collector = startRaw();
+        dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
+        dbgs.deliverOnMeasureOff(measureWithMissingLineNumber(10));
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(Map.of(2, true, 10, true), coverage("/" + OBJECT_ID + "/" + PROPERTY_ID));
+    }
+
+    private static DBGUIExtCmdInfoMeasure measureWithMissingLineNumber(int validLine) {
+        DBGUIExtCmdInfoMeasure packet = FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 4, 1, validLine, 1);
+        packet.getMeasure().getModuleData().getFirst().getLineInfo().getFirst().setLineNo(null);
+        return packet;
     }
 
     @Test

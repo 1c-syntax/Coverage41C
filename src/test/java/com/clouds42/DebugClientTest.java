@@ -215,6 +215,36 @@ class DebugClientTest {
     }
 
     @Test
+    void setMeasureModeAcceptsEmptySuccessfulResponse() throws Exception {
+        respond(200, null, "");
+        client.toggleProfiling(UUID.randomUUID());
+    }
+
+    @Test
+    void setMeasureModeAcceptsNoContent() throws Exception {
+        respond(204, null, "");
+        client.toggleProfiling(null);
+    }
+
+    @Test
+    void setMeasureModeRejectsProxySuccess() throws Exception {
+        respond(200, "text/plain", "Maintenance in progress");
+        assertThrows(RuntimeDebugClientException.class, () -> client.toggleProfiling(null));
+    }
+
+    @Test
+    void setMeasureModeRejectsUnexpectedXmlBody() throws Exception {
+        respond(200, "application/xml", "<unrelated/>");
+        assertThrows(RuntimeDebugClientException.class, () -> client.toggleProfiling(UUID.randomUUID()));
+    }
+
+    @Test
+    void initSettingsStillAcceptsSuccessfulResponseWithBody() throws Exception {
+        respond(200, "text/plain", "Settings accepted");
+        client.initSettings(false);
+    }
+
+    @Test
     void suspendedInitialSettingsAreSentToDebugger() throws Exception {
         try (FakeDebugServer dbgs = new FakeDebugServer()) {
             client.configure(dbgs.url(), UUID.randomUUID(), "DefAlias");

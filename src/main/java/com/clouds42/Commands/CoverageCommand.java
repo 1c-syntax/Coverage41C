@@ -122,6 +122,8 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     private final AtomicBoolean shutDown = new AtomicBoolean(false);
     private volatile boolean coverageWritten = true;
     private volatile boolean profilingFinished = true;
+    private boolean collectingFinalMeasures;
+    private volatile boolean finalMeasureFailed;
     private boolean rawMode = false;
     private volatile boolean systemStarted = false;
     private volatile boolean mainLoopRunning = false;
@@ -312,10 +314,11 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                 if (stopExecution.get()) {
                     return;
                 }
-                logger.info("Command: {}", command.getCmdID().getName());
-                // One malformed command must not end measuring and lose collected coverage.
+                DBGUIExtCmds commandType = command.getCmdID();
+                logger.info("Command: {}", commandType.getName());
+                // One malformed command must not discard later measurements.
                 try {
-                    if (command.getCmdID() == DBGUIExtCmds.MEASURE_RESULT_PROCESSING) {
+                    if (commandType == DBGUIExtCmds.MEASURE_RESULT_PROCESSING) {
                         DBGUIExtCmdInfoMeasureImpl measure = (DBGUIExtCmdInfoMeasureImpl) command;
                         if (targets.needsLookup(measure)) {
                             String id = UserTargets.targetIdOf(measure);
@@ -328,80 +331,111 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                             }
                         }
                         if (targets.verdict(measure, loggingOptions.isVerbose()) == UserTargets.Verdict.ACCEPTED) {
-                            synchronized (coverageData) {
-                                if (!stopExecution.get()) {
-                                    measureResultProcessing(uriListByKey, externalDataProcessorsUriSet, measure);
-                                }
-                            }
+                            measureResultProcessing(uriListByKey, externalDataProcessorsUriSet, measure);
                         }
-                    } else if (command.getCmdID() == DBGUIExtCmds.TARGET_STARTED) {
+                    } else if (commandType == DBGUIExtCmds.TARGET_STARTED) {
                         targetStarted((DBGUIExtCmdInfoStartedImpl) command);
-                    } else if (command.getCmdID() == DBGUIExtCmds.TARGET_QUIT) {
+                    } else if (commandType == DBGUIExtCmds.TARGET_QUIT) {
                         // The target stays known: its last measures may arrive after this event.
                         DebugTargetId quit = command.getTargetID();
                         logger.info("Target {} quit", quit == null ? null : quit.getId());
                     }
                 } catch (RuntimeException e) {
-                    logger.error("Can't process command {}: {}", command.getCmdID().getName(), e, e);
+                    if (commandType == DBGUIExtCmds.MEASURE_RESULT_PROCESSING) {
+                        reportMeasureFailure(e);
+                    } else {
+                        logger.error("Can't process command {}: {}", commandType.getName(), e, e);
+                    }
                 }
             }
             pingsProcessed.incrementAndGet();
         }
     }
 
-    private void measureResultProcessing(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet, DBGUIExtCmdInfoMeasureImpl command) {
-        logger.info("Found MEASURE_RESULT_PROCESSING command");
-        PerformanceInfoMain measure = command.getMeasure();
-        EList<PerformanceInfoModule> moduleInfoList = measure.getModuleData();
-        moduleInfoList.forEach(moduleInfo -> {
-            BSLModuleIdInternal moduleId = moduleInfo.getModuleID();
-            String moduleUrl = moduleId.getURL();
-            if (loggingOptions.isVerbose() && !moduleUrl.isEmpty() && !externalDataProcessorsUriSet.contains(moduleUrl)) {
-                logger.info("Found external data processor: {}", moduleUrl);
-                externalDataProcessorsUriSet.add(moduleUrl);
+    private void measureResultProcessing(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet,
+                                         DBGUIExtCmdInfoMeasureImpl command) {
+        synchronized (coverageData) {
+            if (stopExecution.get()) {
+                return;
             }
-            String moduleExtensionName = Objects.requireNonNullElse(moduleId.getExtensionName(), "");
-            if (rawMode || (metadataOptions.usesNamedSources() && moduleUrl.isEmpty())
-                    || (moduleUrl.isEmpty() && metadataOptions.hasExtensionSources(moduleExtensionName))
-                    || (filterOptions.getExtensionName().equals(moduleExtensionName)
-                    && filterOptions.getExternalDataProcessorUrl().equals(moduleUrl))) {
-                String objectId = moduleId.getObjectID();
-                String propertyId = moduleId.getPropertyID();
-                String key = metadataOptions.hasMultipleSources()
-                        ? SourceKey.of(objectId, propertyId, moduleExtensionName, moduleUrl)
-                        : Utils.getUriKey(objectId, propertyId);
-
-                URI uri;
-                if (!rawMode) {
-                    uri = uriListByKey.get(key);
-                } else {
-                    uri = Utils.getRawUri(moduleExtensionName, moduleUrl, key);
+            logger.info("Found MEASURE_RESULT_PROCESSING command");
+            PerformanceInfoMain measure = command.getMeasure();
+            if (measure == null) {
+                reportMeasureFailure(new IllegalArgumentException("Missing measurement data"));
+                return;
+            }
+            for (PerformanceInfoModule moduleInfo : measure.getModuleData()) {
+                try {
+                    mergeMeasuredModule(uriListByKey, externalDataProcessorsUriSet, moduleInfo);
+                } catch (RuntimeException e) {
+                    reportMeasureFailure(e);
                 }
-                if (uri == null) {
-                    logger.info("Couldn't find object id {}, property id {} in sources!", objectId, propertyId);
-                } else {
-                    EList<PerformanceInfoLine> lineInfoList = moduleInfo.getLineInfo();
-                    lineInfoList.forEach(lineInfo -> {
-                        BigDecimal lineNo = lineInfo.getLineNo();
-                        Map<BigDecimal, Integer> coverMap = coverageData.get(uri);
-                        if (!CoverageHits.add(coverMap, lineNo, lineInfo.getFrequency().intValue(), rawMode)) {
-                            if (loggingOptions.isVerbose()) {
-                                logger.info("Can't find line to cover {} in module {}", lineNo, uri);
-                                try (Stream<String> lines = Files.lines(Paths.get(uri))) {
-                                    Optional<String> first = lines.skip(lineNo.longValue() - 1).findFirst();
-                                    if (first.isPresent()) {
-                                        String specific_line_n = first.get();
-                                        logger.info(">>> {}", specific_line_n);
-                                    }
-                                } catch (Exception e) {
-                                    logger.error(e.getLocalizedMessage());
+            }
+        }
+    }
+
+    private void reportMeasureFailure(RuntimeException failure) {
+        synchronized (coverageData) {
+            if (collectingFinalMeasures && !stopExecution.get()) {
+                finalMeasureFailed = true;
+            }
+        }
+        logger.error("Can't process measure: {}", failure.getMessage(), failure);
+    }
+
+    private void mergeMeasuredModule(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet,
+                                     PerformanceInfoModule moduleInfo) {
+        BSLModuleIdInternal moduleId = Objects.requireNonNull(moduleInfo.getModuleID(), "Missing module identifier");
+        String moduleUrl = moduleId.getURL();
+        if (loggingOptions.isVerbose() && !moduleUrl.isEmpty() && !externalDataProcessorsUriSet.contains(moduleUrl)) {
+            logger.info("Found external data processor: {}", moduleUrl);
+            externalDataProcessorsUriSet.add(moduleUrl);
+        }
+        String moduleExtensionName = Objects.requireNonNullElse(moduleId.getExtensionName(), "");
+        if (rawMode || (metadataOptions.usesNamedSources() && moduleUrl.isEmpty())
+                || (moduleUrl.isEmpty() && metadataOptions.hasExtensionSources(moduleExtensionName))
+                || (filterOptions.getExtensionName().equals(moduleExtensionName)
+                && filterOptions.getExternalDataProcessorUrl().equals(moduleUrl))) {
+            String objectId = moduleId.getObjectID();
+            String propertyId = moduleId.getPropertyID();
+            String key = metadataOptions.hasMultipleSources()
+                    ? SourceKey.of(objectId, propertyId, moduleExtensionName, moduleUrl)
+                    : Utils.getUriKey(objectId, propertyId);
+
+            URI uri;
+            if (!rawMode) {
+                uri = uriListByKey.get(key);
+            } else {
+                uri = Utils.getRawUri(moduleExtensionName, moduleUrl, key);
+            }
+            if (uri == null) {
+                logger.info("Couldn't find object id {}, property id {} in sources!", objectId, propertyId);
+            } else {
+                EList<PerformanceInfoLine> lineInfoList = moduleInfo.getLineInfo();
+                lineInfoList.forEach(lineInfo -> {
+                    BigDecimal lineNo = lineInfo.getLineNo();
+                    if (lineNo == null) {
+                        reportMeasureFailure(new IllegalArgumentException("Missing line number"));
+                        return;
+                    }
+                    Map<BigDecimal, Integer> coverMap = coverageData.get(uri);
+                    if (!CoverageHits.add(coverMap, lineNo, lineInfo.getFrequency().intValue(), rawMode)) {
+                        if (loggingOptions.isVerbose()) {
+                            logger.info("Can't find line to cover {} in module {}", lineNo, uri);
+                            try (Stream<String> lines = Files.lines(Paths.get(uri))) {
+                                Optional<String> first = lines.skip(lineNo.longValue() - 1).findFirst();
+                                if (first.isPresent()) {
+                                    String specific_line_n = first.get();
+                                    logger.info(">>> {}", specific_line_n);
                                 }
+                            } catch (Exception e) {
+                                logger.error(e.getLocalizedMessage());
                             }
                         }
-                    });
-                }
+                    }
+                });
             }
-        });
+        }
     }
 
     private void startSystem(UUID measureUuid) throws RuntimeDebugClientException {
@@ -461,6 +495,10 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
             if (!stopExecution.get()) {
                 closeCollectionCommands();
                 if (serverPipeOut != null && mainLoopRunning) {
+                    synchronized (coverageData) {
+                        // Include measurements returned by pings already in flight.
+                        collectingFinalMeasures = true;
+                    }
                     profilingFinished = disableProfiling();
                     if (profilingFinished) {
                         try {
@@ -471,12 +509,10 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                             interrupted = true;
                         }
                     }
-                    stopExecution.set(true);
-                    coverageWritten = dumpCoverage();
+                    finishCollection();
                 } else {
                     // The process may be killed soon. Save what was collected before contacting dbgs.
-                    stopExecution.set(true);
-                    coverageWritten = dumpCoverage();
+                    finishCollection();
                     profilingFinished = disableProfiling() && serverPipeOut == null;
                 }
                 logger.info("Bye!");
@@ -491,8 +527,15 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         }
     }
 
+    private void finishCollection() {
+        synchronized (coverageData) {
+            stopExecution.set(true);
+            coverageWritten = dumpCoverage();
+        }
+    }
+
     private boolean collectionSucceeded() {
-        return profilingFinished && coverageWritten && targets.matchedAnyTarget();
+        return profilingFinished && !finalMeasureFailed && coverageWritten && targets.matchedAnyTarget();
     }
 
     private boolean disableProfiling() {

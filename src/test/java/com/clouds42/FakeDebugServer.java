@@ -83,6 +83,7 @@ class FakeDebugServer implements AutoCloseable {
     private final List<DBGUIExtCmdInfoBase> eventsOnMeasureOff = new CopyOnWriteArrayList<>();
     private final AtomicInteger pings = new AtomicInteger();
     private volatile boolean proxyPings;
+    private volatile boolean proxyProfilingDisable;
     private volatile AttachDebugUIResult attachResult = AttachDebugUIResult.REGISTERED;
     private volatile String apiVersion = "8.3.24";
     private volatile boolean compressResponses;
@@ -176,6 +177,10 @@ class FakeDebugServer implements AutoCloseable {
         proxyPings = true;
     }
 
+    void sendProxyReplyWhenProfilingIsDisabled() {
+        proxyProfilingDisable = true;
+    }
+
     void setTargets(DebugTargetId... newTargets) {
         targets = List.of(newTargets);
     }
@@ -195,9 +200,17 @@ class FakeDebugServer implements AutoCloseable {
 
     // Отдаёт события в очередной ping и ждёт, пока Coverage41C их обработает и придёт за следующими.
     void deliver(DBGUIExtCmdInfoBase... newEvents) throws InterruptedException {
+        queueEvents(newEvents);
+        awaitEventProcessing();
+    }
+
+    void queueEvents(DBGUIExtCmdInfoBase... newEvents) {
         synchronized (events) {
             events.addAll(List.of(newEvents));
         }
+    }
+
+    void awaitEventProcessing() throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
         while (!events.isEmpty()) {
             checkDeadline(deadline);
@@ -297,7 +310,8 @@ class FakeDebugServer implements AutoCloseable {
                 pause.arrived.countDown();
                 pause.release.await();
             }
-            if (command.equals("setMeasureMode") && !body.contains("measureModeSeanceID")) {
+            boolean turningProfilingOff = command.equals("setMeasureMode") && !body.contains("measureModeSeanceID");
+            if (turningProfilingOff) {
                 events.addAll(eventsOnMeasureOff);
                 eventsOnMeasureOff.clear();
             }
@@ -316,7 +330,8 @@ class FakeDebugServer implements AutoCloseable {
                 exchange.sendResponseHeaders(failure, -1);
                 return;
             }
-            if (proxyPings && command.equals("pingDebugUIParams")) {
+            if ((proxyPings && command.equals("pingDebugUIParams"))
+                    || (proxyProfilingDisable && turningProfilingOff)) {
                 Thread.sleep(20);
                 byte[] message = "Upstream unavailable".getBytes(StandardCharsets.UTF_8);
                 exchange.getResponseHeaders().set("Content-Type", "text/plain");

@@ -359,7 +359,11 @@ public class DebugClient extends AbstractDebugClient{
         }
 
         Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "setMeasureMode");
-        this.performRuntimeHttpRequest(request, this.initRequest(requestContent));
+        var response = requestResponse(request, this.initRequest(requestContent));
+        if (response.hasBody()) {
+            throw new RuntimeDebugClientException("Unexpected response body to setMeasureMode (HTTP "
+                    + response.status() + ")");
+        }
     }
 
     public boolean notifyInfobaseUpdateStart() throws RuntimeDebugClientException {

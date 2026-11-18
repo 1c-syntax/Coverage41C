@@ -118,11 +118,16 @@ public abstract class AbstractDebugClient {
         return requestResponse(client, request, requestContent, responseClass).model();
     }
 
-    protected record DebugResponse<T extends EObject>(int status, T model) {}
+    protected record DebugResponse<T extends EObject>(int status, T model, boolean hasBody) {}
 
     protected <T extends EObject> DebugResponse<T> requestResponse(Request request, Class<T> responseClass)
             throws RuntimeDebugClientException {
         return requestResponse(this, request, null, responseClass);
+    }
+
+    protected DebugResponse<EObject> requestResponse(Request request, EObject requestContent)
+            throws RuntimeDebugClientException {
+        return requestResponse(this, request, requestContent, null);
     }
 
     private static <T extends EObject> DebugResponse<T> requestResponse(AbstractDebugClient client, Request request,
@@ -142,14 +147,15 @@ public abstract class AbstractDebugClient {
             int status = response.getStatus();
             if (HttpStatus.isSuccess(status)) {
                 byte[] body = response.getContent();
+                boolean hasBody = body != null && body.length > 0;
                 if (status == HttpStatus.NO_CONTENT_204 || responseClass == null
-                        || !"application/xml".equalsIgnoreCase(response.getMediaType())
-                        || body == null || body.length == 0) {
-                    return new DebugResponse<>(status, null);
+                        || !"application/xml".equalsIgnoreCase(response.getMediaType()) || !hasBody) {
+                    return new DebugResponse<>(status, null, hasBody);
                 }
                 try {
                     String xml = getStringFromContent(response);
-                    return new DebugResponse<>(status, responseClass.cast(client.serializer.deserialize(xml, responseClass)));
+                    return new DebugResponse<>(status, responseClass.cast(client.serializer.deserialize(xml, responseClass)),
+                            true);
                 } catch (IOException | ClassCastException e) {
                     throw new RuntimeDebugClientException("Error occurred while processing response", e);
                 }
