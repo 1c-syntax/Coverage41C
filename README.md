@@ -151,4 +151,180 @@ Coverage41C validate -P . -s src/cf \
 
 Для сборки нужны Java 21 и библиотеки отладчика EDT. Укажите `EDT_LOCATION` с путём к ним и запустите `./gradlew test`. Тесты сборщика используют локальную имитацию сервера отладки. Для интеграционного прогона с установленной платформой 1С, `dbgs`, OneScript и `vrunner` предусмотрена задача `./gradlew integrationTest`.
 
-Справка по параметрам доступна через `Coverage41C --help`, `Coverage41C start --help`, `Coverage41C convert --help` и `Coverage41C validate --help`.
+## Справка из командной строки
+
+```text
+> Coverage41C --help
+Usage: Coverage41C [-hV] [COMMAND]
+Make measures from 1C:Enterprise and save them to genericCoverage.xml file
+  -h, --help      Show this help message and exit.
+  -V, --version   Print version information and exit.
+Commands:
+  start     Start measure and save coverage data to file
+  stop      Stop main application and save coverage to file
+  check     Check is main application ready
+  clean     Clear coverage data in main application
+  dump      Save coverage data to file
+  stats     Print coverage statistic report
+  convert   Convert results from internal uuid-based format
+  validate  Validate coverage configuration and markers without measuring
+```
+
+### Параметры `start`
+
+```text
+> Coverage41C start --help
+Usage: Coverage41C start [-hV] [-p] [--verbose] [--config=<configFile>]
+                         [-e=<extensionName>]
+                         [--exclusion-report=<exclusionReportFile>]
+                         [-f=<outputFormat>] [-i=<infobaseAlias>]
+                         [-o=<outputFile>] [--opid=<opid>]
+                         [-P=<projectDirName>] [-p:env=<passwordEnv>]
+                         [-r=<removeSupport>] [-s=<srcDirName>]
+                         [-t=<pingTimeout>] [-u=<debugServerUrl>] [-u:
+                         file=<debugServerUrlFileName>]
+                         [-x=<externalDataProcessorUrl>]
+                         [--extension=<extensionName>=<path>]...
+                         [--include-user=USER]... [--source=NAME=DIR]... [-a
+                         [=<autoconnectTargets>...]]... [-n
+                         [=<debugAreaNames>...]]...
+Start measure and save coverage data to file
+  -i, --infobase=<infobaseAlias>
+                            InfoBase name. File infobase uses 'DefAlias' name.
+                              Default - DefAlias
+  -u, --debugger=<debugServerUrl>
+                            Debugger url. Default - http://127.0.0.1:1550/
+      -u:file, --debugger:file=<debugServerUrlFileName>
+                            Debugger url file name
+  -e, --extensionName=<extensionName>
+                            Extension name
+  -x, --externalDataProcessor=<externalDataProcessorUrl>
+                            External data processor (or external report) url
+  -s, --srcDir=<srcDirName> Directory with sources exported to xml
+  -P, --projectDir=<projectDirName>
+                            Directory with project
+  -r, --removeSupport=<removeSupport>
+                            Remove support values: NOT_EDITABLE,
+                              EDITABLE_SUPPORT_ENABLED, NOT_SUPPORTED, NONE.
+                              Default - NONE
+      --config=<configFile> Coverage configuration file or directory with *.
+                              json files
+      --exclusion-report=<exclusionReportFile>
+                            Write coverage exclusion report to JSON file
+      --source=NAME=DIR     Source directory relative to -P; repeat for each
+                              extension (empty name for main configuration)
+      --extension=<extensionName>=<path>
+                            Extension source directory relative to -P. Can be
+                              repeated.
+  -o, --out=<outputFile>    Output file name
+  -f, --format=<outputFormat>
+                            Output file format: GENERIC_COVERAGE, LCOV,
+                              COBERTURA. Default - GENERIC_COVERAGE
+  -p, --password            Dbgs password
+      -p:env, --password:env=<passwordEnv>
+                            Password environment variable name
+  -n, --areanames[=<debugAreaNames>...]
+                            Debug area names (not for general use!)
+  -a, --autoconnectTargets[=<autoconnectTargets>...]
+                            Autoconnect debug targets (not for general use!):
+                              Unknown, Client, ManagedClient, WEBClient,
+                              COMConnector, Server, ServerEmulation,
+                              WEBService, HTTPService, OData, JOB, JobFileMode,
+                              MobileClient, MobileServer, MobileJobFileMode,
+                              MobileManagedClient, MobileManagedServer
+  -t, --timeout=<pingTimeout>
+                            Ping timeout. Default - 1000
+      --verbose             If you need more logs. Default - false
+      --opid=<opid>         Owner process PID
+      --include-user=USER   Collect measures only from debug targets of this
+                              infobase user (exact name); repeat for several
+                              users. Replaces includeUsers of --config
+  -h, --help                Show this help message and exit.
+  -V, --version             Print version information and exit.
+```
+
+<details>
+<summary>Параметры convert</summary>
+
+```text
+> Coverage41C convert --help
+Usage: Coverage41C convert [-hV] [--verbose] -c=<inputRawXmlFile>
+                           [--config=<configFile>] [-e=<extensionName>]
+                           [--exclusion-report=<exclusionReportFile>]
+                           [-f=<outputFormat>] [-o=<outputFile>]
+                           [-P=<projectDirName>] [-r=<removeSupport>]
+                           [-s=<srcDirName>] [-x=<externalDataProcessorUrl>]
+                           [--extension=<extensionName>=<path>]...
+                           [--source=NAME=DIR]...
+Convert results from internal uuid-based format
+  -o, --out=<outputFile>   Output file name
+  -f, --format=<outputFormat>
+                           Output file format: GENERIC_COVERAGE, LCOV,
+                             COBERTURA. Default - GENERIC_COVERAGE
+  -c, --convertFile=<inputRawXmlFile>
+                           Input file name with RAW xml coverage data
+  -s, --srcDir=<srcDirName>
+                           Directory with sources exported to xml
+  -P, --projectDir=<projectDirName>
+                           Directory with project
+  -r, --removeSupport=<removeSupport>
+                           Remove support values: NOT_EDITABLE,
+                             EDITABLE_SUPPORT_ENABLED, NOT_SUPPORTED, NONE.
+                             Default - NONE
+      --config=<configFile>
+                           Coverage configuration file or directory with *.json
+                             files
+      --exclusion-report=<exclusionReportFile>
+                           Write coverage exclusion report to JSON file
+      --source=NAME=DIR    Source directory relative to -P; repeat for each
+                             extension (empty name for main configuration)
+      --extension=<extensionName>=<path>
+                           Extension source directory relative to -P. Can be
+                             repeated.
+      --verbose            If you need more logs. Default - false
+  -e, --extensionName=<extensionName>
+                           Extension name
+  -x, --externalDataProcessor=<externalDataProcessorUrl>
+                           External data processor (or external report) url
+  -h, --help               Show this help message and exit.
+  -V, --version            Print version information and exit.
+```
+
+</details>
+
+<details>
+<summary>Параметры validate</summary>
+
+```text
+> Coverage41C validate --help
+Usage: Coverage41C validate [-hV] [--strict] [--config=<configFile>]
+                            [--exclusion-report=<exclusionReportFile>]
+                            [-P=<projectDirName>] [-r=<removeSupport>]
+                            [-s=<srcDirName>]
+                            [--extension=<extensionName>=<path>]...
+                            [--source=NAME=DIR]...
+Validate coverage configuration and markers without measuring
+  -s, --srcDir=<srcDirName>
+                          Directory with sources exported to xml
+  -P, --projectDir=<projectDirName>
+                          Directory with project
+  -r, --removeSupport=<removeSupport>
+                          Remove support values: NOT_EDITABLE,
+                            EDITABLE_SUPPORT_ENABLED, NOT_SUPPORTED, NONE.
+                            Default - NONE
+      --config=<configFile>
+                          Coverage configuration file or directory with *.json
+                            files
+      --exclusion-report=<exclusionReportFile>
+                          Write coverage exclusion report to JSON file
+      --source=NAME=DIR   Source directory relative to -P; repeat for each
+                            extension (empty name for main configuration)
+      --extension=<extensionName>=<path>
+                          Extension source directory relative to -P. Can be
+                            repeated.
+      --strict            Fail on warnings. Default - false
+  -h, --help              Show this help message and exit.
+  -V, --version           Print version information and exit.
+```
+
+</details>
