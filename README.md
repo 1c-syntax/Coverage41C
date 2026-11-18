@@ -330,9 +330,10 @@ Validate coverage configuration and markers without measuring
 
 <details>
 <summary>Запуск тестов для разработчиков</summary>
+<br>
 
-Укажите `EDT_LOCATION`, как описано в инструкции по установке, и запустите `./gradlew test`. Тесты сборщика используют локальную имитацию сервера отладки.
-
-Для интеграционного прогона с установленной платформой 1С, `dbgs`, OneScript и `vrunner` используйте `./gradlew integrationTest`.
+> Укажите `EDT_LOCATION`, как описано в инструкции по установке, и запустите `./gradlew test`. Тесты сборщика используют локальную имитацию сервера отладки.
+>
+> Для интеграционного прогона с установленной платформой 1С, `dbgs`, OneScript и `vrunner` используйте `./gradlew integrationTest`.
 
 </details>
