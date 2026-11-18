@@ -170,7 +170,8 @@ Commands:
   validate  Validate coverage configuration and markers without measuring
 ```
 
-### Параметры `start`
+<details>
+<summary>Параметры start</summary>
 
 ```text
 > Coverage41C start --help
@@ -242,6 +243,8 @@ Start measure and save coverage data to file
   -h, --help                Show this help message and exit.
   -V, --version             Print version information and exit.
 ```
+
+</details>
 
 <details>
 <summary>Параметры convert</summary>
