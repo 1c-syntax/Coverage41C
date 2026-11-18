@@ -30,6 +30,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.FileSystemLoopException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -169,17 +170,41 @@ class ExclusionRulesTest {
     @Test
     void rejectsNewJsonReportInLinkedConfigDirectory() throws Exception {
         Path directory = Files.createDirectory(tempDir.resolve("conf"));
-        Path alias = tempDir.resolve("alias");
-        try {
-            Files.createSymbolicLink(alias, directory);
-        } catch (IOException | UnsupportedOperationException e) {
-            assumeTrue(false, "Symbolic links unavailable: " + e.getMessage());
-        }
+        createSymbolicLink(tempDir.resolve("alias"), directory);
         write("conf/a.json", "{'exclusionReport':'alias/report.json','exclude':{'objects':['Catalog.А']}}");
 
         String message = assertThrows(IllegalArgumentException.class, () -> load(directory.toFile())).getMessage();
         assertTrue(message.contains("is inside the configuration directory"), message);
         assertFalse(Files.exists(directory.resolve("report.json")));
+    }
+
+    @Test
+    void configuredReportCannotCreateRulesViaFileLinks() throws Exception {
+        Path rules = Files.createDirectory(tempDir.resolve("rules"));
+        Path exports = Files.createDirectory(tempDir.resolve("exports"));
+        Path entryPoint = tempDir.resolve("output");
+        Path redirect = exports.resolve("redirect");
+        Path newRulesFile = rules.resolve("summary.JSON");
+
+        createSymbolicLink(entryPoint, redirect);
+        createSymbolicLink(redirect, Path.of("..", "rules", "summary.JSON"));
+        write("rules/app.json", "{'exclusionReport':'output','auto':{'lines':['Sample']}}");
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> load(rules.toFile()));
+        assertTrue(error.getMessage().startsWith("app.json → exclusionReport: " + entryPoint), error.getMessage());
+        assertFalse(Files.exists(newRulesFile));
+    }
+
+    @Test
+    void cyclicReportLinkIsDetectedAfterResolvingItsParent() throws Exception {
+        Path rules = Files.createDirectory(tempDir.resolve("rules"));
+        Files.createDirectory(tempDir.resolve("nested"));
+        Path report = tempDir.resolve("destination");
+        createSymbolicLink(report, Path.of("nested", "..", "destination"));
+
+        FileSystemLoopException error = assertThrows(FileSystemLoopException.class,
+                () -> ExclusionRules.rejectReportInsideConfigDirectory(rules.toFile(), report.toFile(), "--exclusion-report"));
+        assertEquals(report.toString(), error.getFile());
     }
 
     @Test
@@ -872,6 +897,14 @@ class ExclusionRulesTest {
         Path file = tempDir.resolve(name);
         Files.writeString(file, json.replace('\'', '"'));
         return file.toFile();
+    }
+
+    private static void createSymbolicLink(Path link, Path target) {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (IOException | UnsupportedOperationException e) {
+            assumeTrue(false, "Symbolic links unavailable: " + e.getMessage());
+        }
     }
 
     private ExclusionRules load(File path) throws IOException {

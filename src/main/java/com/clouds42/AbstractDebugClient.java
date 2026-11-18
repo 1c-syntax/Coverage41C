@@ -51,6 +51,7 @@ import java.net.MalformedURLException;
 import java.net.URI;
 import java.net.URL;
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -112,11 +113,24 @@ public abstract class AbstractDebugClient {
         AbstractDebugClient.performRuntimeHttpRequest(this, request, requestContent, null);
     }
 
-    protected static <T extends EObject> T performRuntimeHttpRequest(AbstractDebugClient abstractDebugClient, Request request, EObject requestContent, Class<T> responseClass) throws RuntimeDebugClientException {
+    protected static <T extends EObject> T performRuntimeHttpRequest(AbstractDebugClient client, Request request,
+            EObject requestContent, Class<T> responseClass) throws RuntimeDebugClientException {
+        return requestResponse(client, request, requestContent, responseClass).model();
+    }
+
+    protected record DebugResponse<T extends EObject>(int status, T model) {}
+
+    protected <T extends EObject> DebugResponse<T> requestResponse(Request request, Class<T> responseClass)
+            throws RuntimeDebugClientException {
+        return requestResponse(this, request, null, responseClass);
+    }
+
+    private static <T extends EObject> DebugResponse<T> requestResponse(AbstractDebugClient client, Request request,
+            EObject requestContent, Class<T> responseClass) throws RuntimeDebugClientException {
         try {
             if (requestContent != null) {
                 try {
-                    String serializedRequest = abstractDebugClient.serializer.serialize(requestContent);
+                    String serializedRequest = client.serializer.serialize(requestContent);
                     request.body(new StringRequestContent(serializedRequest));
                 } catch (IOException e) {
                     throw new RuntimeDebugClientException("Error occurred while processing request", e);
@@ -127,28 +141,23 @@ public abstract class AbstractDebugClient {
             ContentResponse response = listener.send().get(60L, TimeUnit.SECONDS);
             int status = response.getStatus();
             if (HttpStatus.isSuccess(status)) {
-                if (responseClass != null && status != 204) {
-                    String type = response.getMediaType();
-                    if(!type.equalsIgnoreCase("application/xml")) {
-                        return null;
-                    }
-                    try {
-                        String contentString = getStringFromContent(response);
-                        return abstractDebugClient.serializer.deserialize(contentString, responseClass);
-                    } catch (IOException e) {
-                        logger.error("Get stuff from server.");
-                        e.printStackTrace();
-                        throw new RuntimeDebugClientException(
-                                "Error occurred while processing response", e);
-                    }
-                } else {
-                    return null;
+                byte[] body = response.getContent();
+                if (status == HttpStatus.NO_CONTENT_204 || responseClass == null
+                        || !"application/xml".equalsIgnoreCase(response.getMediaType())
+                        || body == null || body.length == 0) {
+                    return new DebugResponse<>(status, null);
+                }
+                try {
+                    String xml = getStringFromContent(response);
+                    return new DebugResponse<>(status, responseClass.cast(client.serializer.deserialize(xml, responseClass)));
+                } catch (IOException | ClassCastException e) {
+                    throw new RuntimeDebugClientException("Error occurred while processing response", e);
                 }
             } else if (response.getContent() != null && response.getContent().length > 0) {
                 String errorMessage = RuntimePresentationConverter.presentation(response.getContent());
 
                 try {
-                    Exception exception = abstractDebugClient.serializer.deserialize(errorMessage, Exception.class, "exception", "Exception");
+                    Exception exception = client.serializer.deserialize(errorMessage, Exception.class, "exception", "Exception");
                     throw new RuntimeDebugClientException("Unsuccessful response from 1C:Enterprise" + exception.getDescr());
                 } catch (IOException e) {
                     logger.debug("exception raw data `[{}]`", errorMessage);
@@ -167,17 +176,15 @@ public abstract class AbstractDebugClient {
         String charset = response.getEncoding();
         HttpField contentEncoding = headers.getField(HttpHeader.CONTENT_ENCODING);
         byte[] origContent = response.getContent();
-        HttpField len = headers.getField(HttpHeader.CONTENT_LENGTH);
-        int lenValue = len.getIntValue();
         if(contentEncoding!=null && "deflate".equalsIgnoreCase(contentEncoding.getValue())) {
             try(InputStream bis = new ByteArrayInputStream(origContent)) {
                 try (InputStream in = new InflaterInputStream(bis, new Inflater(true))) {
                     origContent = in.readAllBytes();
-                    lenValue = origContent.length;
                 }
             }
         }
         int offset = removeBOM(origContent);
+        int lenValue = origContent.length;
         for (int i = offset; i<lenValue; i++ ) {
             if(origContent[i] == 0) {
                 lenValue = i;
@@ -186,7 +193,8 @@ public abstract class AbstractDebugClient {
         }
         byte[] content = new byte[lenValue - offset];
         System.arraycopy(origContent, offset, content,0, content.length);
-        String contentString = new String(content, Charset.forName(charset))
+        Charset encoding = charset == null ? StandardCharsets.UTF_8 : Charset.forName(charset);
+        String contentString = new String(content, encoding)
                 .replaceFirst("^([\\W]+)<","<");
         contentString = Utils.normalizeXml(contentString);
         return contentString;

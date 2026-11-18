@@ -179,6 +179,59 @@ class StartCommandTest {
     }
 
     @Test
+    void collectionCommandsAreRejectedWhileProfilingIsBeingDisabled() throws Exception {
+        Future<Integer> collector = start();
+        dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
+        dbgs.pause("setMeasureMode");
+        Future<Integer> stop = executor.submit(() -> send(PipeMessages.EXIT_COMMAND));
+
+        try {
+            dbgs.awaitPaused("setMeasureMode");
+            assertEquals(List.of(1, 1, 1), List.of(send(PipeMessages.CHECK_COMMAND),
+                    send(PipeMessages.CLEAN_COMMAND), send(PipeMessages.DUMP_COMMAND)));
+            assertFalse(Files.exists(output));
+        } finally {
+            dbgs.resume("setMeasureMode");
+        }
+
+        assertEquals(0, stop.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(0, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(Map.of(2, true, 10, false, 11, false), coverage());
+    }
+
+    @Test
+    void collectionCommandsCannotOverwriteStoppedRawReport() throws Exception {
+        Future<Integer> collector = startRaw();
+        dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 10, 1));
+        dbgs.pause("detachDebugUI");
+
+        try {
+            assertEquals(0, send(PipeMessages.EXIT_COMMAND));
+            dbgs.awaitPaused("detachDebugUI");
+            String reported = Files.readString(output);
+
+            assertEquals(List.of(1, 1, 1), List.of(send(PipeMessages.CLEAN_COMMAND),
+                    send(PipeMessages.DUMP_COMMAND), send(PipeMessages.CHECK_COMMAND)));
+            assertEquals(reported, Files.readString(output));
+        } finally {
+            dbgs.resume("detachDebugUI");
+        }
+
+        assertEquals(0, collector.get(TIMEOUT, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void proxyPingsCannotConfirmFinalCollection() throws Exception {
+        Future<Integer> collector = start();
+        dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 10, 1));
+        dbgs.sendProxyPings();
+
+        assertEquals(1, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(1, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(Map.of(2, false, 10, true, 11, false), coverage());
+    }
+
+    @Test
     void stopFailsAndWritesPartialCoverageWhenProfilingCannotBeDisabled() throws Exception {
         Future<Integer> start = start();
         dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
@@ -244,7 +297,7 @@ class StartCommandTest {
 
     @Test
     void stateChangingCommandsFailUntilProfilingIsReady() throws Exception {
-        dbgs.pause("setMeasureMode");
+        dbgs.pause("setMeasureMode", body -> body.contains("measureModeSeanceID"));
         Future<Integer> start = executor.submit(() -> Coverage41C.getCommandLine().execute(PipeMessages.START_COMMAND,
                 "-i", infobase, "-u", dbgs.url(), "-o", output.toString(), "-t", "10"));
         try {
@@ -835,16 +888,18 @@ class StartCommandTest {
     }
 
     @Test
-    void includeUserRefreshesTargetsOnceForUnknownTargetAndDropsPacketsWithoutTarget() throws Exception {
+    void includeUserReusesRefreshedTargetListWithinOnePing() throws Exception {
         Future<Integer> start = start("--include-user", "coverage_unit");
         int listed = dbgs.requests("getDbgTargets").size();
         DebugTargetId late = user("coverage_unit");
         dbgs.setTargets(late);
         DebugTargetId lateIdOnly = FakeDebugServer.target(UUID.fromString(late.getId()), DebugTargetType.MANAGED_CLIENT, null);
         DebugTargetId stranger = FakeDebugServer.target(UUID.randomUUID(), DebugTargetType.MANAGED_CLIENT, null);
+        DebugTargetId another = FakeDebugServer.target(UUID.randomUUID(), DebugTargetType.CLIENT, null);
         String log = captureLog(() -> {
             dbgs.deliver(FakeDebugServer.measure(lateIdOnly, OBJECT_ID, PROPERTY_ID, 2, 1),
                     FakeDebugServer.measure(stranger, OBJECT_ID, PROPERTY_ID, 10, 1),
+                    FakeDebugServer.measure(another, OBJECT_ID, PROPERTY_ID, 10, 1),
                     FakeDebugServer.measure(stranger, OBJECT_ID, PROPERTY_ID, 10, 1),
                     FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 10, 1));
             assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
@@ -852,11 +907,11 @@ class StartCommandTest {
         });
 
         assertEquals(Map.of(2, true, 10, false, 11, false), coverage());
-        assertEquals(listed + 2, dbgs.requests("getDbgTargets").size());
+        assertEquals(listed + 1, dbgs.requests("getDbgTargets").size());
         assertTrue(dbgs.requests("attachDetachDbgTargets").get(0).body.contains(late.getId()));
-        // каждый пакет посчитан один раз; стартовый предмет без имени и stranger — неизвестные предметы
-        assertTrue(log.contains("Include users: 1 target(s) accepted, 0 rejected, 2 unknown; "
-                + "1 measure packet(s) accepted, 0 rejected, 3 unknown"), log);
+        // каждый пакет посчитан один раз; стартовый предмет без имени и два неизвестных UUID
+        assertTrue(log.contains("Include users: 1 target(s) accepted, 0 rejected, 3 unknown; "
+                + "1 measure packet(s) accepted, 0 rejected, 4 unknown"), log);
         assertFalse(log.contains("Measures of target " + late.getId() + " have no user"), log);
     }
 

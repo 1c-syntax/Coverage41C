@@ -64,6 +64,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.zip.Deflater;
 import java.util.zip.DeflaterOutputStream;
@@ -81,6 +82,7 @@ class FakeDebugServer implements AutoCloseable {
     private final BlockingQueue<DBGUIExtCmdInfoBase> events = new LinkedBlockingQueue<>();
     private final List<DBGUIExtCmdInfoBase> eventsOnMeasureOff = new CopyOnWriteArrayList<>();
     private final AtomicInteger pings = new AtomicInteger();
+    private volatile boolean proxyPings;
     private volatile AttachDebugUIResult attachResult = AttachDebugUIResult.REGISTERED;
     private volatile String apiVersion = "8.3.24";
     private volatile boolean compressResponses;
@@ -93,6 +95,11 @@ class FakeDebugServer implements AutoCloseable {
     private static class PausedCommand {
         private final CountDownLatch arrived = new CountDownLatch(1);
         private final CountDownLatch release = new CountDownLatch(1);
+        private final Predicate<String> matches;
+
+        private PausedCommand(Predicate<String> matches) {
+            this.matches = matches;
+        }
     }
 
     static final class Request {
@@ -144,7 +151,11 @@ class FakeDebugServer implements AutoCloseable {
     }
 
     void pause(String command) {
-        pausedCommands.put(command, new PausedCommand());
+        pause(command, body -> true);
+    }
+
+    void pause(String command, Predicate<String> matches) {
+        pausedCommands.put(command, new PausedCommand(matches));
     }
 
     void resume(String command) {
@@ -155,9 +166,14 @@ class FakeDebugServer implements AutoCloseable {
     }
 
     void awaitPaused(String command) throws InterruptedException {
-        if (!pausedCommands.get(command).arrived.await(10, TimeUnit.SECONDS)) {
+        PausedCommand pause = pausedCommands.get(command);
+        if (pause == null || !pause.arrived.await(10, TimeUnit.SECONDS)) {
             throw new IllegalStateException("No paused debugger request for " + command);
         }
+    }
+
+    void sendProxyPings() {
+        proxyPings = true;
     }
 
     void setTargets(DebugTargetId... newTargets) {
@@ -179,7 +195,9 @@ class FakeDebugServer implements AutoCloseable {
 
     // Отдаёт события в очередной ping и ждёт, пока Coverage41C их обработает и придёт за следующими.
     void deliver(DBGUIExtCmdInfoBase... newEvents) throws InterruptedException {
-        events.addAll(List.of(newEvents));
+        synchronized (events) {
+            events.addAll(List.of(newEvents));
+        }
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
         while (!events.isEmpty()) {
             checkDeadline(deadline);
@@ -275,7 +293,7 @@ class FakeDebugServer implements AutoCloseable {
             String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             requests.add(new Request(command, body));
             PausedCommand pause = pausedCommands.get(command);
-            if (pause != null) {
+            if (pause != null && pause.matches.test(body)) {
                 pause.arrived.countDown();
                 pause.release.await();
             }
@@ -296,6 +314,14 @@ class FakeDebugServer implements AutoCloseable {
             Integer failure = failures.get(command);
             if (failure != null) {
                 exchange.sendResponseHeaders(failure, -1);
+                return;
+            }
+            if (proxyPings && command.equals("pingDebugUIParams")) {
+                Thread.sleep(20);
+                byte[] message = "Upstream unavailable".getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type", "text/plain");
+                exchange.sendResponseHeaders(200, message.length);
+                exchange.getResponseBody().write(message);
                 return;
             }
             EObject response = response(command);
@@ -351,7 +377,9 @@ class FakeDebugServer implements AutoCloseable {
         DBGUIExtCmdInfoBase event = events.poll(20, TimeUnit.MILLISECONDS);
         if (event != null) {
             ping.getResult().add(event);
-            events.drainTo(ping.getResult());
+            synchronized (events) {
+                events.drainTo(ping.getResult());
+            }
         }
         return ping;
     }

@@ -81,16 +81,31 @@ case "`uname`" in
 esac
 
 if [ -z "\$EDT_LOCATION" ] && command -v ring >/dev/null 2>&1; then
-    EDT_ROOT=\$(ring edt locations list | sed -n '/./{p;q;}')
-    if [ -n "\$EDT_ROOT" ]; then
-        EDT_LOCATION="\$EDT_ROOT/plugins"
-    fi
+    EDT_LOCATION=\$(ring edt locations list | while IFS= read -r installation || [ -n "\$installation" ]; do
+        [ -n "\$installation" ] || continue
+        plugins="\$installation/plugins"
+        has_core=false
+        has_model=false
+        for jar in "\$plugins"/com._1c.g5.v8.dt.debug.*.jar; do
+            [ -f "\$jar" ] || continue
+            case "\$jar" in
+                */com._1c.g5.v8.dt.debug.core_*.jar) has_core=true ;;
+                */com._1c.g5.v8.dt.debug.model_*.jar) has_model=true ;;
+            esac
+        done
+        if "\$has_core" && "\$has_model"; then
+            printf '%s\\n' "\$plugins"
+            break
+        fi
+    done)
 fi
 
 EDT_CLASSPATH=""
-for f in "\$EDT_LOCATION"/com._1c.g5.v8.dt.debug.*; do
-    EDT_CLASSPATH=\$EDT_CLASSPATH:\$f;
-done
+if [ -n "\$EDT_LOCATION" ]; then
+    for jar in "\$EDT_LOCATION"/com._1c.g5.v8.dt.debug.*.jar; do
+        [ -f "\$jar" ] && EDT_CLASSPATH="\$EDT_CLASSPATH:\$jar"
+    done
+fi
 
 CLASSPATH="$classpath\$EDT_CLASSPATH"
 

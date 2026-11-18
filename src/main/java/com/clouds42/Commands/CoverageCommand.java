@@ -147,21 +147,20 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         });
     }
 
-    // Refresh incomplete target information and attach any newly recognized allowed targets.
-    private void refreshTargets(String unknownTargetId) {
+    private boolean tryRefreshTargetList(String triggerId) {
         if (System.nanoTime() - targetLookupAllowedAt < 0) {
-            return;
+            return false;
         }
-        logger.info("Refreshing debug targets for unknown target {}", unknownTargetId);
+        logger.info("Refreshing debug targets for unknown target {}", triggerId);
         try {
             if (connectListedTargets()) {
-                targets.markUnknown(unknownTargetId);
-                return;
+                return true;
             }
         } catch (RuntimeDebugClientException e) {
             logger.error("Can't list debug targets: {}", e.getLocalizedMessage());
         }
         targetLookupAllowedAt = System.nanoTime() + FAILED_LOOKUP_INTERVAL_NANOS;
+        return false;
     }
 
     @Override
@@ -285,7 +284,8 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         }
     }
 
-    private void mainLoop(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet) throws RuntimeDebugClientException {
+    private void mainLoop(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet)
+            throws RuntimeDebugClientException, InterruptedException {
         mainLoopRunning = true;
         systemStarted = true;
         try {
@@ -295,11 +295,20 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         }
     }
 
-    private void pingLoop(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet) throws RuntimeDebugClientException {
+    private void pingLoop(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet)
+            throws RuntimeDebugClientException, InterruptedException {
         while (!stopExecution.get()) {
-            List<? extends DBGUIExtCmdInfoBase> commandsList = client.ping();
+            Optional<List<? extends DBGUIExtCmdInfoBase>> poll = client.pollDebugServer();
+            if (poll.isEmpty()) {
+                logger.debug("Ignoring an unrecognized debugger poll response");
+                Thread.sleep(Math.max(10, debuggerOptions.getPingTimeout()));
+                continue;
+            }
+            List<? extends DBGUIExtCmdInfoBase> commandsList = poll.get();
             logger.info("Ping result commands size: {}", commandsList.size());
-            commandsList.forEach(command -> {
+            boolean refreshAttempted = false;
+            boolean listAvailable = false;
+            for (DBGUIExtCmdInfoBase command : commandsList) {
                 if (stopExecution.get()) {
                     return;
                 }
@@ -308,7 +317,17 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                 try {
                     if (command.getCmdID() == DBGUIExtCmds.MEASURE_RESULT_PROCESSING) {
                         DBGUIExtCmdInfoMeasureImpl measure = (DBGUIExtCmdInfoMeasureImpl) command;
-                        if (acceptsMeasure(measure)) {
+                        if (targets.needsLookup(measure)) {
+                            String id = UserTargets.targetIdOf(measure);
+                            if (!refreshAttempted) {
+                                refreshAttempted = true;
+                                listAvailable = tryRefreshTargetList(id);
+                            }
+                            if (listAvailable) {
+                                targets.markUnknown(id);
+                            }
+                        }
+                        if (targets.verdict(measure, loggingOptions.isVerbose()) == UserTargets.Verdict.ACCEPTED) {
                             synchronized (coverageData) {
                                 if (!stopExecution.get()) {
                                     measureResultProcessing(uriListByKey, externalDataProcessorsUriSet, measure);
@@ -325,18 +344,9 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                 } catch (RuntimeException e) {
                     logger.error("Can't process command {}: {}", command.getCmdID().getName(), e, e);
                 }
-            });
+            }
             pingsProcessed.incrementAndGet();
         }
-    }
-
-    // With includeUsers, a measure is merged only when its target belongs to an allowed user.
-    private boolean acceptsMeasure(DBGUIExtCmdInfoMeasureImpl measure) {
-        // Look the target up before the verdict, so that every packet is counted and logged once.
-        if (targets.needsLookup(measure)) {
-            refreshTargets(UserTargets.targetIdOf(measure));
-        }
-        return targets.verdict(measure, loggingOptions.isVerbose()) == UserTargets.Verdict.ACCEPTED;
     }
 
     private void measureResultProcessing(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet, DBGUIExtCmdInfoMeasureImpl command) {
@@ -449,6 +459,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         boolean interrupted = false;
         try {
             if (!stopExecution.get()) {
+                closeCollectionCommands();
                 if (serverPipeOut != null && mainLoopRunning) {
                     profilingFinished = disableProfiling();
                     if (profilingFinished) {

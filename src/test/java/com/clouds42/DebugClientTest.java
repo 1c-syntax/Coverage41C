@@ -135,12 +135,60 @@ class DebugClientTest {
     void pingWithoutContentReturnsNoCommands() throws Exception {
         respond(204, "application/xml; charset=UTF-8", "");
         assertTrue(client.ping().isEmpty());
+        assertTrue(client.pollDebugServer().orElseThrow().isEmpty());
     }
 
     @Test
     void pingWithNonXmlContentDoesNotInventCommands() throws Exception {
         respond(200, "text/plain; charset=UTF-8", "unavailable");
         assertTrue(client.ping().isEmpty());
+        assertTrue(client.pollDebugServer().isEmpty());
+    }
+
+    @Test
+    void emptyXmlBodyDoesNotAcknowledgePoll() throws Exception {
+        respond(200, "application/xml", "");
+        assertTrue(client.pollDebugServer().isEmpty());
+    }
+
+    @Test
+    void wrongXmlDocumentDoesNotAcknowledgePoll() throws Exception {
+        respond(200, "application/xml", "<unavailable/>");
+        assertThrows(RuntimeDebugClientException.class, client::pollDebugServer);
+    }
+
+    @Test
+    void debuggerXmlCanArriveWithoutContentLength() throws Exception {
+        String xml = "<response xmlns:debugRDBGRequestResponse=\"http://v8.1c.ru/8.3/debugger/debugRDBGRequestResponse\"/>";
+        respondChunked(200, "application/xml", xml);
+        assertTrue(client.pollDebugServer().orElseThrow().isEmpty());
+    }
+
+    @Test
+    void noContentCannotSupplyTargetList() throws Exception {
+        respond(204, "application/xml", "");
+        assertThrows(RuntimeDebugClientException.class, () -> client.getRuntimeDebugTargets(null));
+    }
+
+    @Test
+    void proxyCannotSupplyTargetList() throws Exception {
+        respond(200, "text/plain", "Upstream unavailable");
+        assertThrows(RuntimeDebugClientException.class, () -> client.getRuntimeDebugTargets("area"));
+    }
+
+    @Test
+    void targetListRequiresXmlMediaType() throws Exception {
+        respond(200, null, "Not available");
+        assertThrows(RuntimeDebugClientException.class, () -> client.getRuntimeDebugTargets(null));
+    }
+
+    @Test
+    void debuggerMayReturnAnEmptyTargetList() throws Exception {
+        try (FakeDebugServer dbg = new FakeDebugServer()) {
+            dbg.setTargets();
+            client.configure(dbg.url(), UUID.randomUUID(), "DefAlias");
+            assertTrue(client.getRuntimeDebugTargets(null).isEmpty());
+        }
     }
 
     @Test
@@ -188,12 +236,23 @@ class DebugClientTest {
     }
 
     private void respond(int status, String contentType, String body) throws IOException {
+        int length = body.isEmpty() ? -1 : body.getBytes(StandardCharsets.UTF_8).length;
+        respond(status, contentType, body, length);
+    }
+
+    private void respondChunked(int status, String contentType, String body) throws IOException {
+        respond(status, contentType, body, 0);
+    }
+
+    private void respond(int status, String contentType, String body, int length) throws IOException {
         responseServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         responseServer.createContext("/e1crdbg/rdbg", exchange -> {
             exchange.getRequestBody().readAllBytes();
-            exchange.getResponseHeaders().set("Content-Type", contentType);
+            if (contentType != null) {
+                exchange.getResponseHeaders().set("Content-Type", contentType);
+            }
             byte[] content = body.getBytes(StandardCharsets.UTF_8);
-            exchange.sendResponseHeaders(status, content.length == 0 ? -1 : content.length);
+            exchange.sendResponseHeaders(status, length);
             if (content.length > 0) {
                 exchange.getResponseBody().write(content);
             }

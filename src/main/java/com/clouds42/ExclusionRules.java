@@ -29,6 +29,7 @@ import com.github._1c_syntax.bsl.mdclasses.CF;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.FileSystemLoopException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -261,12 +262,25 @@ final class ExclusionRules {
             return;
         }
         Path report = reportFile.toPath().toAbsolutePath();
-        Path parent = report.getParent();
         Path configDirectory = configPath.toPath().toAbsolutePath();
-        if (isConfigFileName(reportFile) && parent != null && (configDirectory.normalize().equals(parent.normalize())
-                || Files.exists(parent) && Files.isSameFile(configDirectory, parent))) {
-            throw new IllegalArgumentException(source + ": " + report
-                    + " is inside the configuration directory and would be read as a config on the next run");
+        Set<Path> visited = new HashSet<>();
+        for (Path candidate = report; candidate.getParent() != null; ) {
+            Path parent = candidate.getParent();
+            if (isConfigFileName(candidate.toFile()) && (configDirectory.normalize().equals(parent.normalize())
+                    || Files.exists(parent) && Files.isSameFile(configDirectory, parent))) {
+                throw new IllegalArgumentException(source + ": " + report
+                        + " is inside the configuration directory and would be read as a config on the next run");
+            }
+            if (!Files.isSymbolicLink(candidate)) {
+                return;
+            }
+
+            // Resolve the parent only, as the final link may point to a file that does not exist yet.
+            Path link = parent.toRealPath().resolve(candidate.getFileName());
+            if (!visited.add(link)) {
+                throw new FileSystemLoopException(report.toString());
+            }
+            candidate = link.resolveSibling(Files.readSymbolicLink(link));
         }
     }
 

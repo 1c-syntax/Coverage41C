@@ -58,6 +58,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BooleanSupplier;
 
 public abstract class CoverServer {
 
@@ -66,6 +67,9 @@ public abstract class CoverServer {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     // Closing a second channel for a locked file can release this JVM's lock on Unix.
     private static final Set<Path> LOCAL_UNIX_LOCKS = ConcurrentHashMap.newKeySet();
+
+    private final Object collectionLock = new Object();
+    private volatile boolean stopping;
 
     private ServerSocket windowsListener;
     private volatile boolean listeningWindows;
@@ -241,25 +245,22 @@ public abstract class CoverServer {
     }
 
     private void executeCommand(String command, PrintWriter out) throws InterruptedException {
-        if (!getSystemStarted() && (PipeMessages.DUMP_COMMAND.equals(command)
-                || PipeMessages.CLEAN_COMMAND.equals(command) || PipeMessages.EXIT_COMMAND.equals(command))) {
-            out.println(PipeMessages.FAIL_RESULT);
-            return;
-        }
         switch (command) {
             case PipeMessages.DUMP_COMMAND:
-                out.println(dumpCoverage() ? PipeMessages.OK_RESULT : PipeMessages.FAIL_RESULT);
+                out.println(runCollectionCommand(this::dumpCoverage));
                 break;
             case PipeMessages.STATS_COMMAND:
                 out.println(printCoverageStats() ? PipeMessages.OK_RESULT : PipeMessages.FAIL_RESULT);
                 break;
             case PipeMessages.CLEAN_COMMAND:
-                cleanCoverageData();
-                out.println(PipeMessages.OK_RESULT);
+                out.println(runCollectionCommand(() -> {
+                    cleanCoverageData();
+                    return true;
+                }));
                 break;
             case PipeMessages.CHECK_COMMAND:
-                for (int i = 0; i < 60; i++) {
-                    if (getSystemStarted()) {
+                for (int i = 0; i < 60 && !stopping; i++) {
+                    if (getSystemStarted() && !stopping) {
                         out.println(PipeMessages.OK_RESULT);
                         return;
                     }
@@ -268,10 +269,29 @@ public abstract class CoverServer {
                 out.println(PipeMessages.FAIL_RESULT);
                 break;
             case PipeMessages.EXIT_COMMAND:
-                gracefulShutdown(out);
+                if (getSystemStarted()) {
+                    gracefulShutdown(out);
+                } else {
+                    out.println(PipeMessages.FAIL_RESULT);
+                }
                 break;
             default:
                 logger.info("Unknown command skipped: {}", command);
+        }
+    }
+
+    protected final void closeCollectionCommands() {
+        synchronized (collectionLock) {
+            stopping = true;
+        }
+    }
+
+    private String runCollectionCommand(BooleanSupplier command) {
+        synchronized (collectionLock) {
+            if (stopping || !getSystemStarted() || !command.getAsBoolean()) {
+                return PipeMessages.FAIL_RESULT;
+            }
+            return PipeMessages.OK_RESULT;
         }
     }
 

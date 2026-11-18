@@ -55,6 +55,7 @@ import org.eclipse.emf.ecore.xml.type.XMLTypePackage;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.client.Request;
 import org.eclipse.jetty.http.HttpMethod;
+import org.eclipse.jetty.http.HttpStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -189,9 +190,19 @@ public class DebugClient extends AbstractDebugClient{
     }
 
     public List<? extends DBGUIExtCmdInfoBase> ping() throws RuntimeDebugClientException {
-        Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "pingDebugUIParams").param("dbgui", this.debugServerUuid.toString());
-        RDBGPingDebugUIResponse responseContent = this.performRuntimeHttpRequest(request, RDBGPingDebugUIResponse.class);
-        return  (responseContent == null ? Collections.emptyList() : responseContent.getResult());
+        return pollDebugServer().orElseGet(List::of);
+    }
+
+    /** A present result acknowledges the poll, even if dbgs sent no commands. */
+    public Optional<List<? extends DBGUIExtCmdInfoBase>> pollDebugServer() throws RuntimeDebugClientException {
+        Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl)
+                .param("cmd", "pingDebugUIParams")
+                .param("dbgui", this.debugServerUuid.toString());
+        DebugResponse<RDBGPingDebugUIResponse> response = requestResponse(request, RDBGPingDebugUIResponse.class);
+        if (response.status() == HttpStatus.NO_CONTENT_204) {
+            return Optional.of(List.of());
+        }
+        return Optional.ofNullable(response.model()).map(RDBGPingDebugUIResponse::getResult);
     }
 
     public void setLineBreakpoints(Map<BslModuleInformation, List<BslLineBreakpointInformation>> modulesBreakpoints) throws RuntimeDebugClientException {
@@ -251,7 +262,9 @@ public class DebugClient extends AbstractDebugClient{
 
         Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "getDbgTargets");
         RDBGSGetDbgTargetsResponse responseContent = AbstractDebugClient.performRuntimeHttpRequest(this, request, this.initRequest(requestContent), RDBGSGetDbgTargetsResponse.class);
-        assert responseContent != null;
+        if (responseContent == null) {
+            throw new RuntimeDebugClientException("Missing XML response to getDbgTargets");
+        }
         return responseContent.getId();
     }
 
