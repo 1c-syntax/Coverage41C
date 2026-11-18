@@ -232,7 +232,25 @@ public class Utils {
                                                 String mainExtension,
                                                 Map<URI, Map<BigDecimal, Integer>> coverageData,
                                                 boolean measuring) throws Exception {
-        return readMetadata(metadataOptions, mainExtension, coverageData, new ExclusionReport(), measuring);
+        boolean hasUserFilter = measuring && metadataOptions.isRawMode() && metadataOptions.getConfigFile() != null
+                && IncludeUsers.load(metadataOptions.getConfigFile(), Collections.emptyList()).isActive();
+        return readMetadata(metadataOptions, mainExtension, coverageData, measuring, hasUserFilter);
+    }
+
+    public static Map<String, URI> readMetadata(MetadataOptions metadataOptions,
+                                                String mainExtension,
+                                                Map<URI, Map<BigDecimal, Integer>> coverageData,
+                                                boolean measuring, boolean hasUserFilter) throws Exception {
+        return readMetadata(metadataOptions, mainExtension, coverageData, new ExclusionReport(),
+                measuring, hasUserFilter, null);
+    }
+
+    public static Map<String, URI> readMetadataForConversion(MetadataOptions metadataOptions,
+                                                             String mainExtension,
+                                                             Map<URI, Map<BigDecimal, Integer>> coverageData,
+                                                             File rawInput) throws Exception {
+        return readMetadata(metadataOptions, mainExtension, coverageData, new ExclusionReport(),
+                false, false, rawInput);
     }
 
     public static List<String> validateMetadata(MetadataOptions metadataOptions) throws Exception {
@@ -241,22 +259,22 @@ public class Utils {
         }
         ExclusionReport report = new ExclusionReport();
         metadataOptions.validateSourceFilters("", "");
-        readMetadata(metadataOptions, "", new HashMap<>(), report, false);
+        readMetadata(metadataOptions, "", new HashMap<>(), report, false, false, null);
         return report.getWarnings();
     }
 
     private static Map<String, URI> readMetadata(MetadataOptions metadataOptions,
                                                  String mainExtension,
                                                  Map<URI, Map<BigDecimal, Integer>> coverageData,
-                                                 ExclusionReport report, boolean measuring) throws Exception {
+                                                 ExclusionReport report, boolean measuring,
+                                                 boolean hasUserFilter, File rawInput) throws Exception {
 
         boolean rawMode = false;
         if (metadataOptions.isRawMode()) {
             if (metadataOptions.getConfigFile() != null) {
                 // A config with includeUsers is useful to start without sources: it filters measures by user,
                 // the source rules wait for convert. convert itself still needs the sources.
-                if (!measuring
-                        || !IncludeUsers.load(metadataOptions.getConfigFile(), Collections.emptyList()).isActive()) {
+                if (!measuring || !hasUserFilter) {
                     throw new IllegalArgumentException("Coverage configuration requires source files");
                 }
                 logger.info("RAW mode: source rules of {} are applied by convert", metadataOptions.getConfigFile());
@@ -346,7 +364,7 @@ public class Utils {
                     Map<MdoReference, Set<String>> subsystemsByObject = rules.needsSubsystemMembership()
                             ? SubsystemFilter.membership(conf) : Map.of();
                     for (Module module : conf.getAllModules()) {
-                        if (module.isProtected() || !Files.exists(Path.of(module.getUri()))) {
+                        if (!Files.exists(Path.of(module.getUri()))) {
                             logger.info("Skipping module without source text: {}", module.getUri());
                             continue;
                         }
@@ -364,6 +382,13 @@ public class Utils {
                         }
                         if (metadataOptions.hasMultipleSources() && coverageData.containsKey(module.getUri())) {
                             throw new IllegalArgumentException("Module belongs to more than one source: " + module.getUri());
+                        }
+
+                        if (module.isProtected()) {
+                            // Keep the module's source identity for legacy RAW ambiguity checks.
+                            logger.info("Skipping module without source text: {}", module.getUri());
+                            coverageData.put(module.getUri(), new HashMap<>());
+                            continue;
                         }
 
                         ModuleId moduleId = moduleId(projectUri, module, mdObj,
@@ -470,6 +495,15 @@ public class Utils {
             File exclusionReportFile = metadataOptions.getExclusionReportFile() != null
                     ? metadataOptions.getExclusionReportFile() : configExclusionReportFile;
             if (exclusionReportFile != null) {
+                Path destination = exclusionReportFile.toPath().toAbsolutePath();
+                if (rawInput != null) {
+                    rejectReportOverwritingInput(destination, rawInput);
+                }
+                if (metadataOptions.getConfigFile() != null) {
+                    for (File input : ExclusionRules.configFiles(metadataOptions.getConfigFile())) {
+                        rejectReportOverwritingInput(destination, input);
+                    }
+                }
                 report.writeJson(exclusionReportFile);
                 logger.info("Exclusion report written to {}", exclusionReportFile.getAbsolutePath());
             }
@@ -477,6 +511,14 @@ public class Utils {
         }
 
         return uriListByKey;
+    }
+
+    private static void rejectReportOverwritingInput(Path report, File input) throws IOException {
+        Path inputPath = input.toPath().toAbsolutePath();
+        if (report.equals(inputPath)
+                || (Files.exists(report) && Files.exists(inputPath) && Files.isSameFile(report, inputPath))) {
+            throw new IllegalArgumentException("Exclusion report would overwrite input file: " + inputPath);
+        }
     }
 
     private static void readExternalDataProcessorSources(Path rootPath,
@@ -608,15 +650,18 @@ public class Utils {
 
     // start can dump coverage several times, so standard output stays open.
     private static OutputStream standardOutput() {
-        return new FilterOutputStream(System.out) {
+        PrintStream stream = System.out;
+        return new FilterOutputStream(stream) {
             @Override
             public void write(byte[] bytes, int offset, int length) {
-                System.out.write(bytes, offset, length);
+                stream.write(bytes, offset, length);
             }
 
             @Override
-            public void close() {
-                System.out.flush();
+            public void close() throws IOException {
+                if (stream.checkError()) {
+                    throw new IOException("Cannot write coverage to standard output");
+                }
             }
         };
     }
@@ -832,6 +877,11 @@ public class Utils {
 
     public static void printCoverageStats(Map<URI, Map<BigDecimal, Integer>> coverageData,
                                           MetadataOptions metadataOptions) {
+        printCoverageStats(coverageData, metadataOptions, System.out);
+    }
+
+    public static void printCoverageStats(Map<URI, Map<BigDecimal, Integer>> coverageData,
+                                          MetadataOptions metadataOptions, PrintStream output) {
         List<Object[]> dataList = new LinkedList<>();
         URI projectUri = Path.of(metadataOptions.getProjectDirName()).toUri();
         coverageData.forEach((uri, bigDecimalsMap) -> {
@@ -861,7 +911,7 @@ public class Utils {
         CWC_LongestLine cwc = new CWC_LongestLine();
         at.getRenderer().setCWC(cwc);
         String rend = at.render();
-        System.out.println(rend);
+        output.println(rend);
     }
 
     public static String getPipeName(ConnectionOptions connectionOptions) throws IOException {

@@ -31,8 +31,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -104,8 +106,23 @@ class ChangeBlocksTest {
 
         assertTrue(blocks.covers(3));
         assertTrue(blocks.covers(5));
-        assertEquals(2, blocks.bySource().get("team.json → changeMarkers[0]").size());
+        List<ChangeBlocks.Block> pairs = blocks.bySource().get("team.json → changeMarkers[0]");
+        assertEquals(2, pairs.size());
+        assertEquals(Set.of(List.of(1, 4), List.of(2, 6)), pairs.stream()
+                .map(block -> List.of(block.getBeginLine(), block.getEndLine())).collect(Collectors.toSet()));
         assertTrue(blocks.getWarnings().isEmpty());
+    }
+
+    @Test
+    void markersInsideDeletedExtensionTextDoNotOpenOrCloseBlocks() throws Exception {
+        ChangeBlocks blocks = parse(DEFAULT,
+                "Процедура Обработать()", "#Удаление", "//++", "#КонецУдаления", "ПервыйВызов();", "//--",
+                "//++", "#Delete", "//--", "#EndDelete", "ВторойВызов();", "//--", "КонецПроцедуры");
+
+        assertFalse(blocks.covers(5));
+        assertTrue(blocks.covers(11));
+        assertEquals(1, blocks.bySource().get("team.json → changeMarkers[0]").size());
+        assertEquals(List.of("Module.bsl:6 → team.json → changeMarkers[0]: end without begin"), blocks.getWarnings());
     }
 
     @Test

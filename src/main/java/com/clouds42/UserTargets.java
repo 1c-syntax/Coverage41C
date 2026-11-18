@@ -30,10 +30,12 @@ import org.slf4j.LoggerFactory;
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.stream.Collectors;
 
@@ -46,10 +48,11 @@ public final class UserTargets {
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     private static final String NO_USER = "";
+    private static final long LOOKUP_INTERVAL_NANOS = TimeUnit.SECONDS.toNanos(1);
 
     private final IncludeUsers users;
     private final Map<String, String> usersById = new ConcurrentHashMap<>();
-    private final Set<String> unknownIds = ConcurrentHashMap.newKeySet();
+    private final Map<String, Long> unknownIds = new ConcurrentHashMap<>();
     private final Set<String> attachedIds = ConcurrentHashMap.newKeySet();
     private final Set<String> loggedPackets = ConcurrentHashMap.newKeySet();
     private final Set<String> loggedConflicts = ConcurrentHashMap.newKeySet();
@@ -57,6 +60,7 @@ public final class UserTargets {
     private final LongAdder rejectedPackets = new LongAdder();
     private final LongAdder unknownPackets = new LongAdder();
     private final Map<String, LongAdder> packetsByUser = new ConcurrentHashMap<>();
+    private volatile boolean matchedUser;
 
     public UserTargets(IncludeUsers users) {
         this.users = users;
@@ -88,6 +92,9 @@ public final class UserTargets {
             }
         }
         boolean wanted = !isActive() || users.accepts(usersById.get(id));
+        if (wanted) {
+            matchedUser = true;
+        }
         return wanted && !attachedIds.contains(id);
     }
 
@@ -96,20 +103,26 @@ public final class UserTargets {
         attachedIds.add(targetId);
     }
 
-    // A packet without a user from a target dbgs never announced: worth asking dbgs for the target list.
+    // A nameless packet may need a fresh list even if dbgs already announced the target id.
     public boolean needsLookup(DBGUIExtCmdInfoMeasure command) {
         DebugTargetId target = targetOf(command);
-        return isActive() && target != null && userOf(target) == null && !knows(target.getId());
+        if (!isActive() || target == null || userOf(target) != null) {
+            return false;
+        }
+        String id = target.getId();
+        Long lastLookup = unknownIds.get(id);
+        return usersById.getOrDefault(id, NO_USER).isEmpty()
+                && (lastLookup == null || System.nanoTime() - lastLookup >= LOOKUP_INTERVAL_NANOS);
     }
 
     public boolean knows(String targetId) {
-        return targetId != null && (usersById.containsKey(targetId) || unknownIds.contains(targetId));
+        return targetId != null && (usersById.containsKey(targetId) || unknownIds.containsKey(targetId));
     }
 
-    // The target was looked up in dbgs once already; do not ask again for it.
+    // A successful lookup found no user. Give dbgs time to learn the name before trying again.
     public void markUnknown(String targetId) {
-        if (targetId != null) {
-            unknownIds.add(targetId);
+        if (targetId != null && usersById.getOrDefault(targetId, NO_USER).isEmpty()) {
+            unknownIds.put(targetId, System.nanoTime());
         }
     }
 
@@ -138,6 +151,9 @@ public final class UserTargets {
             }
         }
         Verdict verdict = user == null ? Verdict.UNKNOWN : users.accepts(user) ? Verdict.ACCEPTED : Verdict.REJECTED;
+        if (verdict == Verdict.ACCEPTED) {
+            matchedUser = true;
+        }
         count(verdict, user);
         log(verdict, id, user, verbose);
         return verdict;
@@ -151,7 +167,7 @@ public final class UserTargets {
 
     // True without a filter; with a filter, true once a target of an allowed user has been seen.
     public boolean matchedAnyTarget() {
-        return !isActive() || usersById.values().stream().anyMatch(users::accepts);
+        return !isActive() || matchedUser;
     }
 
     public List<String> summary() {
@@ -165,9 +181,9 @@ public final class UserTargets {
         long namelessTargets = targetsByUser.getOrDefault(NO_USER, 0L);
         long rejectedTargets = usersById.size() - acceptedTargets - namelessTargets;
         // Targets seen only in packets without a user and not found in dbgs' list are unknown too.
-        long unknownTargets = namelessTargets + unknownIds.stream().filter(id -> !usersById.containsKey(id)).count();
+        long unknownTargets = namelessTargets + unknownIds.keySet().stream().filter(id -> !usersById.containsKey(id)).count();
         List<String> lines = new ArrayList<>();
-        lines.add(String.format("Include users: %d target(s) accepted, %d rejected, %d unknown; "
+        lines.add(String.format(Locale.ROOT, "Include users: %d target(s) accepted, %d rejected, %d unknown; "
                         + "%d measure packet(s) accepted, %d rejected, %d unknown",
                 acceptedTargets, rejectedTargets, unknownTargets,
                 acceptedPackets.sum(), rejectedPackets.sum(), unknownPackets.sum()));
@@ -179,7 +195,7 @@ public final class UserTargets {
         if (!rejected.isEmpty()) {
             lines.add("  rejected: " + rejected);
         }
-        lines.add(String.format("  unknown: %d target(s) without user name, %d packet(s) without target or user",
+        lines.add(String.format(Locale.ROOT, "  unknown: %d target(s) without user name, %d packet(s) without target or user",
                 unknownTargets, unknownPackets.sum()));
         return lines;
     }
@@ -193,7 +209,7 @@ public final class UserTargets {
 
     private String perUser(String user, Map<String, Long> targetsByUser) {
         LongAdder packets = packetsByUser.get(user);
-        return String.format("%s (%d target(s), %d packet(s))", user, targetsByUser.getOrDefault(user, 0L),
+        return String.format(Locale.ROOT, "%s (%d target(s), %d packet(s))", user, targetsByUser.getOrDefault(user, 0L),
                 packets == null ? 0 : packets.sum());
     }
 

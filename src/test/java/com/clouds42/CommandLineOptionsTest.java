@@ -25,6 +25,7 @@ import com._1c.g5.v8.dt.debug.model.base.data.DebugTargetType;
 import com.clouds42.CommandLineOptions.ConnectionOptions;
 import com.clouds42.CommandLineOptions.DebuggerOptions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
 
@@ -104,7 +105,10 @@ class CommandLineOptionsTest {
     void pipeNameIsBuiltFromInfobaseAndDebuggerUrl() throws Exception {
         ConnectionOptions options = connectionOptions("-i", "База", "-u", "http://host:1550/");
 
-        assertEquals("/tmp/coverage41c/База_http___host_1550_.sock", Utils.getPipeName(options));
+        String expected = OS.WINDOWS.isCurrentOs()
+                ? "\\\\.\\pipe\\COVER_База_http___host_1550_"
+                : "/tmp/coverage41c/База_http___host_1550_.sock";
+        assertEquals(expected, Utils.getPipeName(options));
     }
 
     private static DebuggerOptions debuggerOptions(String... arguments) {

@@ -86,6 +86,24 @@ class SubsystemFilterTest {
         assertEquals(Set.of("Subsystem.ВтораяПодсистема.Subsystem.ПодчиненнаяПодсистема"), second);
     }
 
+    @Test
+    void fullRootPathTakesPrecedenceOverSameNestedName() throws Exception {
+        Path root = TestUtils.copyConfiguration(tempDir).resolve("configuration");
+        Path subsystems = root.resolve("Subsystems");
+        String child = Files.readString(subsystems.resolve("ПерваяПодсистема/Subsystems/ПодчиненнаяПодсистема.xml"));
+        Files.writeString(subsystems.resolve("ПодчиненнаяПодсистема.xml"),
+                child.replace("0fbc4f99-ef89-4d98-9b8f-d26c216c8e31", "0fbc4f99-ef89-4d98-9b8f-d26c216c8e33"));
+        Path config = root.resolve("Configuration.xml");
+        Files.writeString(config, Files.readString(config).replace("<Subsystem>ПерваяПодсистема</Subsystem>",
+                "<Subsystem>ПерваяПодсистема</Subsystem><Subsystem>ПодчиненнаяПодсистема</Subsystem>"));
+        CF configuration = (CF) MDClasses.createConfiguration(root);
+
+        assertEquals(Set.of("Subsystem.ПодчиненнаяПодсистема"),
+                SubsystemFilter.resolve(configuration, "ПодчиненнаяПодсистема"));
+        assertEquals(Set.of("Subsystem.ПерваяПодсистема.Subsystem.ПодчиненнаяПодсистема"),
+                SubsystemFilter.resolve(configuration, "ПерваяПодсистема.ПодчиненнаяПодсистема"));
+    }
+
     private CF configurationWithDuplicateSubsystemNames() throws Exception {
         Path root = TestUtils.copyConfiguration(tempDir).resolve("configuration");
         Path subsystems = root.resolve("Subsystems");

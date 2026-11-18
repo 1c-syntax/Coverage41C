@@ -77,20 +77,20 @@ final class PrefixRoutines {
             if (name == null) {
                 continue;
             }
-            ExclusionRules.ScopePrefix prefix = prefixes.stream().filter(candidate -> candidate.matchesRoutine(name))
-                    .findFirst().orElse(null);
-            if (prefix == null) {
+            List<ExclusionRules.ScopePrefix> matches = prefixes.stream()
+                    .filter(candidate -> candidate.matchesRoutine(name)).toList();
+            if (matches.isEmpty()) {
                 continue;
             }
             ParserRuleContext context = (ParserRuleContext) node;
             int begin = keyword != null && keyword.getSymbol().getTokenIndex() >= 0
                     ? keyword.getSymbol().getLine() : context.getStart().getLine();
             if (end == null || end.getSymbol().getTokenIndex() < 0) {
-                warnings.add(modulePath + ":" + begin + " → " + prefix.getSource() + ": method " + name
+                warnings.add(modulePath + ":" + begin + " → " + matches.get(0).getSource() + ": method " + name
                         + " has no end, not counted");
                 continue;
             }
-            routines.add(new Routine(name, begin, end.getSymbol().getLine(), prefix));
+            routines.add(new Routine(name, begin, end.getSymbol().getLine(), matches));
         }
         routines.sort(Comparator.comparingInt(Routine::getBeginLine));
         return new PrefixRoutines(Collections.unmodifiableList(routines), Collections.unmodifiableList(warnings));
@@ -138,13 +138,13 @@ final class PrefixRoutines {
         private final String name;
         private final int beginLine;
         private final int endLine;
-        private final ExclusionRules.ScopePrefix prefix;
+        private final List<ExclusionRules.ScopePrefix> prefixes;
 
-        private Routine(String name, int beginLine, int endLine, ExclusionRules.ScopePrefix prefix) {
+        private Routine(String name, int beginLine, int endLine, List<ExclusionRules.ScopePrefix> prefixes) {
             this.name = name;
             this.beginLine = beginLine;
             this.endLine = endLine;
-            this.prefix = prefix;
+            this.prefixes = prefixes;
         }
 
         String getName() {
@@ -159,8 +159,8 @@ final class PrefixRoutines {
             return endLine;
         }
 
-        ExclusionRules.ScopePrefix getPrefix() {
-            return prefix;
+        List<ExclusionRules.ScopePrefix> getPrefixes() {
+            return prefixes;
         }
     }
 }

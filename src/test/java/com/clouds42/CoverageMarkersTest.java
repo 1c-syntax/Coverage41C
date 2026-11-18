@@ -64,6 +64,17 @@ class CoverageMarkersTest {
     }
 
     @Test
+    void markersInsideDeletedExtensionTextAreIgnored() {
+        CoverageMarkers markers = parse(
+                "#Удаление", "// Cover:file-off", "#КонецУдаления",
+                "Процедура Обработать()", "// Cover:auto", "# Delete", "// Cover:off", "// Cover:on",
+                "# EndDelete", "Обновить();", "// Cover:on", "КонецПроцедуры");
+
+        assertEquals(List.of("AUTO Cover:auto 5..11"), ranges(markers));
+        assertEquals(List.of(), markers.getWarnings());
+    }
+
+    @Test
     void markerFollowedByHyphenAndReasonIsRecognized() {
         CoverageMarkers markers = parse(
                 "Процедура А()", "\t// Cover:off-временный код", "\tБ();", "\t// Cover:on", "КонецПроцедуры");

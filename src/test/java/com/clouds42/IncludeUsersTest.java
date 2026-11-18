@@ -112,6 +112,15 @@ class IncludeUsersTest {
     }
 
     @Test
+    void rejectsUnicodeWhitespaceWithoutChangingNonblankNames() throws Exception {
+        assertMessage("{\"includeUsers\":[\"\u2003\"]}", "a.json → includeUsers[0]: empty value");
+        assertThrows(IllegalArgumentException.class, () -> IncludeUsers.load(null, List.of("\u2003")));
+        IncludeUsers users = IncludeUsers.load(null, List.of("\u2003unit"));
+        assertTrue(users.accepts("\u2003unit"));
+        assertFalse(users.accepts("unit"));
+    }
+
+    @Test
     void invalidConfigValueIsRejectedEvenWhenCommandLineReplacesIt() throws Exception {
         write("a.json", "{\"includeUsers\":[]}");
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,

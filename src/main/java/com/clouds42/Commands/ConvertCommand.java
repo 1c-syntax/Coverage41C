@@ -24,8 +24,8 @@ package com.clouds42.Commands;
 import com.clouds42.BuildConfig;
 import com.clouds42.CommandLineOptions.*;
 import com.clouds42.PipeMessages;
-import com.clouds42.Utils;
 import com.clouds42.SourceKey;
+import com.clouds42.Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
@@ -37,6 +37,7 @@ import picocli.CommandLine.Mixin;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
+import java.io.File;
 import java.io.FileInputStream;
 import java.lang.invoke.MethodHandles;
 import java.math.BigDecimal;
@@ -44,9 +45,9 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-import java.util.HashSet;
 import java.util.TreeSet;
 import java.util.concurrent.Callable;
 import java.util.stream.Stream;
@@ -79,13 +80,7 @@ public class ConvertCommand implements Callable<Integer> {
     private URI resolveFileKey(String key, Map<String, URI> sources) {
         if (SourceKey.isQualified(key)) {
             String legacy = SourceKey.legacy(key);
-            if (metadataOptions.hasMultipleSources()) {
-                return sources.get(key);
-            }
-            // A single root still selects one source; do not attribute another extension's hits to it.
-            String selected = SourceKey.qualify(legacy, filterOptions.getExtensionName(),
-                    filterOptions.getExternalDataProcessorUrl());
-            return selected.equals(key) ? sources.get(legacy) : null;
+            return sources.get(metadataOptions.hasMultipleSources() ? key : legacy);
         }
         if (!metadataOptions.hasMultipleSources()) {
             return sources.get(key);
@@ -95,6 +90,11 @@ public class ConvertCommand implements Callable<Integer> {
                     + "; collect RAW data again with a version that preserves source identity");
         }
         return legacySources.get(key);
+    }
+
+    private boolean matchesSelectedSource(String key) {
+        return key.equals(SourceKey.qualify(SourceKey.legacy(key), filterOptions.getExtensionName(),
+                filterOptions.getExternalDataProcessorUrl()));
     }
 
     private String rawFileKey(Node fileNode, boolean sourceIdentity, boolean includesExtensionAttributes) {
@@ -132,8 +132,7 @@ public class ConvertCommand implements Callable<Integer> {
         return false;
     }
 
-    // Check the whole input first: a mixed raw file legitimately contains other sources
-    // with the same UUID. Failing on the first such key would reject a valid selection.
+    // A mixed RAW file can contain other sources. Check every record before rejecting the selection.
     private void verifySelectedSource(NodeList files, Map<String, URI> sources,
                                       boolean sourceIdentity, boolean includesExtensionAttributes) {
         if (metadataOptions.hasMultipleSources()) {
@@ -143,40 +142,45 @@ public class ConvertCommand implements Callable<Integer> {
         Set<String> otherSources = new TreeSet<>();
         for (int index = 0; index < files.getLength(); index++) {
             String key = rawFileKey(files.item(index), sourceIdentity, includesExtensionAttributes);
-            if (resolveFileKey(key, sources) != null) {
+            if (SourceKey.isQualified(key)) {
+                if (matchesSelectedSource(key)) {
+                    selectedSourceFound = true;
+                } else {
+                    otherSources.add(SourceKey.selectionHint(key));
+                }
+            } else if (sources.containsKey(key)) {
                 selectedSourceFound = true;
-            } else if (SourceKey.isQualified(key) && sources.containsKey(SourceKey.legacy(key))) {
-                otherSources.add(SourceKey.selectionHint(key));
             }
         }
         if (!otherSources.isEmpty() && !selectedSourceFound) {
-            throw new IllegalArgumentException("No RAW measurements for the selected source; "
-                    + "known module UUIDs belong to other sources. Select the matching source: "
+            throw new IllegalArgumentException("No RAW measurements for the selected source. Select the matching source: "
                     + String.join("; ", otherSources));
         }
-        otherSources.forEach(hint -> logger.warn("Ignoring RAW source with known module UUIDs; "
-                + "to convert that source use {} with its sources directory", hint));
+        otherSources.forEach(hint -> logger.warn("Ignoring RAW source. "
+                + "To convert that source use {} with its sources directory", hint));
     }
 
     @Override
     public Integer call() throws Exception {
 
         metadataOptions.validateSourceFilters(filterOptions.getExtensionName(), filterOptions.getExternalDataProcessorUrl());
-        Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<URI,Map<BigDecimal, Integer>>();
+        Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<>();
 
-        Map<String, URI> uriListByKey = Utils.readMetadata(metadataOptions, filterOptions.getExtensionName(), coverageData, false);
-        legacySources.clear();
-        ambiguousLegacyKeys.clear();
-        if (metadataOptions.hasMultipleSources()) {
-            uriListByKey.forEach((key, uri) -> {
-                String legacy = SourceKey.legacy(key);
-                if (legacySources.putIfAbsent(legacy, uri) != null) {
-                    ambiguousLegacyKeys.add(legacy);
-                }
-            });
-        }
+        File rawInput = convertOptions.getInputRawXmlFile();
+        try (FileInputStream fileIS = new FileInputStream(rawInput)) {
+            Map<String, URI> uriListByKey = Utils.readMetadataForConversion(metadataOptions,
+                    filterOptions.getExtensionName(), coverageData, rawInput);
+            legacySources.clear();
+            ambiguousLegacyKeys.clear();
+            if (metadataOptions.hasMultipleSources()) {
+                uriListByKey.forEach((key, uri) -> {
+                    String legacy = SourceKey.legacy(key);
+                    if (legacySources.putIfAbsent(legacy, uri) != null) {
+                        ambiguousLegacyKeys.add(legacy);
+                    }
+                });
+            }
 
-        try (FileInputStream fileIS = new FileInputStream(convertOptions.getInputRawXmlFile())) {
             DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
             DocumentBuilder builder = builderFactory.newDocumentBuilder();
             Document xmlDocument = builder.parse(fileIS);
@@ -187,12 +191,13 @@ public class ConvertCommand implements Callable<Integer> {
             for(int fileNodeNumber = 0; fileNodeNumber < fileNodeList.getLength(); fileNodeNumber++) {
                 Node fileNode = fileNodeList.item(fileNodeNumber);
                 String fileKey = rawFileKey(fileNode, sourceIdentity, includesExtensions);
+                if (!metadataOptions.hasMultipleSources() && SourceKey.isQualified(fileKey)
+                        && !matchesSelectedSource(fileKey)) {
+                    continue;
+                }
                 URI fileUri = resolveFileKey(fileKey, uriListByKey);
                 if (fileUri == null) {
-                    if (metadataOptions.hasMultipleSources() || !SourceKey.isQualified(fileKey)
-                            || !uriListByKey.containsKey(SourceKey.legacy(fileKey))) {
-                        logger.error("Can't find file key: {}", fileKey);
-                    }
+                    logger.error("Can't find file key: {}", fileKey);
                     continue;
                 }
                 Map<BigDecimal, Integer> coverMap = coverageData.get(fileUri);

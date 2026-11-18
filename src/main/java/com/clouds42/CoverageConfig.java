@@ -24,6 +24,8 @@ package com.clouds42;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonSetter;
+import com.fasterxml.jackson.annotation.Nulls;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.NullNode;
 
@@ -60,6 +62,7 @@ public class CoverageConfig {
         return valueOrEmpty(includeSubsystems);
     }
 
+    @JsonSetter(nulls = Nulls.FAIL)
     public void setIncludeSubsystems(List<String> includeSubsystems) {
         this.includeSubsystems = includeSubsystems;
     }
@@ -68,6 +71,7 @@ public class CoverageConfig {
         return valueOrEmpty(includePrefix);
     }
 
+    @JsonSetter(nulls = Nulls.FAIL)
     public void setIncludePrefix(List<String> includePrefix) {
         this.includePrefix = includePrefix;
     }
@@ -107,12 +111,7 @@ public class CoverageConfig {
     }
 
     public List<MarkerPair> getChangeMarkers() {
-        if (changeMarkers == null) {
-            return Collections.emptyList();
-        }
-        List<MarkerPair> pairs = new ArrayList<>();
-        changeMarkers.forEach(pair -> pairs.add(pair == null ? new MarkerPair() : pair));
-        return pairs;
+        return changeMarkers == null ? Collections.emptyList() : new ArrayList<>(changeMarkers);
     }
 
     public void setChangeMarkers(List<MarkerPair> changeMarkers) {

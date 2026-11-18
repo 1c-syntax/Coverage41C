@@ -87,7 +87,7 @@ public final class IncludeUsers {
             if (!value.isTextual()) {
                 throw new IllegalArgumentException(source + "[" + index + "]: expected a string");
             }
-            if (value.asText().trim().isEmpty()) {
+            if (value.asText().isBlank()) {
                 throw new IllegalArgumentException(source + "[" + index + "]: empty value");
             }
             users.add(value.asText());
@@ -98,7 +98,7 @@ public final class IncludeUsers {
     static List<String> parseCommandLine(List<String> values) {
         Set<String> users = new LinkedHashSet<>();
         for (String value : values) {
-            if (value == null || value.trim().isEmpty()) {
+            if (value == null || value.isBlank()) {
                 throw new IllegalArgumentException("--include-user: empty value");
             }
             users.add(value);

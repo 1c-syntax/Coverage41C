@@ -32,6 +32,8 @@ import javax.xml.xpath.XPathConstants;
 import javax.xml.xpath.XPathFactory;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -99,6 +101,29 @@ class CoverageFileTest {
             String output = stdout.toString(StandardCharsets.UTF_8);
             assertTrue(output.contains("ПростойОбщийМодуль"), format.name());
             assertTrue(output.endsWith("still open"), format.name());
+        }
+    }
+
+    @Test
+    void failsWhenStandardOutputCannotBeWritten() {
+        for (OutputOptions.OutputFormat format : OutputOptions.OutputFormat.values()) {
+            PrintStream originalOut = System.out;
+            StringWriter stderr = new StringWriter();
+            int exitCode;
+            try (PrintStream failingOutput = new PrintStream(new OutputStream() {
+                @Override
+                public void write(int value) throws IOException {
+                    throw new IOException("simulated write failure");
+                }
+            }, false, StandardCharsets.UTF_8)) {
+                System.setOut(failingOutput);
+                exitCode = convert(stderr, "-f", format.name());
+            } finally {
+                System.setOut(originalOut);
+            }
+
+            assertEquals(CommandLine.ExitCode.SOFTWARE, exitCode, format.name());
+            assertTrue(stderr.toString().contains("Cannot write coverage to standard output"), format + ": " + stderr);
         }
     }
 

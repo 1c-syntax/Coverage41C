@@ -235,7 +235,11 @@ class CoverMapBuilderTest {
         cover(rules("{'auto':{'lines':['Б\\\\(\\\\);']}}"), report, MODULE,
                 text("Процедура А()", "\tБ(); // Cover:off", "КонецПроцедуры"));
 
-        assertTrue(report.hasEntry("team.json → auto.lines[0]"));
+        assertEquals(0, report.getEntries().stream()
+                .filter(entry -> entry.getSource().equals("team.json → auto.lines[0]"))
+                .findFirst().orElseThrow().getExcludedLines());
+        assertEquals(0, report.getAutoLines());
+        assertEquals(1, report.getExcludedLines());
         assertEquals(List.of(), report.getWarnings());
     }
 
@@ -245,6 +249,14 @@ class CoverMapBuilderTest {
 
         assertEquals(Map.of(), cover(report, "Перем А;", "// Cover:off", "Перем Б;", "// Cover:on"));
         assertTrue(report.getEntries().isEmpty());
+    }
+
+    @Test
+    void unclosedMarkerInModuleWithoutExecutableLinesIsWarned() {
+        ExclusionReport report = new ExclusionReport();
+
+        assertEquals(Map.of(), cover(report, "// Cover:off"));
+        assertEquals(List.of("Module.bsl:1: Cover:off is not closed, excluded up to end of module"), report.getWarnings());
     }
 
     @Test
@@ -360,13 +372,16 @@ class CoverMapBuilderTest {
     }
 
     @Test
-    void fileOffOutsideLeavesTotalsAndEntriesUntouched() throws Exception {
+    void fileOffOutsideRecordsChangeBlockWithoutIncludingItsLines() throws Exception {
         ExclusionReport report = new ExclusionReport();
 
         assertEquals(Map.of(), outside(rules("{'changeMarkers':{}}"), report, "// Cover:file-off\n" + text(CHANGED)));
         assertEquals(0, report.getTotalLines());
         assertTrue(report.getEntries().isEmpty());
-        assertTrue(report.getChangeBlocks().isEmpty());
+        ExclusionReport.ChangeBlocksEntry entry = report.getChangeBlocks().iterator().next();
+        assertEquals(1, entry.getBlocks());
+        assertEquals(0, entry.getIncludedLines());
+        assertEquals(0, report.getIncludedLines());
     }
 
     @Test
@@ -607,6 +622,15 @@ class CoverMapBuilderTest {
 
         assertEquals(Map.of(2, -1, 3, -1), outsideScope(rules, new ExclusionReport(),
                 text("Процедура тестХ()", "\tА();", "КонецПроцедуры")));
+    }
+
+    @Test
+    void unclosedMarkerInPrefixedMethodOutsideScopeIsWarned() throws Exception {
+        ExclusionReport report = new ExclusionReport();
+
+        assertEquals(Map.of(), outsideScope(scoped(ROUTINES), report,
+                text("Процедура тестХ()", "// Cover:off", "\tА();", "КонецПроцедуры")));
+        assertEquals(List.of("Module.bsl:2: Cover:off is not closed, excluded up to end of module"), report.getWarnings());
     }
 
     @Test

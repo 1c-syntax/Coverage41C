@@ -22,12 +22,14 @@
 package com.clouds42;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github._1c_syntax.bsl.mdclasses.CF;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -48,7 +50,8 @@ import java.util.stream.Collectors;
 
 final class ExclusionRules {
 
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper()
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
     private static final int LINE_PATTERN_FLAGS = Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE;
     // Default comment styles: //++ … //-- and //{{ … //}}; "// -----" is a separator, not an end.
     private static final String[][] DEFAULT_CHANGE_MARKERS = {
@@ -216,7 +219,8 @@ final class ExclusionRules {
     }
 
     static Pattern routinePrecheck(List<ScopePrefix> prefixes) {
-        return Pattern.compile("(?iu:процедура|функция|procedure|function)\\s+(?:" + prefixes.stream()
+        return Pattern.compile("(?iu:процедура|функция|procedure|function)(?=\\s|//)"
+                + "\\s*+(?://[^\\r\\n]*+[\\r\\n]\\s*+)*+(?:" + prefixes.stream()
                 .map(prefix -> Pattern.quote(prefix.getPrefix())).collect(Collectors.joining("|")) + ")");
     }
 
@@ -251,12 +255,16 @@ final class ExclusionRules {
     }
 
     // A report written into the config directory would be read as a config on the next run and fail it.
-    static void rejectReportInsideConfigDirectory(File configPath, File reportFile, String source) {
+    static void rejectReportInsideConfigDirectory(File configPath, File reportFile, String source)
+            throws IOException {
         if (configPath == null || reportFile == null || !configPath.isDirectory()) {
             return;
         }
-        Path report = reportFile.toPath().toAbsolutePath().normalize();
-        if (isConfigFileName(report.toFile()) && configPath.toPath().toAbsolutePath().normalize().equals(report.getParent())) {
+        Path report = reportFile.toPath().toAbsolutePath();
+        Path parent = report.getParent();
+        Path configDirectory = configPath.toPath().toAbsolutePath();
+        if (isConfigFileName(reportFile) && parent != null && (configDirectory.normalize().equals(parent.normalize())
+                || Files.exists(parent) && Files.isSameFile(configDirectory, parent))) {
             throw new IllegalArgumentException(source + ": " + report
                     + " is inside the configuration directory and would be read as a config on the next run");
         }
@@ -288,6 +296,12 @@ final class ExclusionRules {
             if (config == null) {
                 throw new IllegalArgumentException(
                         "Cannot read coverage configuration " + file.getName() + ": empty document");
+            }
+            List<CoverageConfig.MarkerPair> pairs = config.getChangeMarkers();
+            for (int index = 0; index < pairs.size(); index++) {
+                if (pairs.get(index) == null) {
+                    throw new IllegalArgumentException(source(file.getName(), "changeMarkers", index) + ": empty value");
+                }
             }
             return config;
         } catch (JsonProcessingException e) {

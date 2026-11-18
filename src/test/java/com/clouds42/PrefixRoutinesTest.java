@@ -66,6 +66,14 @@ class PrefixRoutinesTest {
     }
 
     @Test
+    void commentBetweenKeywordAndNameDoesNotDefeatRoutinePrecheck() {
+        PrefixRoutines routines = parse("Процедура // Описание", "// продолжение", "тестРассчитать()",
+                "Рассчитать();", "КонецПроцедуры");
+
+        assertEquals(List.of("тестРассчитать"), names(routines));
+    }
+
+    @Test
     void prefixIsCaseSensitiveAndComparedWithStartOfName() {
         PrefixRoutines routines = parse("Процедура ТестХ()", "КонецПроцедуры", "Процедура подмодульХ()", "КонецПроцедуры",
                 "Процедура тест()", "КонецПроцедуры", "Процедура тестХ_Ещё()", "КонецПроцедуры");
@@ -77,9 +85,9 @@ class PrefixRoutinesTest {
     void severalPrefixesAreAttributedToTheirSources() {
         PrefixRoutines routines = parse("Процедура demoX()", "КонецПроцедуры", "Процедура тестY()", "КонецПроцедуры");
 
-        assertSame(DEMO_LATIN, routines.getRoutines().get(0).getPrefix());
-        assertSame(DEMO, routines.getRoutines().get(1).getPrefix());
-        assertSame(DEMO, routines.routineAt(3).getPrefix());
+        assertEquals(List.of(DEMO_LATIN), routines.getRoutines().get(0).getPrefixes());
+        assertEquals(List.of(DEMO), routines.getRoutines().get(1).getPrefixes());
+        assertEquals(List.of(DEMO), routines.routineAt(3).getPrefixes());
         assertEquals(null, routines.routineAt(5));
     }
 

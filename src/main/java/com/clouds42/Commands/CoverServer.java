@@ -26,8 +26,6 @@ import com.clouds42.CommandLineOptions.MetadataOptions;
 import com.clouds42.CommandLineOptions.OutputOptions;
 import com.clouds42.PipeMessages;
 import com.clouds42.Utils;
-import org.scalasbt.ipcsocket.UnixDomainServerSocket;
-import org.scalasbt.ipcsocket.UnixDomainSocket;
 import org.scalasbt.ipcsocket.Win32NamedPipeServerSocket;
 import org.scalasbt.ipcsocket.Win32SecurityLevel;
 import org.slf4j.Logger;
@@ -35,73 +33,148 @@ import org.slf4j.LoggerFactory;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.lang.invoke.MethodHandles;
 import java.math.BigDecimal;
+import java.net.ConnectException;
 import java.net.ServerSocket;
+import java.net.StandardProtocolFamily;
 import java.net.Socket;
 import java.net.URI;
+import java.net.UnixDomainSocketAddress;
+import java.nio.channels.Channels;
+import java.nio.channels.FileChannel;
+import java.nio.channels.ServerSocketChannel;
+import java.nio.channels.SocketChannel;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 public abstract class CoverServer {
 
     public abstract ConnectionOptions getConnectionOptions();
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
-    private ServerSocket serverSocket;
-    private String pipeName;
-    private volatile boolean listening;
-    private final boolean isWindows = System.getProperty ("os.name").toLowerCase().contains("win");
+    // Closing a second channel for a locked file can release this JVM's lock on Unix.
+    private static final Set<Path> LOCAL_UNIX_LOCKS = ConcurrentHashMap.newKeySet();
 
-    protected void closeSocket() throws IOException {
-        if (serverSocket != null) {
-            listening = false;
-            serverSocket.close();
-            serverSocket = null;
-            if (!isWindows) {
-                Files.deleteIfExists(Path.of(pipeName));
+    private ServerSocket windowsListener;
+    private volatile boolean listeningWindows;
+    private ServerSocketChannel unixListener;
+    private FileChannel unixLockChannel;
+    private Path unixSocketPath;
+    private Object unixSocketKey;
+
+    protected synchronized void closeSocket() throws IOException {
+        if (windowsListener != null) {
+            listeningWindows = false;
+            windowsListener.close();
+            windowsListener = null;
+        } else if (unixListener != null) {
+            try (FileChannel lock = unixLockChannel) {
+                unixListener.close();
+                removeSocketIfOwned(unixSocketPath, unixSocketKey);
+            } finally {
+                LOCAL_UNIX_LOCKS.remove(unixSocketPath);
+                unixListener = null;
             }
-            logger.info("Close server socket");
         }
+        logger.info("Close server socket");
     }
 
-    protected ServerSocket getServerSocket() throws IOException {
-
-        if(serverSocket == null) {
-            pipeName = Utils.getPipeName(getConnectionOptions());
-            if (isWindows) {
-                serverSocket = new Win32NamedPipeServerSocket(pipeName, false, Win32SecurityLevel.OWNER_DACL);
-            } else {
-                removeStaleSocket(pipeName);
-                serverSocket = new UnixDomainServerSocket(pipeName);
-            }
-            listening = true;
-            startDaemon(this::acceptCommands, "coverage41c-commands");
-            logger.info("Create server socket");
+    protected synchronized void startListening() throws IOException {
+        String pipeName = Utils.getPipeName(getConnectionOptions());
+        if (System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win")) {
+            ServerSocket listener = new Win32NamedPipeServerSocket(pipeName, false, Win32SecurityLevel.OWNER_DACL);
+            windowsListener = listener;
+            listeningWindows = true;
+            startDaemon(() -> acceptWindowsCommands(listener), "coverage41c-commands");
+        } else {
+            startUnixListening(Path.of(pipeName));
         }
-        return serverSocket;
+        logger.info("Create server socket");
     }
 
-    // A socket file left by a killed process blocks bind, a live one answers the connection.
-    private static void removeStaleSocket(String pipeName) throws IOException {
-        Path socketFile = Path.of(pipeName);
-        if (!Files.exists(socketFile)) {
+    private void startUnixListening(Path socketPath) throws IOException {
+        if (!LOCAL_UNIX_LOCKS.add(socketPath)) {
+            throw alreadyRunning(socketPath);
+        }
+        FileChannel lock = null;
+        ServerSocketChannel listener = null;
+        try {
+            Path lockPath = socketPath.resolveSibling(socketPath.getFileName() + ".lock");
+            // Leave the lock file in place so all processes lock the same inode. A dead process releases the lock.
+            lock = FileChannel.open(lockPath, StandardOpenOption.CREATE, StandardOpenOption.WRITE,
+                    LinkOption.NOFOLLOW_LINKS);
+            if (lock.tryLock() == null) {
+                throw alreadyRunning(socketPath);
+            }
+            UnixDomainSocketAddress address = UnixDomainSocketAddress.of(socketPath);
+            removeStaleSocket(address);
+
+            listener = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
+            listener.bind(address);
+            unixSocketKey = socketKey(socketPath);
+            unixSocketPath = socketPath;
+            unixLockChannel = lock;
+            unixListener = listener;
+        } catch (IOException | RuntimeException e) {
+            try (FileChannel failedLock = lock; ServerSocketChannel failedListener = listener) {
+                throw e;
+            } finally {
+                LOCAL_UNIX_LOCKS.remove(socketPath);
+            }
+        }
+        ServerSocketChannel activeListener = listener;
+        startDaemon(() -> acceptUnixCommands(activeListener), "coverage41c-commands");
+    }
+
+    private static IOException alreadyRunning(Path socketPath) {
+        return new IOException("Coverage41C is already running for this infobase and debugger: " + socketPath);
+    }
+
+    // A socket file left by a killed process blocks bind. Only a refused connection identifies a stale socket.
+    private static void removeStaleSocket(UnixDomainSocketAddress address) throws IOException {
+        Path path = address.getPath();
+        Object key = socketKey(path);
+        if (key == null) {
             return;
         }
-        boolean alive;
-        try (Socket ignored = new UnixDomainSocket(pipeName)) {
-            alive = true;
-        } catch (IOException e) {
-            alive = false;
+        try (SocketChannel probe = SocketChannel.open(StandardProtocolFamily.UNIX)) {
+            probe.configureBlocking(false);
+            probe.connect(address);
+        } catch (ConnectException e) {
+            removeSocketIfOwned(path, key);
+            logger.info("Removed socket left by a stopped process: {}", path);
+            return;
         }
-        if (alive) {
-            throw new IOException("Coverage41C is already running for this infobase and debugger: " + pipeName);
+        throw alreadyRunning(path);
+    }
+
+    private static void removeSocketIfOwned(Path path, Object key) throws IOException {
+        if (key != null && key.equals(socketKey(path))) {
+            Files.deleteIfExists(path);
         }
-        Files.delete(socketFile);
-        logger.info("Removed socket left by a stopped process: {}", pipeName);
+    }
+
+    private static Object socketKey(Path path) throws IOException {
+        try {
+            Map<String, Object> attributes = Files.readAttributes(path, "unix:mode,fileKey", LinkOption.NOFOLLOW_LINKS);
+            int mode = (Integer) attributes.get("mode");
+            // The high mode bits identify the socket file type and distinguish it from regular files and symlinks.
+            return (mode & 0170000) == 0140000 ? attributes.get("fileKey") : null;
+        } catch (NoSuchFileException e) {
+            return null;
+        }
     }
 
     private static void startDaemon(Runnable task, String name) {
@@ -110,45 +183,75 @@ public abstract class CoverServer {
         thread.start();
     }
 
-    private void acceptCommands() {
-        logger.info("Set socket listener...");
-        ServerSocket socket = serverSocket;
-        while (listening) {
+    private void acceptWindowsCommands(ServerSocket listener) {
+        logger.info("Set pipe listener...");
+        while (listeningWindows) {
             try {
-                Socket clientSocket = socket.accept();
-                startDaemon(() -> listenSocket(clientSocket), "coverage41c-command");
+                Socket client = listener.accept();
+                startDaemon(() -> {
+                    try (client) {
+                        listenSocket(client.getInputStream(), client.getOutputStream());
+                    } catch (IOException e) {
+                        logger.error(e.getLocalizedMessage());
+                    }
+                }, "coverage41c-command");
             } catch (IOException e) {
-                if (listening) {
+                if (listeningWindows) {
+                    logger.info("Can't accept pipe: {}", e.getLocalizedMessage());
+                }
+            }
+        }
+    }
+
+    private void acceptUnixCommands(ServerSocketChannel listener) {
+        logger.info("Set socket listener...");
+        while (listener.isOpen()) {
+            try {
+                SocketChannel client = listener.accept();
+                startDaemon(() -> {
+                    try (client) {
+                        listenSocket(Channels.newInputStream(client), Channels.newOutputStream(client));
+                    } catch (IOException e) {
+                        logger.error(e.getLocalizedMessage());
+                    }
+                }, "coverage41c-command");
+            } catch (IOException e) {
+                if (listener.isOpen()) {
                     logger.info("Can't accept socket: {}", e.getLocalizedMessage());
                 }
             }
         }
     }
 
-    private void listenSocket(Socket clientSocket) {
-        try (Socket socket = clientSocket) {
-            PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
-            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-            // The client closes the connection after reading the reply. Closing it here first could drop
-            // an unread reply on a Windows named pipe.
+    private void listenSocket(InputStream input, OutputStream output) throws IOException {
+        PrintWriter out = new PrintWriter(output, true);
+        BufferedReader in = new BufferedReader(new InputStreamReader(input));
+        // The client closes the connection after reading the reply. Closing it here first could drop
+        // an unread reply on a Windows named pipe.
+        try {
             String line;
             while ((line = in.readLine()) != null) {
-                String command = line.trim().toLowerCase();
+                String command = line.trim().toLowerCase(Locale.ROOT);
                 logger.info("Get command: {}", command);
                 executeCommand(command, out);
             }
-        } catch (IOException | InterruptedException e) {
-            logger.error(e.getLocalizedMessage());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
     private void executeCommand(String command, PrintWriter out) throws InterruptedException {
+        if (!getSystemStarted() && (PipeMessages.DUMP_COMMAND.equals(command)
+                || PipeMessages.CLEAN_COMMAND.equals(command) || PipeMessages.EXIT_COMMAND.equals(command))) {
+            out.println(PipeMessages.FAIL_RESULT);
+            return;
+        }
         switch (command) {
             case PipeMessages.DUMP_COMMAND:
                 out.println(dumpCoverage() ? PipeMessages.OK_RESULT : PipeMessages.FAIL_RESULT);
                 break;
             case PipeMessages.STATS_COMMAND:
-                out.println(PipeMessages.OK_RESULT);
+                out.println(printCoverageStats() ? PipeMessages.OK_RESULT : PipeMessages.FAIL_RESULT);
                 break;
             case PipeMessages.CLEAN_COMMAND:
                 cleanCoverageData();
@@ -169,6 +272,24 @@ public abstract class CoverServer {
                 break;
             default:
                 logger.info("Unknown command skipped: {}", command);
+        }
+    }
+
+    private boolean printCoverageStats() {
+        if (!getSystemStarted()) {
+            return true;
+        }
+        Map<URI, Map<BigDecimal, Integer>> coverageData = getCoverageData();
+        synchronized (coverageData) {
+            try {
+                if (!coverageData.isEmpty()) {
+                    Utils.printCoverageStats(coverageData, getMetadataOptions(), System.err);
+                }
+                return true;
+            } catch (RuntimeException e) {
+                logger.error("Can't print coverage statistics: {}", e.toString());
+                return false;
+            }
         }
     }
 

@@ -65,6 +65,8 @@ final class ExclusionReport {
     private final Set<String> automaticallyIncludedLines = new TreeSet<>();
     private final Map<String, PrefixRoutinesEntry> prefixRoutines = new TreeMap<>();
     private final Set<String> routineModules = new TreeSet<>();
+    private long totalPrefixRoutines;
+    private long totalPrefixRoutineLines;
     private ExclusionRules.PrefixScope prefixScope;
 
     void setPrefixScope(ExclusionRules.PrefixScope prefixScope) {
@@ -83,6 +85,12 @@ final class ExclusionReport {
         if (lines > 0) {
             entry.modules.add(module);
         }
+    }
+
+    // Each module contributes these totals once even if one method matches several prefixes.
+    void addPrefixRoutineTotals(int routines, int lines) {
+        totalPrefixRoutines += routines;
+        totalPrefixRoutineLines += lines;
     }
 
     boolean hasPrefixRoutines(String source) {
@@ -267,8 +275,7 @@ final class ExclusionReport {
         }
         if (!prefixRoutines.isEmpty()) {
             logger.info("Prefix routines: {} line(s) in {} method(s) of {} module(s)",
-                    prefixRoutines.values().stream().mapToInt(PrefixRoutinesEntry::getIncludedLines).sum(),
-                    prefixRoutines.values().stream().mapToInt(PrefixRoutinesEntry::getRoutines).sum(),
+                    totalPrefixRoutineLines, totalPrefixRoutines,
                     routineModules.size());
         }
         if (!warnings.isEmpty()) {

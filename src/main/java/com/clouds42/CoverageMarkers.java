@@ -72,10 +72,7 @@ final class CoverageMarkers {
         Map<Integer, Range<Integer>> blocks = null;
         int firstCodeIndex = firstCodeIndex(tokens);
 
-        for (Token token : tokens) {
-            if (token.getType() != BSLLexer.LINE_COMMENT) {
-                continue;
-            }
+        for (Token token : activeLineComments(tokens)) {
             Matcher matcher = MARKER.matcher(token.getText());
             if (!matcher.find()) {
                 continue;
@@ -146,6 +143,22 @@ final class CoverageMarkers {
             }
         }
         return Integer.MAX_VALUE;
+    }
+
+    // The lexer emits the same LINE_COMMENT token type inside deleted extension text.
+    static List<Token> activeLineComments(List<Token> tokens) {
+        List<Token> comments = new ArrayList<>();
+        boolean deleted = false;
+        for (Token token : tokens) {
+            if (token.getType() == BSLLexer.PREPROC_DELETE) {
+                deleted = true;
+            } else if (token.getType() == BSLLexer.PREPROC_ENDDELETE) {
+                deleted = false;
+            } else if (!deleted && token.getType() == BSLLexer.LINE_COMMENT) {
+                comments.add(token);
+            }
+        }
+        return comments;
     }
 
     static boolean isInline(List<Token> tokens, Token comment) {

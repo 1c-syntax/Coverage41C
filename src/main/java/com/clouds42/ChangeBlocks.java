@@ -21,7 +21,6 @@
  */
 package com.clouds42;
 
-import com.github._1c_syntax.bsl.parser.BSLLexer;
 import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.tree.ParseTree;
 
@@ -118,10 +117,8 @@ final class ChangeBlocks {
             if (tokens == null) {
                 tokens = tokensSupplier.get();
                 lineComments = new HashMap<>();
-                for (Token token : tokens) {
-                    if (token.getType() == BSLLexer.LINE_COMMENT) {
-                        lineComments.put(token.getLine(), token);
-                    }
+                for (Token token : CoverageMarkers.activeLineComments(tokens)) {
+                    lineComments.put(token.getLine(), token);
                 }
             }
             Token token = lineComments.get(index + 1);

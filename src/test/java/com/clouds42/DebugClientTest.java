@@ -36,6 +36,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -48,9 +49,12 @@ class DebugClientTest {
 
     @AfterEach
     void dispose() throws RuntimeDebugClientException {
-        client.dispose();
-        if (responseServer != null) {
-            responseServer.stop(0);
+        try {
+            client.dispose();
+        } finally {
+            if (responseServer != null) {
+                responseServer.stop(0);
+            }
         }
     }
 
@@ -74,17 +78,16 @@ class DebugClientTest {
 
     @Test
     void httpClientCloseFailurePreservesCauseAndCanBeRetried() throws Exception {
+        AtomicInteger stopCalls = new AtomicInteger();
         DebugClient failing = new DebugClient(new MyRuntimeDebugModelXmlSerializer()) {
             @Override
             protected HttpClient createHttpClient() {
                 return new HttpClient() {
-                    private boolean fail = true;
                     @Override
                     protected void doStart() { }
                     @Override
                     protected void doStop() throws Exception {
-                        if (fail) {
-                            fail = false;
+                        if (stopCalls.incrementAndGet() == 1) {
                             throw new IOException("cannot close transport");
                         }
                         super.doStop();
@@ -98,6 +101,7 @@ class DebugClientTest {
         } finally {
             failing.dispose();
         }
+        assertEquals(2, stopCalls.get());
     }
 
     @Test
@@ -156,6 +160,13 @@ class DebugClientTest {
     }
 
     @Test
+    void emptyErrorResponseIncludesHttpStatus() throws Exception {
+        respond(500, "application/xml", "");
+        RuntimeDebugClientException error = assertThrows(RuntimeDebugClientException.class, client::getApiVersion);
+        assertTrue(error.getMessage().contains("status: 500"), error.getMessage());
+    }
+
+    @Test
     void suspendedInitialSettingsAreSentToDebugger() throws Exception {
         try (FakeDebugServer dbgs = new FakeDebugServer()) {
             client.configure(dbgs.url(), UUID.randomUUID(), "DefAlias");
@@ -182,8 +193,8 @@ class DebugClientTest {
             exchange.getRequestBody().readAllBytes();
             exchange.getResponseHeaders().set("Content-Type", contentType);
             byte[] content = body.getBytes(StandardCharsets.UTF_8);
-            exchange.sendResponseHeaders(status, status == 204 ? -1 : content.length);
-            if (status != 204) {
+            exchange.sendResponseHeaders(status, content.length == 0 ? -1 : content.length);
+            if (content.length > 0) {
                 exchange.getResponseBody().write(content);
             }
             exchange.close();

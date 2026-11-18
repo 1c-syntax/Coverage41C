@@ -80,8 +80,11 @@ case "`uname`" in
     ;;
 esac
 
-if [ -z "\$EDT_LOCATION" ]; then
-    EDT_LOCATION=\$(ring edt locations list | sed -n '/./{p;q;}')
+if [ -z "\$EDT_LOCATION" ] && command -v ring >/dev/null 2>&1; then
+    EDT_ROOT=\$(ring edt locations list | sed -n '/./{p;q;}')
+    if [ -n "\$EDT_ROOT" ]; then
+        EDT_LOCATION="\$EDT_ROOT/plugins"
+    fi
 fi
 
 EDT_CLASSPATH=""

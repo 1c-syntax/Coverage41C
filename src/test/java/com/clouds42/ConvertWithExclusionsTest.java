@@ -32,6 +32,7 @@ import picocli.CommandLine;
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -45,10 +46,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.stream.Stream;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 // Сквозная проверка: исходники + конфиг исключений + сырые замеры → итоговый отчёт покрытия.
 class ConvertWithExclusionsTest {
@@ -91,8 +97,8 @@ class ConvertWithExclusionsTest {
         Path output = convert(MARKED_MODULE, null, new int[]{2, 4, 7}, "LCOV");
 
         // Порядок строк DA в LCOV не гарантирован.
-        assertEquals(Set.of("TN:", "SF:" + MODULE, "DA:2,1", "DA:7,1", "DA:10,0", "DA:11,0", "LH:2", "LF:4",
-                "end_of_record"), Set.copyOf(lcovRecord(output, MODULE)));
+        assertEquals(Stream.of("TN:", "SF:" + MODULE, "DA:2,1", "DA:7,1", "DA:10,0", "DA:11,0", "LH:2", "LF:4",
+                "end_of_record").sorted().toList(), sortedLcovRecord(output, MODULE));
     }
 
     @Test
@@ -108,7 +114,7 @@ class ConvertWithExclusionsTest {
 
         assertFalse(genericCoverage(convert(module, null, new int[]{3}, "GENERIC_COVERAGE")).containsKey(MODULE));
         assertFalse(Files.readAllLines(convert(module, null, new int[]{3}, "LCOV")).contains("SF:" + MODULE));
-        assertEquals(Map.of(), coberturaHits(convert(module, null, new int[]{3}, "COBERTURA"), MODULE));
+        assertNull(coberturaClass(convert(module, null, new int[]{3}, "COBERTURA"), MODULE));
     }
 
     @Test
@@ -199,6 +205,106 @@ class ConvertWithExclusionsTest {
         assertTrue(output.contains(">>> Процедура А() Экспорт"), output);
         assertTrue(output.contains("Can't find file key: 00000000-0000-0000-0000-000000000000/"), output);
         assertEquals(Map.of(2, false, 3, false, 4, false), genericCoverage(tempDir.resolve("coverage.xml")).get(MODULE));
+    }
+
+    @Test
+    void rejectsExclusionReportThatIsTheRawInput() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path rawCoverage = Files.copy(Path.of(INTERNAL_XML), tempDir.resolve("raw.xml"));
+
+        assertReportCollision(project, rawCoverage, rawCoverage, "--exclusion-report", rawCoverage.toString());
+    }
+
+    @Test
+    void rejectsConfiguredReportThatIsTheRawInput() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path rawCoverage = Files.copy(Path.of(INTERNAL_XML), project.resolve("raw.xml"));
+        Path config = Files.writeString(tempDir.resolve("team.json"), "{\"exclusionReport\":\"raw.xml\"}");
+
+        assertReportCollision(project, rawCoverage, rawCoverage, "--config", config.toString());
+    }
+
+    @Test
+    void rejectsExclusionReportThatIsASymlinkToRawInput() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path rawCoverage = Files.copy(Path.of(INTERNAL_XML), tempDir.resolve("raw.xml"));
+        Path alias = tempDir.resolve("report.json");
+        createSymbolicLink(alias, rawCoverage);
+
+        assertReportCollision(project, rawCoverage, rawCoverage, "--exclusion-report", alias.toString());
+    }
+
+    @Test
+    void missingRawInputIsNotCreatedByTheExclusionReport() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path rawDirectory = Files.createDirectory(tempDir.resolve("raw"));
+        Path rawCoverage = rawDirectory.resolve("coverage.xml");
+        Path alias = tempDir.resolve("alias");
+        createSymbolicLink(alias, rawDirectory);
+
+        StringWriter stderr = new StringWriter();
+        assertEquals(CommandLine.ExitCode.SOFTWARE, convert(project, rawCoverage, tempDir.resolve("coverage.xml"), stderr,
+                "--exclusion-report", alias.resolve(rawCoverage.getFileName()).toString()), stderr.toString());
+        assertFalse(Files.exists(rawCoverage));
+    }
+
+    @Test
+    void rejectsExclusionReportThatIsTheSingleConfigInput() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path config = Files.writeString(tempDir.resolve("team.json"), "{\"includeUsers\":[\"unit\"]}");
+
+        assertReportCollision(project, Path.of(INTERNAL_XML), config,
+                "--config", config.toString(), "--exclusion-report", config.toString());
+    }
+
+    @Test
+    void rejectsExclusionReportThatIsAHardLinkToAConfigInput() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path configDir = Files.createDirectory(tempDir.resolve("conf"));
+        Path config = Files.writeString(configDir.resolve("team.json"), "{\"includeUsers\":[\"unit\"]}");
+        Path alias = tempDir.resolve("report.json");
+        try {
+            Files.createLink(alias, config);
+        } catch (IOException | UnsupportedOperationException error) {
+            assumeTrue(false, () -> "Cannot create a hard link: " + error.getMessage());
+        }
+
+        assertReportCollision(project, Path.of(INTERNAL_XML), config,
+                "--config", configDir.toString(), "--exclusion-report", alias.toString());
+    }
+
+    @Test
+    void usesCliReportBesideConfigEvenWhenConfiguredPathAliasesRawInput() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path rawCoverage = Files.copy(Path.of(INTERNAL_XML), project.resolve("raw.xml"));
+        byte[] rawContents = Files.readAllBytes(rawCoverage);
+        Path config = Files.writeString(tempDir.resolve("team.json"), "{\"exclusionReport\":\"raw.xml\"}");
+        Path report = tempDir.resolve("report.json");
+        StringWriter stderr = new StringWriter();
+
+        assertEquals(CommandLine.ExitCode.OK, convert(project, rawCoverage, tempDir.resolve("coverage.xml"), stderr,
+                "--config", config.toString(), "--exclusion-report", report.toString()), stderr.toString());
+        assertTrue(new ObjectMapper().readTree(report.toFile()).has("totalLines"));
+        assertArrayEquals(rawContents, Files.readAllBytes(rawCoverage));
+    }
+
+    private static void createSymbolicLink(Path link, Path target) {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (IOException | UnsupportedOperationException error) {
+            assumeTrue(false, () -> "Cannot create a symbolic link: " + error.getMessage());
+        }
+    }
+
+    private void assertReportCollision(Path project, Path rawCoverage, Path input, String... options) throws Exception {
+        byte[] original = Files.readAllBytes(input);
+        Path output = tempDir.resolve("coverage.xml");
+        StringWriter stderr = new StringWriter();
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, convert(project, rawCoverage, output, stderr, options), stderr.toString());
+        assertTrue(stderr.toString().contains("Exclusion report would overwrite input file"), stderr.toString());
+        assertArrayEquals(original, Files.readAllBytes(input));
+        assertFalse(Files.exists(output));
     }
 
     @Test
@@ -382,8 +488,8 @@ class ConvertWithExclusionsTest {
     @Test
     void prefixedMethodsShapeLcovAndCobertura() throws Exception {
         Path lcov = convert(ROUTINE_MODULE, ROUTINES, new int[]{3, 7, 12}, "LCOV");
-        assertEquals(Set.of("TN:", "SF:" + MODULE, "DA:7,1", "DA:8,0", "DA:9,0", "DA:12,1", "DA:13,0", "LH:2", "LF:5",
-                "end_of_record"), Set.copyOf(lcovRecord(lcov, MODULE)));
+        assertEquals(Stream.of("TN:", "SF:" + MODULE, "DA:7,1", "DA:8,0", "DA:9,0", "DA:12,1", "DA:13,0", "LH:2", "LF:5",
+                "end_of_record").sorted().toList(), sortedLcovRecord(lcov, MODULE));
 
         Path cobertura = convert(ROUTINE_MODULE, ROUTINES, new int[]{3, 7, 12}, "COBERTURA");
         assertEquals(Map.of(7, 1, 8, 0, 9, 0, 12, 1, 13, 0), coberturaHits(cobertura, MODULE));
@@ -465,34 +571,40 @@ class ConvertWithExclusionsTest {
         return commandLine.execute(arguments.toArray(new String[0]));
     }
 
-    private static List<String> lcovRecord(Path output, String path) throws Exception {
+    private static List<String> sortedLcovRecord(Path output, String path) throws Exception {
         List<String> lines = Files.readAllLines(output);
-        int start = lines.indexOf("SF:" + path) - 1;
-        int end = start;
+        int file = lines.indexOf("SF:" + path);
+        assertTrue(file > 0, "Missing LCOV record for " + path);
+        int end = file;
         while (!lines.get(end).equals("end_of_record")) {
             end++;
         }
-        return lines.subList(start, end + 1);
+        return lines.subList(file - 1, end + 1).stream().sorted().toList();
     }
 
-    // номер строки → число попаданий
-    private static Map<Integer, Integer> coberturaHits(Path output, String path) throws Exception {
+    private static Element coberturaClass(Path output, String path) throws Exception {
         NodeList classes = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(output.toFile())
                 .getElementsByTagName("class");
         for (int i = 0; i < classes.getLength(); i++) {
             Element coberturaClass = (Element) classes.item(i);
-            if (!coberturaClass.getAttribute("filename").equals(path)) {
-                continue;
+            if (coberturaClass.getAttribute("filename").equals(path)) {
+                return coberturaClass;
             }
-            Map<Integer, Integer> hits = new TreeMap<>();
-            NodeList lines = coberturaClass.getElementsByTagName("line");
-            for (int j = 0; j < lines.getLength(); j++) {
-                Element line = (Element) lines.item(j);
-                hits.put(Integer.parseInt(line.getAttribute("number")), Integer.parseInt(line.getAttribute("hits")));
-            }
-            return hits;
         }
-        return Map.of();
+        return null;
+    }
+
+    // номер строки → число попаданий
+    private static Map<Integer, Integer> coberturaHits(Path output, String path) throws Exception {
+        Element coberturaClass = coberturaClass(output, path);
+        assertNotNull(coberturaClass, "Missing Cobertura class for " + path);
+        Map<Integer, Integer> hits = new TreeMap<>();
+        NodeList lines = coberturaClass.getElementsByTagName("line");
+        for (int i = 0; i < lines.getLength(); i++) {
+            Element line = (Element) lines.item(i);
+            hits.put(Integer.parseInt(line.getAttribute("number")), Integer.parseInt(line.getAttribute("hits")));
+        }
+        return hits;
     }
 
     // path → (номер строки → покрыта ли)

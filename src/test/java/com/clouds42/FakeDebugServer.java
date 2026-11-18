@@ -58,6 +58,7 @@ import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -83,10 +84,16 @@ class FakeDebugServer implements AutoCloseable {
     private volatile AttachDebugUIResult attachResult = AttachDebugUIResult.REGISTERED;
     private volatile String apiVersion = "8.3.24";
     private volatile boolean compressResponses;
+    private final Map<String, PausedCommand> pausedCommands = new ConcurrentHashMap<>();
     private final Map<String, Integer> failures = new ConcurrentHashMap<>();
     private final Map<String, String> exceptions = new ConcurrentHashMap<>();
     // Что отдаёт getDbgTargets: по умолчанию один серверный предмет без имени пользователя, как раньше.
     private volatile List<DebugTargetId> targets = List.of(target(UUID.randomUUID()));
+
+    private static class PausedCommand {
+        private final CountDownLatch arrived = new CountDownLatch(1);
+        private final CountDownLatch release = new CountDownLatch(1);
+    }
 
     static final class Request {
         final String command;
@@ -130,6 +137,27 @@ class FakeDebugServer implements AutoCloseable {
     // Отвечает на команду HTTP-ошибкой без тела.
     void fail(String command, int status) {
         failures.put(command, status);
+    }
+
+    void recover(String command) {
+        failures.remove(command);
+    }
+
+    void pause(String command) {
+        pausedCommands.put(command, new PausedCommand());
+    }
+
+    void resume(String command) {
+        PausedCommand pause = pausedCommands.remove(command);
+        if (pause != null) {
+            pause.release.countDown();
+        }
+    }
+
+    void awaitPaused(String command) throws InterruptedException {
+        if (!pausedCommands.get(command).arrived.await(10, TimeUnit.SECONDS)) {
+            throw new IllegalStateException("No paused debugger request for " + command);
+        }
     }
 
     void setTargets(DebugTargetId... newTargets) {
@@ -246,6 +274,11 @@ class FakeDebugServer implements AutoCloseable {
             String command = query.replaceFirst("^cmd=([^&]*).*$", "$1");
             String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             requests.add(new Request(command, body));
+            PausedCommand pause = pausedCommands.get(command);
+            if (pause != null) {
+                pause.arrived.countDown();
+                pause.release.await();
+            }
             if (command.equals("setMeasureMode") && !body.contains("measureModeSeanceID")) {
                 events.addAll(eventsOnMeasureOff);
                 eventsOnMeasureOff.clear();
@@ -332,9 +365,11 @@ class FakeDebugServer implements AutoCloseable {
 
     private static byte[] deflate(byte[] content) throws IOException {
         ByteArrayOutputStream compressed = new ByteArrayOutputStream();
-        try (DeflaterOutputStream output = new DeflaterOutputStream(compressed,
-                new Deflater(Deflater.DEFAULT_COMPRESSION, true))) {
+        Deflater deflater = new Deflater(Deflater.DEFAULT_COMPRESSION, true);
+        try (DeflaterOutputStream output = new DeflaterOutputStream(compressed, deflater)) {
             output.write(content);
+        } finally {
+            deflater.end();
         }
         return compressed.toByteArray();
     }

@@ -23,7 +23,6 @@ package com.clouds42;
 
 import com.github._1c_syntax.bsl.parser.BSLTokenizer;
 
-
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -78,10 +77,11 @@ final class CoverMapBuilder {
             return new HashMap<>();
         }
         int[] linesToCover = LinesToCoverage.getLines(tokenizer.getAst());
-        CoverageMarkers markers = linesToCover.length > 0 ? CoverageMarkers.parse(tokenizer) : null;
+        CoverageMarkers markers = CoverageMarkers.parse(tokenizer);
         // Cover:file-off in a module outside coverage keeps it out of the totals, as today.
-        if (outside && markers != null && markers.getMarkers().stream().anyMatch(CoverageMarker::isFileOff)) {
-            recordAutomaticallyClosedBlocks(blocks, module, report, new HashMap<>(), false);
+        if (outside && markers.getMarkers().stream().anyMatch(CoverageMarker::isFileOff)) {
+            recordChangeBlocks(blocks, module, report, Map.of());
+            recordAutomaticallyClosedBlocks(blocks, module, report, Map.of(), false);
             return new HashMap<>();
         }
 
@@ -97,10 +97,7 @@ final class CoverMapBuilder {
                 }
             }
         }
-        if (markers != null) {
-            if (!outside) {
-                markers.getWarnings().forEach(warning -> report.warn(module.getPath() + ":" + warning));
-            }
+        if (linesToCover.length > 0) {
             markers.getMarkers().forEach(marker -> sources.add(Source.marker(module, marker)));
             for (ExclusionRules.Rule rule : rules.getRules()) {
                 if (rule.isLineRule()) {
@@ -116,7 +113,9 @@ final class CoverMapBuilder {
         int excluded = 0;
         int auto = 0;
         int included = 0;
+        int prefixedLines = 0;
         Map<String, Integer> routineLines = new HashMap<>();
+        List<Source> matchedSources = new ArrayList<>();
         for (int line : linesToCover) {
             boolean inBlock = blocks.covers(line);
             PrefixRoutines.Routine routine = found.routineAt(line);
@@ -124,12 +123,12 @@ final class CoverMapBuilder {
                 continue;
             }
             counted++;
-            match(sources, line);
-            if (hit(sources, CoverageMarker.Kind.OFF, line)) {
+            CoverageMarker.Kind kind = applyRules(sources, matchedSources, line);
+            if (kind == CoverageMarker.Kind.OFF) {
                 excluded++;
                 continue;
             }
-            if (hit(sources, CoverageMarker.Kind.AUTO, line)) {
+            if (kind == CoverageMarker.Kind.AUTO) {
                 auto++;
                 coverMap.put(new BigDecimal(line), -1);
             } else {
@@ -140,17 +139,21 @@ final class CoverMapBuilder {
                 blocks.sourcesCovering(line).forEach(source -> includedBySource.merge(source, 1, Integer::sum));
             }
             if (routine != null) {
-                routineLines.merge(routine.getPrefix().getSource(), 1, Integer::sum);
+                prefixedLines++;
+                routine.getPrefixes().forEach(prefix -> routineLines.merge(prefix.getSource(), 1, Integer::sum));
             }
+        }
+        if (!outside || counted > 0) {
+            markers.getWarnings().forEach(warning -> report.warn(module.getPath() + ":" + warning));
         }
         report.addModuleTotals(counted, excluded, auto);
         report.addIncludedLines(module.getPath(), included);
-        blocks.bySource().forEach((source, sourceBlocks) -> report.recordChangeBlocks(source,
-                sourceBlocks.get(0).getMarker().getTeam(), module.getPath(), sourceBlocks.size(),
-                includedBySource.getOrDefault(source, 0)));
+        recordChangeBlocks(blocks, module, report, includedBySource);
 
         Map<String, Integer> routinesBySource = new LinkedHashMap<>();
-        found.getRoutines().forEach(routine -> routinesBySource.merge(routine.getPrefix().getSource(), 1, Integer::sum));
+        found.getRoutines().forEach(routine -> routine.getPrefixes()
+                .forEach(prefix -> routinesBySource.merge(prefix.getSource(), 1, Integer::sum)));
+        report.addPrefixRoutineTotals(found.getRoutines().size(), prefixedLines);
         routinesBySource.forEach((source, count) -> report.recordPrefixRoutines(source, module.getPath(), count,
                 routineLines.getOrDefault(source, 0)));
 
@@ -163,6 +166,13 @@ final class CoverMapBuilder {
             }
         }
         return coverMap;
+    }
+
+    private static void recordChangeBlocks(ChangeBlocks blocks, ModuleId module, ExclusionReport report,
+                                           Map<String, Integer> includedBySource) {
+        blocks.bySource().forEach((source, sourceBlocks) -> report.recordChangeBlocks(source,
+                sourceBlocks.get(0).getMarker().getTeam(), module.getPath(), sourceBlocks.size(),
+                includedBySource.getOrDefault(source, 0)));
     }
 
     private static void recordAutomaticallyClosedBlocks(ChangeBlocks blocks, ModuleId module,
@@ -192,23 +202,24 @@ final class CoverMapBuilder {
         return lines;
     }
 
-    private static void match(List<Source> sources, int line) {
+    private static CoverageMarker.Kind applyRules(List<Source> sources, List<Source> matchedSources, int line) {
+        matchedSources.clear();
+        CoverageMarker.Kind kind = null;
         for (Source source : sources) {
             if (source.covers.test(line)) {
                 source.matched = true;
+                matchedSources.add(source);
+                if (kind == null || source.kind == CoverageMarker.Kind.OFF) {
+                    kind = source.kind;
+                }
             }
         }
-    }
-
-    private static boolean hit(List<Source> sources, CoverageMarker.Kind kind, int line) {
-        boolean hit = false;
-        for (Source source : sources) {
-            if (source.kind == kind && source.covers.test(line)) {
+        for (Source source : matchedSources) {
+            if (source.kind == kind) {
                 source.hits++;
-                hit = true;
             }
         }
-        return hit;
+        return kind;
     }
 
     private static final class Source {

@@ -83,6 +83,9 @@ class UserTargetsTest {
         assertEquals(ACCEPTED, targets.verdict(measure(null, target("r", null)), false));
         assertEquals(UNKNOWN, targets.verdict(measure(target("z", null), null), false));
         assertEquals(UNKNOWN, targets.verdict(measure(null, null), false));
+        var bothTargets = measure(target("x", "unit"), target("y", "smoke"));
+        assertEquals("x", UserTargets.targetIdOf(bothTargets));
+        assertEquals(ACCEPTED, targets.verdict(bothTargets, false));
         assertEquals("z", UserTargets.targetIdOf(measure(target("z", null), null)));
         assertEquals("y", UserTargets.targetIdOf(measure(null, target("y", null))));
         assertNull(UserTargets.targetIdOf(measure(null, null)));
@@ -97,6 +100,10 @@ class UserTargetsTest {
         // пакету верим и дальше: следующие пакеты с одним id тоже приняты, предмет засчитан пользователю пакета
         assertEquals(ACCEPTED, targets.verdict(measure(target("r", null), null), false));
         assertTrue(targets.matchedAnyTarget());
+
+        assertEquals(REJECTED, targets.verdict(measure(target("r", "smoke"), null), false));
+        assertEquals(REJECTED, targets.verdict(measure(target("r", null), null), false));
+        assertTrue(targets.matchedAnyTarget());
     }
 
     // Подключение не удалось — следующее объявление того же предмета пробует снова.
@@ -109,21 +116,26 @@ class UserTargetsTest {
         assertFalse(targets.register(target("a", "unit")));
     }
 
-    // Пакет без имени от незнакомого предмета требует опроса dbgs; с именем или знакомый — нет.
+    // Пакет без имени требует поиска, пока имя предмета неизвестно.
     @Test
-    void lookupIsNeededOnlyForUnknownTargetWithoutUser() throws Exception {
+    void lookupIsNeededForTargetWithoutKnownUser() throws Exception {
         UserTargets targets = new UserTargets(IncludeUsers.load(null, List.of("unit")));
         targets.register(target("k", null));
         assertTrue(targets.needsLookup(measure(target("z", null), null)));
         assertFalse(targets.needsLookup(measure(target("z", "smoke"), null)));
+        assertTrue(targets.needsLookup(measure(target("k", null), null)));
+        targets.markUnknown("k");
         assertFalse(targets.needsLookup(measure(target("k", null), null)));
+        targets.register(target("named", "smoke"));
+        assertFalse(targets.needsLookup(measure(target("named", null), null)));
         assertFalse(targets.needsLookup(measure(null, null)));
         targets.markUnknown("z");
         assertFalse(targets.needsLookup(measure(target("z", null), null)));
         assertEquals(List.of(
-                "Include users: 0 target(s) accepted, 0 rejected, 2 unknown; "
+                "Include users: 0 target(s) accepted, 1 rejected, 2 unknown; "
                         + "0 measure packet(s) accepted, 0 rejected, 0 unknown",
                 "  accepted: unit (0 target(s), 0 packet(s))",
+                "  rejected: smoke (1 target(s), 0 packet(s))",
                 "  unknown: 2 target(s) without user name, 0 packet(s) without target or user"), targets.summary());
         assertFalse(new UserTargets(IncludeUsers.NONE).needsLookup(measure(target("z", null), null)));
     }

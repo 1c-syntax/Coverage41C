@@ -146,15 +146,17 @@ class ValidateCommandTest {
 
     @Test
     void commandLineExclusionReportOverridesConfig() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
         File config = config("{'exclusionReport':'from-config.json','exclude':{'objects':['Catalog.Справочник1']}}");
         Path report = tempDir.resolve("from-cli.json");
         StringWriter stderr = new StringWriter();
 
-        int exitCode = validate(stderr, "--config", config.getPath(), "--exclusion-report", report.toString());
+        int exitCode = validateProject(project, stderr, "--config", config.getPath(),
+                "--exclusion-report", report.toString());
 
         assertEquals(CommandLine.ExitCode.OK, exitCode, stderr.toString());
         assertTrue(Files.exists(report));
-        assertFalse(Files.exists(tempDir.resolve("from-config.json")));
+        assertFalse(Files.exists(project.resolve("from-config.json")));
     }
 
     @Test
@@ -479,6 +481,31 @@ class ValidateCommandTest {
         assertEquals(5, root.get("totalLines").asInt());
         assertEquals(SIMPLE_MODULE, root.get("prefixRoutines").get(0).get("modules").get(0).asText());
         assertTrue(root.get("scope").get("modulesOutOfScope").asInt() > 0);
+    }
+
+    @Test
+    void overlappingPrefixesMatchWithoutDoublingRoutineTotals() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Files.writeString(project.resolve(SIMPLE_MODULE),
+                "Процедура тестРассчитать()\n\tРассчитать();\nКонецПроцедуры\n");
+        File config = config("{'includePrefix':['тест','тестРас'],'prefixScope':"
+                + "{'subsystems':false,'modules':false,'routines':true}}");
+        Path report = tempDir.resolve("exclusions.json");
+        StringWriter stderr = new StringWriter();
+
+        String output = captureLog(() -> assertEquals(CommandLine.ExitCode.OK, validateProject(project, stderr,
+                "--config", config.getPath(), "--strict", "--exclusion-report", report.toString()), stderr.toString()));
+
+        assertEquals(List.of(), warnings(report));
+        JsonNode root = new ObjectMapper().readTree(report.toFile());
+        assertEquals(2, root.get("totalLines").asInt());
+        JsonNode routines = root.get("prefixRoutines");
+        assertEquals(2, routines.size());
+        assertEquals(1, routines.get(0).get("routines").asInt());
+        assertEquals(1, routines.get(1).get("routines").asInt());
+        assertEquals(2, routines.get(0).get("includedLines").asInt());
+        assertEquals(2, routines.get(1).get("includedLines").asInt());
+        assertTrue(output.contains("Prefix routines: 2 line(s) in 1 method(s) of 1 module(s)"), output);
     }
 
     @Test

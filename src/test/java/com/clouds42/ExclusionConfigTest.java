@@ -157,7 +157,7 @@ class ExclusionConfigTest {
     @Test
     void readingOrderOfConfigFilesDoesNotMatter() throws Exception {
         String byObject = "{'exclude':{'objects':['Catalog.Справочник1']}}";
-        String byPath = "{'exclude':{'paths':['**/Catalogs/**']}}";
+        String byPath = "{'exclude':{'paths':['**/Documents/**']}}";
         Path first = Files.createDirectory(tempDir.resolve("first"));
         write(first.resolve("a.json"), byObject);
         write(first.resolve("b.json"), byPath);
@@ -166,7 +166,14 @@ class ExclusionConfigTest {
         write(second.resolve("b.json"), byObject);
         Set<String> baseline = coveredFiles(null);
 
-        Set<String> expected = without(baseline, path -> path.contains("/Catalogs/"));
+        Set<String> objectOnly = coveredFiles(config("object.json", byObject));
+        Set<String> pathOnly = coveredFiles(config("path.json", byPath));
+        assertTrue(objectOnly.size() < baseline.size());
+        assertTrue(pathOnly.size() < baseline.size());
+        Set<String> expected = new HashSet<>(objectOnly);
+        expected.retainAll(pathOnly);
+        assertTrue(expected.size() < objectOnly.size());
+        assertTrue(expected.size() < pathOnly.size());
         assertEquals(expected, coveredFiles(first.toFile()));
         assertEquals(expected, coveredFiles(second.toFile()));
     }
@@ -273,7 +280,8 @@ class ExclusionConfigTest {
     void includeSubsystemsNarrowsRulesOfOtherFiles() throws Exception {
         Path directory = tempDir.resolve("configs");
         Files.createDirectories(directory);
-        write(directory.resolve("a.json"), "{'includeSubsystems':['ПодчиненнаяПодсистема']}");
+        String scope = "{'includeSubsystems':['ПодчиненнаяПодсистема']}";
+        write(directory.resolve("a.json"), scope);
         write(directory.resolve("b.json"), "{'exclude':{'objects':['Document.Документ1']}}");
         Path report = tempDir.resolve("report.json");
         Path output = tempDir.resolve("coverage.xml");
@@ -282,12 +290,12 @@ class ExclusionConfigTest {
         assertEquals(0, convert(directory.toFile(), output, stderr, "--exclusion-report", report.toString()),
                 stderr.toString());
 
-        NodeList files = read(output).getElementsByTagName("file");
-        for (int index = 0; index < files.getLength(); index++) {
-            assertFalse(((Element) files.item(index)).getAttribute("path").contains("Документ1"));
-        }
-        // Правило попало только в модули вне охвата: это не опечатка, предупреждения нет.
-        assertEquals(0, new ObjectMapper().readTree(report.toFile()).get("warnings").size());
+        Set<String> covered = filePaths(output);
+        assertTrue(covered.stream().noneMatch(path -> path.contains("Документ1")));
+        assertEquals(coveredFiles(config("scope.json", scope)), covered);
+        JsonNode root = new ObjectMapper().readTree(report.toFile());
+        assertEquals(0, root.get("entries").size());
+        assertEquals(0, root.get("warnings").size());
     }
 
     @Test
@@ -306,7 +314,7 @@ class ExclusionConfigTest {
             System.setErr(originalErr);
         }
 
-        List<String> summary = Arrays.stream(log.toString(StandardCharsets.UTF_8).split("\n"))
+        List<String> summary = log.toString(StandardCharsets.UTF_8).lines()
                 .filter(line -> line.contains("ExclusionReport - "))
                 .map(line -> line.substring(line.indexOf("ExclusionReport - ") + "ExclusionReport - ".length()))
                 .filter(line -> !line.contains("does not match"))
@@ -364,6 +372,10 @@ class ExclusionConfigTest {
         Path output = tempDir.resolve("coverage-" + (++outputCounter) + ".xml");
         StringWriter stderr = new StringWriter();
         assertEquals(0, convert(config, output, stderr), stderr.toString());
+        return filePaths(output);
+    }
+
+    private static Set<String> filePaths(Path output) throws Exception {
         NodeList files = read(output).getElementsByTagName("file");
         return IntStream.range(0, files.getLength())
                 .mapToObj(index -> ((Element) files.item(index)).getAttribute("path"))

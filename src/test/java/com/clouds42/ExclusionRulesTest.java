@@ -43,6 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class ExclusionRulesTest {
 
@@ -87,10 +88,14 @@ class ExclusionRulesTest {
         write("a.json", "{'changeMarkers':{},'unclosedBlocks':{'enabled':true}}");
         write("b.json", "{'changeMarkers':{}}");
         ExclusionRules rules = load(tempDir.toFile());
-        assertTrue(rules.getChangeMarkers().stream().filter(marker -> marker.getSource().startsWith("a.json"))
-                .allMatch(ExclusionRules.ChangeMarker::closesUnclosed));
-        assertFalse(rules.getChangeMarkers().stream().filter(marker -> marker.getSource().startsWith("b.json"))
-                .anyMatch(ExclusionRules.ChangeMarker::closesUnclosed));
+        List<ExclusionRules.ChangeMarker> first = rules.getChangeMarkers().stream()
+                .filter(marker -> marker.getSource().startsWith("a.json")).toList();
+        List<ExclusionRules.ChangeMarker> second = rules.getChangeMarkers().stream()
+                .filter(marker -> marker.getSource().startsWith("b.json")).toList();
+        assertEquals(2, first.size());
+        assertEquals(2, second.size());
+        assertTrue(first.stream().allMatch(ExclusionRules.ChangeMarker::closesUnclosed));
+        assertFalse(second.stream().anyMatch(ExclusionRules.ChangeMarker::closesUnclosed));
     }
 
     @Test
@@ -159,6 +164,22 @@ class ExclusionRulesTest {
                         + " is inside the configuration directory and would be read as a config on the next run",
                 assertThrows(IllegalArgumentException.class,
                         () -> load(tempDir.resolve("conf").toFile())).getMessage());
+    }
+
+    @Test
+    void rejectsNewJsonReportInLinkedConfigDirectory() throws Exception {
+        Path directory = Files.createDirectory(tempDir.resolve("conf"));
+        Path alias = tempDir.resolve("alias");
+        try {
+            Files.createSymbolicLink(alias, directory);
+        } catch (IOException | UnsupportedOperationException e) {
+            assumeTrue(false, "Symbolic links unavailable: " + e.getMessage());
+        }
+        write("conf/a.json", "{'exclusionReport':'alias/report.json','exclude':{'objects':['Catalog.А']}}");
+
+        String message = assertThrows(IllegalArgumentException.class, () -> load(directory.toFile())).getMessage();
+        assertTrue(message.contains("is inside the configuration directory"), message);
+        assertFalse(Files.exists(directory.resolve("report.json")));
     }
 
     @Test
@@ -642,6 +663,30 @@ class ExclusionRulesTest {
         Files.writeString(directory.resolve("TEAM.JSON"), "{\"exclude\":{\"objects\":[\"Catalog.А\"]}}");
 
         assertEquals(List.of("TEAM.JSON → exclude.objects[0]"), sources(load(directory.toFile())));
+    }
+
+    @Test
+    void rejectsExplicitNullInIncludeLists() throws Exception {
+        for (String field : List.of("includeSubsystems", "includePrefix")) {
+            File file = write("a.json", "{'" + field + "':null,'auto':{'lines':['.*']}}");
+            String message = assertThrows(IllegalArgumentException.class, () -> load(file)).getMessage();
+            assertTrue(message.contains("a.json") && message.contains(field), message);
+        }
+    }
+
+    @Test
+    void rejectsNullChangeMarkerWithItsIndex() throws Exception {
+        File file = write("a.json", "{'changeMarkers':[{},null]}");
+        String message = assertThrows(IllegalArgumentException.class, () -> load(file)).getMessage();
+        assertTrue(message.contains("a.json") && message.contains("changeMarkers[1]"), message);
+    }
+
+    @Test
+    void rejectsMoreThanOneJsonDocument() throws Exception {
+        File file = write("a.json", "{'auto':{'lines':['.*']}} {'exclude':{'lines':['.*']}}");
+        String message = assertThrows(IllegalArgumentException.class, () -> load(file)).getMessage();
+        assertTrue(message.contains("a.json") && message.contains("Trailing token"), message);
+        assertEquals(1, load(write("b.json", "{'auto':{'lines':['.*']}} \n\t")).getRules().size());
     }
 
     @Test

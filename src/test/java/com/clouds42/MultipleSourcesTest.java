@@ -32,6 +32,7 @@ import picocli.CommandLine;
 
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -47,10 +48,12 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class MultipleSourcesTest {
     static final String MODULE = "CommonModules/ПростойОбщийМодуль/Ext/Module.bsl";
     static final String KEY = "1be4af7e-334e-49fa-a9f9-d80c737ff954/d5963243-262e-4398-b4d7-fb16d06484f6";
+    private static final String UNKNOWN_KEY = "00000000-0000-0000-0000-000000000000/00000000-0000-0000-0000-000000000000";
     static final String TEXT = "Процедура А() Экспорт\n\tТиповой();\n\t// ++ уч\n\tНаш();\n\t// -- уч\nКонецПроцедуры\n";
     @TempDir Path tempDir;
     Path project;
@@ -243,23 +246,38 @@ class MultipleSourcesTest {
     }
 
     @Test
-    void sourceOutsideProjectIsRejectedEvenThroughSymlink() throws Exception {
-        Files.createSymbolicLink(project.resolve("outside"), tempDir);
-        for (String directory : List.of(tempDir.toString(), "outside")) {
-            StringWriter error = new StringWriter();
-            assertEquals(1, convert(error, "--source", "A=" + directory));
-            assertTrue(error.toString().contains("Source directory must be inside -P"), error.toString());
-            assertFalse(Files.exists(output));
-        }
+    void absoluteSourceOutsideProjectIsRejected() {
+        assertSourceOutsideProjectIsRejected(tempDir.toString());
     }
 
     @Test
-    void samePhysicalSourceCannotBeRegisteredThroughSymlinkTwice() throws Exception {
-        Files.createSymbolicLink(project.resolve("alias"), project.resolve("configuration"));
+    void sourceOutsideProjectIsRejectedThroughSymlink() {
+        createSymbolicLink(project.resolve("outside"), tempDir);
+        assertSourceOutsideProjectIsRejected("outside");
+    }
+
+    private void assertSourceOutsideProjectIsRejected(String directory) {
+        StringWriter error = new StringWriter();
+        assertEquals(1, convert(error, "--source", "A=" + directory));
+        assertTrue(error.toString().contains("Source directory must be inside -P"), error.toString());
+        assertFalse(Files.exists(output));
+    }
+
+    @Test
+    void samePhysicalSourceCannotBeRegisteredThroughSymlinkTwice() {
+        createSymbolicLink(project.resolve("alias"), project.resolve("configuration"));
         StringWriter error = new StringWriter();
         assertEquals(1, convert(error, "--source", "=configuration", "--source", "A=alias"));
         assertTrue(error.toString().contains("Duplicate source directory"), error.toString());
         assertFalse(Files.exists(output));
+    }
+
+    private static void createSymbolicLink(Path link, Path target) {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (IOException | UnsupportedOperationException error) {
+            assumeTrue(false, () -> "Cannot create a symbolic link: " + error.getMessage());
+        }
     }
 
     @Test
@@ -311,6 +329,25 @@ class MultipleSourcesTest {
     }
 
     @Test
+    void legacyKeyCountsProtectedModulesAsPotentialMatches() throws Exception {
+        Path mainModule = project.resolve("configuration/" + MODULE);
+        Files.delete(mainModule);
+        Files.write(mainModule.resolveSibling("Module.bin"), new byte[]{1, 2, 3});
+        writeRaw(KEY, 4, KEY, 2);
+
+        StringWriter error = new StringWriter();
+        assertEquals(1, convert(error, "--source", "=configuration", "--source", "A=extensions/A"));
+        assertTrue(error.toString().contains("Ambiguous legacy module key"), error.toString());
+        assertFalse(Files.exists(output));
+
+        writeRaw(SourceKey.qualify(KEY, "", ""), 4, SourceKey.qualify(KEY, "A", ""), 2);
+        assertEquals(0, convert("--source", "=configuration", "--source", "A=extensions/A"));
+        Map<String, Map<Integer, Boolean>> modules = coverage(output);
+        assertFalse(modules.containsKey("configuration/" + MODULE));
+        assertEquals(Map.of(2, true, 4, false, 6, false), modules.get("extensions/A/" + MODULE));
+    }
+
+    @Test
     void legacyKeyStillWorksWhenOnlyOneSourceMatches() throws Exception {
         writeRaw(KEY, 4, KEY, 2);
         assertEquals(0, convert("--source", "A=extensions/A"));
@@ -331,6 +368,24 @@ class MultipleSourcesTest {
         assertEquals(Map.of(2, false, 4, true, 6, false), coverage(output).get("configuration/" + MODULE));
         assertEquals(0, convert("-s", "extensions/A", "-e", "A"));
         assertEquals(Map.of(2, true, 4, false, 6, false), coverage(output).get("extensions/A/" + MODULE));
+    }
+
+    @Test
+    void selectedSourceCanContainOnlyModulesMissingFromTheExport() throws Exception {
+        writeRaw(SourceKey.qualify(UNKNOWN_KEY, "A", ""), 4, SourceKey.qualify(KEY, "B", ""), 2);
+
+        assertEquals(0, convert("-s", "extensions/A", "-e", "A"));
+        assertEquals(Map.of(2, false, 4, false, 6, false), coverage(output).get("extensions/A/" + MODULE));
+    }
+
+    @Test
+    void wrongSourceWithoutMatchingModuleKeysStillFailsWithHint() throws Exception {
+        writeRaw(SourceKey.qualify(UNKNOWN_KEY, "B", ""), 4, SourceKey.qualify(UNKNOWN_KEY, "B", ""), 2);
+
+        StringWriter error = new StringWriter();
+        assertEquals(1, convert(error, "-s", "extensions/A", "-e", "A"));
+        assertTrue(error.toString().contains("-e B"), error.toString());
+        assertFalse(Files.exists(output));
     }
 
     @Test
@@ -507,19 +562,32 @@ class MultipleSourcesTest {
     @Test
     void allFormatsKeepBothPathsAndUncoveredLines() throws Exception {
         assertEquals(0, convert("--source", "=configuration", "--source", "A=extensions/A", "-f", "LCOV"));
-        List<String> lcov = Files.readAllLines(output);
-        assertTrue(lcov.contains("SF:configuration/" + MODULE));
-        assertTrue(lcov.contains("SF:extensions/A/" + MODULE));
-        assertTrue(lcov.contains("DA:6,0"));
+        List<List<String>> lcovRecords = Arrays.stream(Files.readString(output).split("end_of_record"))
+                .map(record -> record.lines().toList()).toList();
+        List<String> paths = List.of("configuration/" + MODULE, "extensions/A/" + MODULE);
+        for (String path : paths) {
+            List<String> record = lcovRecords.stream().filter(lines -> lines.contains("SF:" + path))
+                    .findFirst().orElseThrow(() -> new AssertionError("Missing LCOV record for " + path));
+            assertTrue(record.contains("DA:6,0"), path);
+        }
+
         assertEquals(0, convert("--source", "=configuration", "--source", "A=extensions/A", "-f", "COBERTURA"));
         NodeList classes = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(output.toFile())
                 .getElementsByTagName("class");
-        List<String> paths = new ArrayList<>();
+        Map<String, String> hitsByPath = new LinkedHashMap<>();
         for (int i = 0; i < classes.getLength(); i++) {
-            paths.add(((Element) classes.item(i)).getAttribute("filename"));
+            Element coberturaClass = (Element) classes.item(i);
+            NodeList lines = coberturaClass.getElementsByTagName("line");
+            for (int j = 0; j < lines.getLength(); j++) {
+                Element line = (Element) lines.item(j);
+                if ("6".equals(line.getAttribute("number"))) {
+                    hitsByPath.put(coberturaClass.getAttribute("filename"), line.getAttribute("hits"));
+                }
+            }
         }
-        assertTrue(paths.contains("configuration/" + MODULE));
-        assertTrue(paths.contains("extensions/A/" + MODULE));
+        for (String path : paths) {
+            assertEquals("0", hitsByPath.get(path), path);
+        }
     }
 
     void writeRaw(String first, int firstLine, String second, int secondLine) throws Exception {
