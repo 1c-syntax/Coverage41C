@@ -32,4 +32,5 @@ public class PipeMessages {
     public static final String CONVERT_COMMAND = "convert";
     public static final String START_COMMAND = "start";
     public static final String STATS_COMMAND = "stats";
+    public static final String VALIDATE_COMMAND = "validate";
 }

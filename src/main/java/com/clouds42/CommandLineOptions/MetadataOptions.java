@@ -29,9 +29,16 @@ import picocli.CommandLine.Option;
 import picocli.CommandLine.ParameterException;
 import picocli.CommandLine.Spec;
 
+import java.io.File;
 import java.lang.invoke.MethodHandles;
-import java.util.HashSet;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.HashSet;
 import java.util.Set;
 
 public class MetadataOptions {
@@ -47,90 +54,163 @@ public class MetadataOptions {
     @Option(names = {"-r", "--removeSupport"}, description = "Remove support values: ${COMPLETION-CANDIDATES}. Default - ${DEFAULT-VALUE}", defaultValue = "NONE")
     private SupportVariant removeSupport;
 
-    @Option(names = {"--extension"}, paramLabel = "<extensionName>=<path>",
+    @Option(names = "--config", description = "Coverage configuration file or directory with *.json files")
+    private File configFile;
+
+    @Option(names = "--exclusion-report", description = "Write coverage exclusion report to JSON file")
+    private File exclusionReportFile;
+
+    @Option(names = "--source", paramLabel = "NAME=DIR",
+            description = "Source directory relative to -P; repeat for each extension (empty name for main configuration)")
+    private List<String> sourceDirectories = new ArrayList<>();
+
+    @Option(names = "--extension", paramLabel = "<extensionName>=<path>",
             converter = ExtensionSource.Converter.class,
-            description = "Extension name and directory with its sources exported to xml (relative to project directory)." +
-                    " Can be repeated. Requires --projectDir")
-    private List<ExtensionSource> extensionSources;
+            description = "Extension source directory relative to -P. Can be repeated.")
+    private List<ExtensionSource> extensionSources = new ArrayList<>();
 
     @Spec(Spec.Target.MIXEE)
     private CommandSpec spec;
 
-    // for backward compatibility: -s without -P is the project directory
-    private boolean isSrcDirProjectDir() {
-        return projectDirName.isEmpty() && !srcDirName.isEmpty();
+    public boolean usesNamedSources() {
+        return !sourceDirectories.isEmpty();
+    }
+
+    public boolean hasExtensionSources(String extensionName) {
+        return extensionSources.stream().anyMatch(source -> source.getName().equals(extensionName));
+    }
+
+    public boolean hasMultipleSources() {
+        return usesNamedSources() || !extensionSources.isEmpty();
+    }
+
+    public void validateSourceFilters(String extension, String url) {
+        if (usesNamedSources() && (!extension.isEmpty() || !url.isEmpty())) {
+            throw new IllegalArgumentException("--source cannot be combined with -e or -x");
+        }
+        if (!extensionSources.isEmpty()) {
+            if (usesNamedSources()) {
+                throw new IllegalArgumentException("--source cannot be combined with --extension");
+            }
+            if (projectDirName.isEmpty()) {
+                throw new ParameterException(spec.commandLine(), "--extension requires --projectDir");
+            }
+            Set<String> names = new HashSet<>();
+            names.add(extension);
+            for (ExtensionSource source : extensionSources) {
+                if (!names.add(source.getName())) {
+                    throw new ParameterException(spec.commandLine(), "Sources of extension '" + source.getName()
+                            + "' are specified more than once");
+                }
+            }
+        }
+    }
+
+    public Map<String, Path> getSourceDirectories(String mainExtension) throws IOException {
+        if (!usesNamedSources()) {
+            Path project = Path.of(getProjectDirName());
+            Map<String, Path> directories = new LinkedHashMap<>();
+            directories.put(mainExtension, project.resolve(getSrcDirName()));
+            for (ExtensionSource extension : extensionSources) {
+                directories.put(extension.getName(), project.resolve(extension.getPath()));
+            }
+            if (!extensionSources.isEmpty()) {
+                Set<Path> physicalDirectories = new HashSet<>();
+                for (Path directory : directories.values()) {
+                    if (!Files.isDirectory(directory)) {
+                        throw new IllegalArgumentException("Multiple sources require a directory: " + directory);
+                    }
+                    if (!physicalDirectories.add(directory.toRealPath())) {
+                        throw new IllegalArgumentException("Duplicate source directory: " + directory);
+                    }
+                }
+            }
+            return directories;
+        }
+        if (projectDirName.isEmpty()) {
+            throw new IllegalArgumentException("--source requires --projectDir");
+        }
+        if (!srcDirName.isEmpty()) {
+            throw new IllegalArgumentException("--source cannot be combined with -s");
+        }
+        Path project = Path.of(projectDirName).toRealPath();
+        projectDirName = project.toString();
+        Map<String, Path> result = new LinkedHashMap<>();
+        for (String source : sourceDirectories) {
+            int separator = source.indexOf('=');
+            if (separator < 0 || separator == source.length() - 1) {
+                throw new IllegalArgumentException("Expected --source NAME=DIR (empty name for main configuration): " + source);
+            }
+            String name = source.substring(0, separator);
+            Path directory = project.resolve(source.substring(separator + 1)).toRealPath();
+            if (!Files.isDirectory(directory)) {
+                throw new IllegalArgumentException("--source requires a configuration or extension directory: " + directory);
+            }
+            if (!directory.startsWith(project)) {
+                throw new IllegalArgumentException("Source directory must be inside -P: " + directory);
+            }
+            if (result.containsKey(name)) {
+                throw new IllegalArgumentException("Duplicate source name: " + name);
+            }
+            if (result.containsValue(directory)) {
+                throw new IllegalArgumentException("Duplicate source directory: " + directory);
+            }
+            result.put(name, directory);
+        }
+        return result;
+    }
+
+    private void updatePaths() {
+        if (hasMultipleSources()) {
+            return;
+        }
+        if (projectDirName.isEmpty() && !srcDirName.isEmpty()) {
+            // for backward compatibility
+            projectDirName = srcDirName;
+            srcDirName = "";
+        }
     }
 
     public String getSrcDirName() {
-        return isSrcDirProjectDir() ? "" : srcDirName;
-    }
-
-    public void setSrcDirName(String srcDirName) {
-        this.srcDirName = srcDirName;
+        updatePaths();
+        return srcDirName;
     }
 
     public String getProjectDirName() {
-        return isSrcDirProjectDir() ? srcDirName : projectDirName;
-    }
-
-    public void setProjectDirName(String projectDirName) {
-        this.projectDirName = projectDirName;
+        updatePaths();
+        return projectDirName;
     }
 
     public SupportVariant getRemoveSupport() {
         return removeSupport;
     }
 
+    public File getConfigFile() {
+        return configFile;
+    }
+
+    public File getExclusionReportFile() {
+        return exclusionReportFile;
+    }
+
+    public boolean isRawMode() {
+        return !hasMultipleSources() && getSrcDirName().isEmpty()
+                && getProjectDirName().isEmpty();
+    }
+
+    public void setSrcDirName(String srcDirName) {
+        this.srcDirName = srcDirName;
+    }
+
+    public void setProjectDirName(String projectDirName) {
+        this.projectDirName = projectDirName;
+    }
+
     public void setRemoveSupport(SupportVariant removeSupport) {
         this.removeSupport = removeSupport;
     }
 
-    public List<ExtensionSource> getExtensionSources() {
-        if (extensionSources == null) {
-            return List.of();
-        } else {
-            return extensionSources;
-        }
-    }
-
     public void setExtensionSources(List<ExtensionSource> extensionSources) {
         this.extensionSources = extensionSources;
-    }
-
-    public boolean hasExtensionSources(String extensionName) {
-        return getExtensionSources().stream()
-                .anyMatch(extensionSource -> extensionSource.getName().equals(extensionName));
-    }
-
-    /**
-     * Проверяет, что деревья расширений можно сочетать с основным деревом исходников
-     *
-     * @param srcDirExtensionName - расширение, которому принадлежит основное дерево (-e), пустое - конфигурация
-     */
-    public void validate(String srcDirExtensionName) {
-        List<ExtensionSource> sources = getExtensionSources();
-        if (sources.isEmpty()) {
-            return;
-        }
-        if (projectDirName.isEmpty()) {
-            throw new ParameterException(spec.commandLine(),
-                    "Option --extension requires --projectDir: extension paths are relative to it");
-        }
-        Set<String> names = new HashSet<>();
-        if (!srcDirExtensionName.isEmpty()) {
-            names.add(srcDirExtensionName);
-        }
-        for (ExtensionSource source : sources) {
-            if (!names.add(source.getName())) {
-                throw new ParameterException(spec.commandLine(),
-                        String.format("Sources of extension '%s' are specified more than once", source.getName()));
-            }
-        }
-    }
-
-    public boolean isRawMode() {
-        return getSrcDirName().isEmpty()
-                && getProjectDirName().isEmpty()
-                && getExtensionSources().isEmpty();
     }
 }

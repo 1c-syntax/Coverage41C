@@ -27,6 +27,7 @@ import com.clouds42.CommandLineOptions.OutputOptions;
 import com.clouds42.PipeMessages;
 import com.clouds42.Utils;
 import org.scalasbt.ipcsocket.UnixDomainServerSocket;
+import org.scalasbt.ipcsocket.UnixDomainSocket;
 import org.scalasbt.ipcsocket.Win32NamedPipeServerSocket;
 import org.scalasbt.ipcsocket.Win32SecurityLevel;
 import org.slf4j.Logger;
@@ -41,9 +42,9 @@ import java.math.BigDecimal;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 public abstract class CoverServer {
 
@@ -51,97 +52,144 @@ public abstract class CoverServer {
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     private ServerSocket serverSocket;
+    private String pipeName;
+    private volatile boolean listening;
     private final boolean isWindows = System.getProperty ("os.name").toLowerCase().contains("win");
 
     protected void closeSocket() throws IOException {
         if (serverSocket != null) {
+            listening = false;
             serverSocket.close();
             serverSocket = null;
+            if (!isWindows) {
+                Files.deleteIfExists(Path.of(pipeName));
+            }
             logger.info("Close server socket");
         }
     }
 
     protected ServerSocket getServerSocket() throws IOException {
 
-        String pipeName = Utils.getPipeName(getConnectionOptions());
         if(serverSocket == null) {
+            pipeName = Utils.getPipeName(getConnectionOptions());
             if (isWindows) {
                 serverSocket = new Win32NamedPipeServerSocket(pipeName, false, Win32SecurityLevel.OWNER_DACL);
             } else {
+                removeStaleSocket(pipeName);
                 serverSocket = new UnixDomainServerSocket(pipeName);
             }
-            CompletableFuture.supplyAsync(() -> {
-                logger.info("Set socket listener...");
-                AtomicBoolean stopListen = new AtomicBoolean(false);
-                while (!stopListen.get()) {
-                    try {
-                        Socket clientSocket = serverSocket.accept();
-                        CompletableFuture.supplyAsync(() -> listenSocket(clientSocket)).thenAccept(aBoolean -> {
-                            if (aBoolean) {
-                                logger.info("Start listen");
-                                stopListen.set(false);
-                            }
-                        });
-                    } catch (IOException e) {
-                        logger.info("Can't accept socket: {}", e.getLocalizedMessage());
-                    }
-                }
-                return true;
-            });
+            listening = true;
+            startDaemon(this::acceptCommands, "coverage41c-commands");
             logger.info("Create server socket");
         }
         return serverSocket;
     }
 
-    private Boolean listenSocket(Socket clientSocket) {
-        try {
-            PrintWriter out =
-                    new PrintWriter(clientSocket.getOutputStream(), true);
-            BufferedReader in = new BufferedReader(
-                    new InputStreamReader(clientSocket.getInputStream()));
-            String line;
-            do {
-                line = in.readLine();
-                if (line != null) {
-                    line = line.trim().toLowerCase();
-                    logger.info("Get command: {}", line);
-                    switch (line) {
-                        case PipeMessages.DUMP_COMMAND:
-                            Utils.dumpCoverageFile(getCoverageData(), getMetadataOptions(), getOutputOptions());
-                            out.println(PipeMessages.OK_RESULT);
-                            return true;
-                        case PipeMessages.STATS_COMMAND:
-                            out.println(PipeMessages.OK_RESULT);
-                            return true;
-                        case PipeMessages.CLEAN_COMMAND:
-                            getCoverageData().forEach((uri, bigDecimalIntegerMap) ->
-                                    bigDecimalIntegerMap.replaceAll((k, v) -> 0));
-                            out.println(PipeMessages.OK_RESULT);
-                            return true;
-                        case PipeMessages.CHECK_COMMAND:
-                            for (int i = 0; i < 60; i++) {
-                                if (getSystemStarted()) {
-                                    out.println(PipeMessages.OK_RESULT);
-                                    return true;
-                                }
-                                Thread.sleep(1000);
-                            }
-                            out.println(PipeMessages.FAIL_RESULT);
-                            return true;
-                    }
+    // A socket file left by a killed process blocks bind, a live one answers the connection.
+    private static void removeStaleSocket(String pipeName) throws IOException {
+        Path socketFile = Path.of(pipeName);
+        if (!Files.exists(socketFile)) {
+            return;
+        }
+        boolean alive;
+        try (Socket ignored = new UnixDomainSocket(pipeName)) {
+            alive = true;
+        } catch (IOException e) {
+            alive = false;
+        }
+        if (alive) {
+            throw new IOException("Coverage41C is already running for this infobase and debugger: " + pipeName);
+        }
+        Files.delete(socketFile);
+        logger.info("Removed socket left by a stopped process: {}", pipeName);
+    }
+
+    private static void startDaemon(Runnable task, String name) {
+        Thread thread = new Thread(task, name);
+        thread.setDaemon(true);
+        thread.start();
+    }
+
+    private void acceptCommands() {
+        logger.info("Set socket listener...");
+        ServerSocket socket = serverSocket;
+        while (listening) {
+            try {
+                Socket clientSocket = socket.accept();
+                startDaemon(() -> listenSocket(clientSocket), "coverage41c-command");
+            } catch (IOException e) {
+                if (listening) {
+                    logger.info("Can't accept socket: {}", e.getLocalizedMessage());
                 }
-            } while (line == null || !line.equals(PipeMessages.EXIT_COMMAND));
-            gracefulShutdown(out);
-            return false;
+            }
+        }
+    }
+
+    private void listenSocket(Socket clientSocket) {
+        try (Socket socket = clientSocket) {
+            PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            // The client closes the connection after reading the reply. Closing it here first could drop
+            // an unread reply on a Windows named pipe.
+            String line;
+            while ((line = in.readLine()) != null) {
+                String command = line.trim().toLowerCase();
+                logger.info("Get command: {}", command);
+                executeCommand(command, out);
+            }
         } catch (IOException | InterruptedException e) {
             logger.error(e.getLocalizedMessage());
         }
-        return true;
     }
+
+    private void executeCommand(String command, PrintWriter out) throws InterruptedException {
+        switch (command) {
+            case PipeMessages.DUMP_COMMAND:
+                out.println(dumpCoverage() ? PipeMessages.OK_RESULT : PipeMessages.FAIL_RESULT);
+                break;
+            case PipeMessages.STATS_COMMAND:
+                out.println(PipeMessages.OK_RESULT);
+                break;
+            case PipeMessages.CLEAN_COMMAND:
+                cleanCoverageData();
+                out.println(PipeMessages.OK_RESULT);
+                break;
+            case PipeMessages.CHECK_COMMAND:
+                for (int i = 0; i < 60; i++) {
+                    if (getSystemStarted()) {
+                        out.println(PipeMessages.OK_RESULT);
+                        return;
+                    }
+                    Thread.sleep(1000);
+                }
+                out.println(PipeMessages.FAIL_RESULT);
+                break;
+            case PipeMessages.EXIT_COMMAND:
+                gracefulShutdown(out);
+                break;
+            default:
+                logger.info("Unknown command skipped: {}", command);
+        }
+    }
+
+    protected boolean dumpCoverage() {
+        Map<URI, Map<BigDecimal, Integer>> coverageData = getCoverageData();
+        synchronized (coverageData) {
+            try {
+                Utils.dumpCoverageFile(coverageData, getMetadataOptions(), getOutputOptions());
+                return true;
+            } catch (IOException | RuntimeException e) {
+                logger.error("Can't write coverage file: {}", e.toString());
+                return false;
+            }
+        }
+    }
+
+    protected abstract void cleanCoverageData();
 
     protected abstract boolean getSystemStarted();
 
-    protected abstract void gracefulShutdown(PrintWriter out) throws IOException;
+    protected abstract void gracefulShutdown(PrintWriter out);
 
     protected abstract MetadataOptions getMetadataOptions();
 

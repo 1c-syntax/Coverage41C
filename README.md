@@ -49,91 +49,106 @@ Coverage41C convert -c internal.xml -P . -s src/cf --extension Доработк�
 ```cmd
 Coverage41C convert -c internal.xml -P . -e Доработки -s src/cfe/Доработки --extension Интеграция=src/cfe/Интеграция -o genericCoverage.xml
 ```
-Прежние сценарии работают как раньше: `-e <ИмяРасширения> -s <ПутьКИсходникамРасширения>` для одного расширения, `convert -s <ПутьКИсходникам>` без `-e` и `--extension` (атрибут `extension` при этом не учитывается), сырые файлы предыдущих версий.
+Прежние сценарии работают как раньше: `-e <ИмяРасширения> -s <ПутьКИсходникамРасширения>` для одного расширения, `convert -s <ПутьКИсходникам>` без `-e` и `--extension` для старых сырых файлов. В новых замерах источник отмечен явно, поэтому для конвертации отдельного расширения укажите его имя через `-e`.
 
-При завершении работы создаётся файл покрытия вида:
+При завершении работы создаётся Generic Coverage XML. Для LCOV и Cobertura используйте `-f LCOV` или `-f COBERTURA`.
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <coverage version="1">
-    <file path="CommonCommands/СменитьПароль/Ext/CommandModule.bsl">
+    <file path="CommonCommands/ОбщаяКоманда1/Ext/CommandModule.bsl">
         <lineToCover covered="true" lineNumber="13"/>
         <lineToCover covered="false" lineNumber="9"/>
     </file>
-    <file path="Catalogs/ОбработчикиСобытийRMQ/Forms/ФормаСписка/Ext/Form/Module.bsl">
+    <file path="Catalogs/Справочник1/Forms/ФормаСписка/Ext/Form/Module.bsl">
         <lineToCover covered="false" lineNumber="11"/>
         <lineToCover covered="true" lineNumber="5"/>
-        <lineToCover covered="true" lineNumber="4"/>
+    </file>
+</coverage>
 ```
 
-Справка из командной строки:
-```cmd
->Coverage41C --help
-Usage: Coverage41C [-hV] [COMMAND]
-Make measures from 1C:Enterprise and save them to genericCoverage.xml file
-  -h, --help      Show this help message and exit.
-  -V, --version   Print version information and exit.
-Commands:
-  start    Start measure and save coverage data to file
-  stop     Stop main application and save coverage to file
-  check    Check is main application ready
-  clean    Clear coverage data in main application
-  dump     Save coverage data to file
-  convert  Convert results from internal uuid-based format
+## Настройка покрытия
+
+Укажите `--config` в `start`, `convert` или `validate`. Параметр принимает JSON-файл или каталог. В каталоге читаются видимые файлы `*.json` верхнего уровня. Это позволяет хранить правила нескольких команд и применять их за один прогон. Области включения из разных файлов объединяются, правила исключений действуют на весь расчёт.
+
+| Ключ | Назначение |
+| --- | --- |
+| `team` | Название команды для отчёта об исключениях. |
+| `includeSubsystems` | Объекты выбранных подсистем и их потомков. Можно передать техническое имя, полный путь через точку или маску с `*`. Точное имя должно разрешаться однозначно. |
+| `includePrefix` | Объекты, формы, команды и подсистемы, имена которых начинаются с указанных префиксов. Результат объединяется с `includeSubsystems`. |
+| `prefixScope` | Настраивает действие `includePrefix`. Ключи `subsystems`, `includeSubsystemContents`, `modules`, `routines` по умолчанию принимают значения `true`, `true`, `true`, `false`. При `routines: true` в охват входят также процедуры и функции с заданным префиксом внутри остальных модулей. |
+| `exclude` | Исключает строки по правилам в `subsystems`, `objects`, `paths`, `lines`. |
+| `auto` | Те же четыре вида правил для необязательных строк. Строка учитывается, когда она была исполнена. |
+| `changeMarkers` | Объект или массив пар `begin` / `end` для включения блоков доработок. |
+| `unclosedBlocks.enabled` | Разрешает автоматически определять конец блока доработки. По умолчанию выключено. |
+| `includeUsers` | Список пользователей ИБ, чьи замеры собирает `start`. |
+| `exclusionReport` | Путь к JSON-отчёту относительно корня проекта `-P` или абсолютный путь. |
+
+В `exclude` и `auto` ключ `subsystems` принимает имена, полные пути и маски. `objects` принимает маски имён модулей, например `Catalog.Справочник1.ManagerModule`. `paths` принимает glob-шаблоны относительно `-P`, разделитель каталогов — `/`. `lines` принимает регулярные выражения для поиска в тексте строки. Имена, маски объектов, пути и префиксы учитывают регистр, регулярные выражения строк по умолчанию регистронезависимы. При пересечении правил `exclude` имеет приоритет над `auto`.
+
+Примеры используют вымышленные названия и демонстрационные исходники из репозитория.
+
+- [Полная конфигурация](examples/coverage41c.full.json) показывает все ключи, виды правил, стандартные и пользовательские метки.
+- [Минимальная конфигурация](examples/coverage41c.minimal.json) задаёт только охват по подсистеме.
+- [Фильтр пользователей](examples/coverage41c.users.json) подходит для сбора сырого файла без исходников.
+
+Правила охвата и исключений рассчитаны на конфигурации и расширения. Для внешних обработок можно использовать маркеры `Cover:*` в модулях.
+
+### Маркеры в исходниках
+
+- `Cover:off` (`Cover:выкл`) исключает строки.
+- `Cover:auto` (`Cover:авто`) делает строки необязательными до их исполнения.
+- `Cover:on` (`Cover:вкл`) закрывает последний открытый диапазон.
+- `Cover:file-off` (`Cover:файл-выкл`) перед первой строкой кода исключает весь модуль.
+
+Отдельный комментарий `Cover:off` или `Cover:auto` открывает диапазон. Маркер после обычного оператора действует на его строку. На строке, открывающей метод, условие, цикл, `Попытка` или область, он применяется к блоку. Текст после маркера можно использовать как причину исключения. Незакрытый диапазон действует до конца модуля и вызывает предупреждение.
+
+### Учёт доработок в типовых модулях
+
+`changeMarkers` включает код между метками даже в модуле, исключённом целиком или находящемся вне охвата. Построчные исключения и `Cover:*` продолжают действовать. Пустой объект `{}` выбирает стандартные пары `//++` / `//--` и `//{{` / `//}}`. Пользовательские регулярные выражения `begin` и `end` сопоставляются с текстом комментария. Строка с кодом и меткой входит в блок, отдельный комментарий служит границей.
+
+При `unclosedBlocks.enabled: true` незакрытый блок внутри метода заканчивается на последней строке метода. Вне метода используется конец ближайшей области или конец модуля. Граница и число добавленных строк видны в отчёте.
+
+### Фильтрация замеров по пользователям ИБ
+
+`start` использует список `includeUsers` или повторяемый `--include-user`. Параметр CLI заменяет список из конфигов для текущего прогона. Используется имя пользователя ИБ, которое сообщает сервер отладки, с учётом регистра.
+
+Пакеты замеров от других или неопознанных пользователей отбрасываются до слияния. Если за весь прогон не найден ни один разрешённый предмет отладки, `stop` сообщает об ошибке, а `start` завершается с ненулевым кодом после записи отчёта. В сырой файл попадают уже отобранные замеры. Остальные правила из конфига можно применить при последующем `convert` с исходниками.
+
+```sh
+Coverage41C start -i DefAlias --config examples/coverage41c.users.json -o raw.xml
+# Выполните тесты под пользователями test_runner или test_ui
+Coverage41C stop -i DefAlias
+Coverage41C convert -c raw.xml -P . -s src --config coverage41c.json -o genericCoverage.xml
 ```
-Также доступна справка по каждой из команд:
-```cmd
->Coverage41C start -h
-Usage: Coverage41C start [-hV] [-p] [--verbose] [-e=<extensionName>]
-                         [-i=<infobaseAlias>] [-o=<outputFile>] [--opid=<opid>]
-                         [-P=<projectDirName>] [-p:env=<passwordEnv>]
-                         [-r=<removeSupport>] [-s=<srcDirName>]
-                         [-t=<pingTimeout>] [-u=<debugServerUrl>] [-u:
-                         file=<debugServerUrlFileName>]
-                         [-x=<externalDataProcessorUrl>]
-                         [--extension=<extensionName>=<path>]... [-a
-                         [=<autoconnectTargets>...]]... [-n
-                         [=<debugAreaNames>...]]...
-Start measure and save coverage data to file
-  -i, --infobase=<infobaseAlias>
-                           InfoBase name. File infobase uses 'DefAlias' name.
-                             Default - DefAlias
-  -u, --debugger=<debugServerUrl>
-                           Debugger url. Default - http://127.0.0.1:1550/
-      -u:file, --debugger:file=<debugServerUrlFileName>
-                           Debugger url file name
-  -e, --extensionName=<extensionName>
-                           Extension name
-  -x, --externalDataProcessor=<externalDataProcessorUrl>
-                           External data processor (or external report) url
-  -s, --srcDir=<srcDirName>
-                           Directory with sources exported to xml
-  -P, --projectDir=<projectDirName>
-                           Directory with project
-  -r, --removeSupport=<removeSupport>
-                           Remove support values: NOT_EDITABLE,
-                             EDITABLE_SUPPORT_ENABLED, NOT_SUPPORTED, NONE.
-                             Default - NONE
-      --extension=<extensionName>=<path>
-                           Extension name and directory with its sources
-                             exported to xml (relative to project directory).
-                             Can be repeated. Requires --projectDir
-  -o, --out=<outputFile>   Output file name
-  -p, --password           Dbgs password
-      -p:env, --password:env=<passwordEnv>
-                           Password environment variable name
-  -n, --areanames[=<debugAreaNames>...]
-                           Debug area names (not for general use!)
-  -a, --autoconnectTargets[=<autoconnectTargets>...]
-                           Autoconnect debug targets (not for general use!):
-                             Unknown, Client, ManagedClient, WEBClient,
-                             COMConnector, Server, ServerEmulation, WEBService,
-                             HTTPService, OData, JOB, JobFileMode,
-                             MobileClient, MobileServer, MobileJobFileMode,
-                             MobileManagedClient
-  -t, --timeout=<pingTimeout>
-                           Ping timeout. Default - 1000
-      --verbose            If you need more logs. Default - false
-      --opid=<opid>        Owner process PID
-  -h, --help               Show this help message and exit.
-  -V, --version            Print version information and exit.
+
+### Проверка правил и отчёт об исключениях
+
+`validate` применяет правила к исходникам и выполняет те же проверки охвата и маркеров без подключения к серверу отладки. `--strict` завершает команду с ненулевым кодом при предупреждениях. Проверка показывает, какие строки войдут в расчёт. Итоговый процент формируется после тестового прогона.
+
+На демонстрационной конфигурации репозитория минимальный пример проходит строгую проверку.
+
+```sh
+Coverage41C validate -P . -s src/test/resources/configuration \
+  --config examples/coverage41c.minimal.json --strict
 ```
+
+Полный пример запускайте на этой же конфигурации без `--strict`. Он показывает диагностику правил и меток, для которых в демонстрационных исходниках нет совпадений.
+
+`--exclusion-report` сохраняет JSON со сводкой, правилами, причинами, затронутыми модулями, блоками доработок и предупреждениями. Путь в CLI считается от каталога запуска и имеет приоритет над `exclusionReport`. При чтении каталога конфигов путь отчёта должен указывать за пределы списка входных файлов.
+
+### Правила для нескольких источников
+
+При указании `--extension` правила применяются к основной конфигурации и перечисленным расширениям. Отчёт формируется по всем источникам, пути считаются от общего `-P`. Точное имя подсистемы должно встречаться хотя бы в одном источнике.
+
+```sh
+Coverage41C validate -P . -s src/cf \
+  --extension 'ДемоРасширение=src/cfe/demo' --config coverage41c.json --strict
+```
+
+Альтернативный синтаксис `--source ИМЯ=КАТАЛОГ` перечисляет все исходники. Пустое имя обозначает основную конфигурацию. Каталоги должны быть внутри `-P`, а имена и физические каталоги должны быть уникальными. В одном вызове используйте один способ задания источников. `--source` несовместим с `-s`, `--extension`, `-e` и `-x`.
+
+## Сборка и тесты
+
+Для сборки нужны Java 21 и библиотеки отладчика EDT. Укажите `EDT_LOCATION` с путём к ним и запустите `./gradlew test`. Тесты сборщика используют локальную имитацию сервера отладки. Для интеграционного прогона с установленной платформой 1С, `dbgs`, OneScript и `vrunner` предусмотрена задача `./gradlew integrationTest`.
+
+Справка по параметрам доступна через `Coverage41C --help`, `Coverage41C start --help`, `Coverage41C convert --help` и `Coverage41C validate --help`.

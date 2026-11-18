@@ -144,7 +144,7 @@ public abstract class AbstractDebugClient {
                 } else {
                     return null;
                 }
-            } else if (response.getContent() != null) {
+            } else if (response.getContent() != null && response.getContent().length > 0) {
                 String errorMessage = RuntimePresentationConverter.presentation(response.getContent());
 
                 try {

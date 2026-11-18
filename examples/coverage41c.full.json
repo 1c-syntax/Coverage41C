@@ -1,0 +1,35 @@
+{
+  "team": "Демонстрационная команда",
+  "includeSubsystems": ["ПерваяПодсистема", "Починенная*"],
+  "includePrefix": ["Документ", "Простой"],
+  "prefixScope": {
+    "subsystems": true,
+    "includeSubsystemContents": true,
+    "modules": true,
+    "routines": true
+  },
+  "includeUsers": ["test_runner", "test_ui"],
+  "exclude": {
+    "subsystems": ["ПерваяПодсистема.ПочиненнаяСистема2"],
+    "objects": ["Document.Документ1.ManagerModule"],
+    "paths": ["**/Documents/Документ1/Forms/**/Module.bsl"],
+    "lines": ["^\\s*ВызватьИсключение\\b"]
+  },
+  "auto": {
+    "subsystems": ["ПерваяПодсистема.ПодчиненнаяПодсистема"],
+    "objects": ["Catalog.Справочник1.ManagerModule"],
+    "paths": ["**/CommonModules/ПростойОбщийМодуль/Ext/Module.bsl"],
+    "lines": ["^\\s*Сообщить\\s*\\("]
+  },
+  "changeMarkers": [
+    {},
+    {
+      "begin": "^\\s*//\\s*DEMO-BEGIN\\b",
+      "end": "^\\s*//\\s*DEMO-END\\b"
+    }
+  ],
+  "unclosedBlocks": {
+    "enabled": true
+  },
+  "exclusionReport": "reports/coverage-exclusions.json"
+}

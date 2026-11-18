@@ -22,7 +22,6 @@
 package com.clouds42;
 
 import com.clouds42.CommandLineOptions.ConnectionOptions;
-import com.clouds42.CommandLineOptions.ExtensionSource;
 import com.clouds42.CommandLineOptions.MetadataOptions;
 import com.clouds42.CommandLineOptions.OutputOptions;
 import com.github._1c_syntax.bsl.mdclasses.CF;
@@ -30,14 +29,12 @@ import com.github._1c_syntax.bsl.mdclasses.MDClasses;
 import com.github._1c_syntax.bsl.mdo.MD;
 import com.github._1c_syntax.bsl.mdo.Module;
 import com.github._1c_syntax.bsl.mdo.SettingsStorage;
-import com.github._1c_syntax.bsl.parser.BSLLexer;
-import com.github._1c_syntax.bsl.parser.BSLTokenizer;
+import com.github._1c_syntax.bsl.mdclasses.Configuration;
+import com.github._1c_syntax.bsl.types.MdoReference;
 import com.github._1c_syntax.bsl.types.ModuleType;
 import com.github._1c_syntax.bsl.support.SupportVariant;
 import de.vandermeer.asciitable.AsciiTable;
 import de.vandermeer.asciitable.CWC_LongestLine;
-import org.antlr.v4.runtime.Token;
-import org.apache.commons.lang3.Range;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
@@ -51,6 +48,7 @@ import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.transform.OutputKeys;
 import javax.xml.transform.Transformer;
+import javax.xml.transform.TransformerException;
 import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
@@ -64,6 +62,7 @@ import java.lang.invoke.MethodHandles;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -72,6 +71,7 @@ import java.time.Instant;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class Utils {
@@ -128,11 +128,16 @@ public class Utils {
      * Путь без фрагмента пишется в атрибут path сырого файла, как и раньше
      */
     public static URI getRawUri(String extensionName, String uriKey) {
-        if (extensionName.isEmpty()) {
+        return getRawUri(extensionName, "", uriKey);
+    }
+
+    public static URI getRawUri(String extensionName, String sourceUrl, String uriKey) {
+        if (extensionName.isEmpty() && sourceUrl.isEmpty()) {
             return URI.create("file:///" + uriKey);
         }
         try {
-            return new URI("file", "", "/" + uriKey, null, extensionName);
+            return new URI("file", "", "/" + uriKey, sourceUrl.isEmpty() ? null : sourceUrl,
+                    extensionName.isEmpty() ? null : extensionName);
         } catch (URISyntaxException e) {
             throw new IllegalArgumentException(e);
         }
@@ -144,100 +149,121 @@ public class Utils {
     }
 
 
-    private static final Pattern COVER_ON = Pattern.compile(
-            "Cover:(?:вкл|on)", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
-    );
-
-    private static final Pattern COVER_OFF = Pattern.compile(
-            "Cover:(?:выкл|off)", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
-    );
-
-    private static final Pattern COVER_AUTO = Pattern.compile(
-            "Cover:(?:авто|auto)", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
-    );
-
-    private static void addCoverageData(Map<URI, Map<BigDecimal, Integer>> coverageData, URI uri) {
-        BSLTokenizer tokenizer;
-        try {
-            tokenizer = LinesToCoverage.createTokenizer(Files.readString(Path.of(uri)));
-        } catch (IOException e) {
-            logger.error(e.getLocalizedMessage());
-            return;
-        }
-
-        int[] linesToCover = LinesToCoverage.getLines(tokenizer.getAst());
-
-        List<Range<Integer>> coverageIgnorance = new ArrayList<>();
-        Stack<Integer> coverageIgnoranceStartStack = new Stack();
-        List<Range<Integer>> coverageAutoIgnorance = new ArrayList<>();
-        Stack<Integer> coverageAutoIgnoranceStartStack = new Stack();
-
-        if (linesToCover.length > 0) {
-
-            List<Token> allTokens = tokenizer.getTokens();
-            List<Token> comments = allTokens.stream()
-                    .filter(token -> token.getType() == BSLLexer.LINE_COMMENT)
-                    .toList();
-
-            for (Token comment : comments) {
-                int commentLine = comment.getLine();
-                Matcher offMatcher = COVER_OFF.matcher(comment.getText());
-                if (offMatcher.find()) {
-                    coverageIgnoranceStartStack.push(commentLine);
-                } else {
-                    Matcher autoMatcher = COVER_AUTO.matcher(comment.getText());
-                    if (autoMatcher.find()) {
-                        coverageAutoIgnoranceStartStack.push(commentLine);
-                    } else {
-                        Matcher onMatcher = COVER_ON.matcher(comment.getText());
-                        if (onMatcher.find()) {
-                            while (!coverageIgnoranceStartStack.empty()) {
-                                coverageIgnorance.add(Range.of(coverageIgnoranceStartStack.pop(), commentLine));
-                            }
-                            while (!coverageAutoIgnoranceStartStack.empty()) {
-                                coverageAutoIgnorance.add(Range.of(coverageAutoIgnoranceStartStack.pop(), commentLine));
-                            }
-                        }
-                    }
-                }
-            }
-            while (!coverageIgnoranceStartStack.empty()) {
-                coverageIgnorance.add(
-                        Range.of(coverageIgnoranceStartStack.pop(), linesToCover[linesToCover.length - 1]));
-            }
-            while (!coverageAutoIgnoranceStartStack.empty()) {
-                coverageAutoIgnorance.add(
-                        Range.of(coverageAutoIgnoranceStartStack.pop(), linesToCover[linesToCover.length - 1]));
-            }
-
-            linesToCover = Arrays.stream(linesToCover).filter(i ->
-              coverageIgnorance.stream().noneMatch(integerRange -> integerRange.contains(i))).toArray();
-        }
-
-        Map<BigDecimal, Integer> coverMap = new HashMap<>();
-        for (int lineNumber : linesToCover) {
-            int countValue = 0;
-            if (coverageAutoIgnorance.stream().anyMatch(integerRange -> integerRange.contains(lineNumber))) {
-                countValue = -1;
-            }
-            coverMap.put(new BigDecimal(lineNumber), countValue);
-        }
-        coverageData.put(uri, coverMap);
+    private static void addCoverageData(Map<URI, Map<BigDecimal, Integer>> coverageData, URI uri,
+                                        ModuleId module, ExclusionRules rules, ExclusionReport report) {
+        String moduleText = readModuleText(uri, module, report);
+        // A skipped module keeps an empty map, like a module out of scope: its measurements are ignored.
+        coverageData.put(uri, moduleText == null
+                ? new HashMap<>()
+                : CoverMapBuilder.build(moduleText, module, rules, report));
     }
 
-    /**
-     * Читает исходники основного дерева (-P/-s) и деревьев расширений (--extension)
-     *
-     * @param srcDirExtensionName - расширение, которому принадлежит основное дерево (-e), пустое - конфигурация
-     * @return URI модулей по ключу {@link #getExtensionUriKey(String, String)}
-     */
+    // A module out of scope or under --removeSupport is read only for its change blocks.
+    private static void addModuleOutside(Map<URI, Map<BigDecimal, Integer>> coverageData, URI uri,
+                                         ModuleId module, ExclusionRules rules, ExclusionReport report) {
+        if (rules.getChangeMarkers().isEmpty()) {
+            coverageData.put(uri, new HashMap<>());
+            return;
+        }
+        String moduleText = readModuleText(uri, module, report);
+        coverageData.put(uri, moduleText == null
+                ? new HashMap<>()
+                : CoverMapBuilder.build(moduleText, module, rules, report, true));
+    }
+
+    // A module outside includeSubsystems/includePrefix: change blocks and methods named with a prefix.
+    private static void addModuleOutsideScope(Map<URI, Map<BigDecimal, Integer>> coverageData, URI uri,
+                                              ModuleId module, ExclusionRules rules, ExclusionReport report) {
+        String moduleText = readModuleText(uri, module, report);
+        coverageData.put(uri, moduleText == null
+                ? new HashMap<>()
+                : CoverMapBuilder.buildOutsideScope(moduleText, module, rules, report));
+    }
+
+    private static String readModuleText(URI uri, ModuleId module, ExclusionReport report) {
+        try {
+            byte[] content = Files.readAllBytes(Path.of(uri));
+            if (isModuleWithoutSourceText(content)) {
+                logger.info("Skipping module without source text: {}", module.getPath());
+                return null;
+            }
+            return StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(content)).toString();
+        } catch (IOException e) {
+            report.warn(module.getPath() + ": cannot read module: " + e.getLocalizedMessage());
+            return null;
+        }
+    }
+
+    // Modules supplied without source text are stored as a binary 1C container.
+    private static boolean isModuleWithoutSourceText(byte[] content) {
+        return content.length >= 4 && content[0] == (byte) 0xFF && content[1] == (byte) 0xFF
+                && content[2] == (byte) 0xFF && content[3] == 0x7F;
+    }
+
+    private static String modulePath(URI projectUri, URI moduleUri) {
+        return projectUri.relativize(moduleUri).getPath();
+    }
+
+    private static List<String> moduleRuleSources(ExclusionRules rules, ModuleId module) {
+        List<String> sources = new ArrayList<>();
+        for (ExclusionRules.Rule rule : rules.getRules()) {
+            if (!rule.isLineRule() && rule.matches(module)) {
+                sources.add(rule.getSource());
+            }
+        }
+        return sources;
+    }
+
+    private static ModuleId moduleId(URI projectUri, Module module, MD owner, Set<String> subsystems) {
+        MdoReference reference = owner.getMdoReference();
+        String moduleType = "." + module.getModuleType().name();
+        return new ModuleId(modulePath(projectUri, module.getUri()),
+                List.of(reference.getMdoRef() + moduleType, reference.getMdoRefRu() + moduleType),
+                subsystems);
+    }
+
     public static Map<String, URI> readMetadata(MetadataOptions metadataOptions,
-                                                String srcDirExtensionName,
-                                                Map<URI, Map<BigDecimal, Integer>> coverageData)
-            throws IOException, ParserConfigurationException, SAXException, XPathExpressionException {
+                                                Map<URI, Map<BigDecimal, Integer>> coverageData) throws Exception {
+        return readMetadata(metadataOptions, "", coverageData, false);
+    }
+
+    // measuring: start applies includeUsers itself; convert and validate only report that the key is not for them.
+    public static Map<String, URI> readMetadata(MetadataOptions metadataOptions,
+                                                String mainExtension,
+                                                Map<URI, Map<BigDecimal, Integer>> coverageData,
+                                                boolean measuring) throws Exception {
+        return readMetadata(metadataOptions, mainExtension, coverageData, new ExclusionReport(), measuring);
+    }
+
+    public static List<String> validateMetadata(MetadataOptions metadataOptions) throws Exception {
+        if (metadataOptions.isRawMode()) {
+            throw new IllegalArgumentException("Validation requires source files");
+        }
+        ExclusionReport report = new ExclusionReport();
+        metadataOptions.validateSourceFilters("", "");
+        readMetadata(metadataOptions, "", new HashMap<>(), report, false);
+        return report.getWarnings();
+    }
+
+    private static Map<String, URI> readMetadata(MetadataOptions metadataOptions,
+                                                 String mainExtension,
+                                                 Map<URI, Map<BigDecimal, Integer>> coverageData,
+                                                 ExclusionReport report, boolean measuring) throws Exception {
 
         boolean rawMode = false;
         if (metadataOptions.isRawMode()) {
+            if (metadataOptions.getConfigFile() != null) {
+                // A config with includeUsers is useful to start without sources: it filters measures by user,
+                // the source rules wait for convert. convert itself still needs the sources.
+                if (!measuring
+                        || !IncludeUsers.load(metadataOptions.getConfigFile(), Collections.emptyList()).isActive()) {
+                    throw new IllegalArgumentException("Coverage configuration requires source files");
+                }
+                logger.info("RAW mode: source rules of {} are applied by convert", metadataOptions.getConfigFile());
+            }
+            if (metadataOptions.getExclusionReportFile() != null) {
+                throw new IllegalArgumentException("Exclusion report requires source files");
+            }
             logger.info("Sources directory not set. Enabling RAW mode");
             rawMode = true;
         } else {
@@ -247,80 +273,217 @@ public class Utils {
         Map<String, URI> uriListByKey = new HashMap<>();
 
         if (!rawMode) {
+            Map<String, Path> sourceDirectories = metadataOptions.getSourceDirectories(mainExtension);
+            File configExclusionReportFile = null;
+            Set<String> rulesOutsideScope = new HashSet<>();
+            Map<String, Integer> prefixModules = new HashMap<>();
+            Map<String, ExclusionRules.ScopePrefix> prefixes = new LinkedHashMap<>();
+            Map<String, ExclusionRules.Rule> allRules = new LinkedHashMap<>();
+            Set<String> markerSources = new LinkedHashSet<>();
+            int modulesInScope = 0;
+            boolean filtersScope = false;
+            boolean includeUsersReported = false;
+            for (Map.Entry<String, Path> source : sourceDirectories.entrySet()) {
+                URI projectUri = Path.of(metadataOptions.getProjectDirName()).toUri();
 
-            Path projectPath = Path.of(metadataOptions.getProjectDirName());
-            readSources(projectPath.resolve(metadataOptions.getSrcDirName()), srcDirExtensionName,
-                    metadataOptions, uriListByKey, coverageData);
-            for (ExtensionSource extensionSource : metadataOptions.getExtensionSources()) {
-                readSources(projectPath.resolve(extensionSource.getPath()), extensionSource.getName(),
-                        metadataOptions, uriListByKey, coverageData);
+                Path rootPath = source.getValue();
+                logger.info("Reading configuration sources from root path: {}", rootPath.toAbsolutePath());
+
+                if (!Files.exists(rootPath)) {
+                    throw new IllegalArgumentException("Sources path does not exist: " + rootPath.toAbsolutePath());
+                }
+
+                if (Files.isDirectory(rootPath)) {
+
+                    String sourceName = source.getKey().isEmpty() ? "<main>" : source.getKey();
+                    String sourceError = "Cannot read configuration metadata for source '" + sourceName
+                            + "': " + rootPath.toAbsolutePath()
+                            + "; expected readable Configuration.xml or src/Configuration/Configuration.mdo";
+                    CF conf;
+                    try {
+                        if (!(MDClasses.createConfiguration(rootPath) instanceof CF configuration)
+                                || configuration == Configuration.EMPTY) {
+                            throw new IllegalArgumentException(sourceError);
+                        }
+                        conf = configuration;
+                    } catch (RuntimeException error) {
+                        if (metadataOptions.hasMultipleSources()) {
+                            throw new IllegalArgumentException(sourceError, error);
+                        }
+                        throw error;
+                    }
+
+                    ExclusionRules rules = ExclusionRules.empty();
+                    if (metadataOptions.getConfigFile() != null) {
+                        ExclusionRules.rejectReportInsideConfigDirectory(metadataOptions.getConfigFile(),
+                                metadataOptions.getExclusionReportFile(), "--exclusion-report");
+                        rules = ExclusionRules.load(metadataOptions.getConfigFile(),
+                                Path.of(metadataOptions.getProjectDirName()), conf, report,
+                                metadataOptions.hasMultipleSources());
+                        configExclusionReportFile = rules.getExclusionReportFile();
+                        rules.getIncludeSources().forEach(report::addScopeSource);
+                        if (!rules.getPrefixes().isEmpty()) {
+                            report.setPrefixScope(rules.getPrefixScope());
+                        }
+                        if (rules.filtersScope()) {
+                            logger.info("Filtering coverage by {} subsystem(s) and {} prefix(es)",
+                                    rules.getIncludedSubsystems().size(), rules.getPrefixes().size());
+                        }
+                        if (!measuring && !rules.getIncludeUsersSources().isEmpty() && !includeUsersReported) {
+                            logger.info("{}: applies only to start, measures are not filtered here",
+                                    String.join(", ", rules.getIncludeUsersSources()));
+                            includeUsersReported = true;
+                        }
+                    }
+
+                    // Module rules that hit only modules outside the scope are a precaution, not a typo.
+                    rules.getPrefixes().forEach(prefix -> prefixes.putIfAbsent(prefix.getSource(), prefix));
+                    rules.getRules().forEach(rule -> allRules.putIfAbsent(rule.getSource(), rule));
+                    rules.getChangeMarkers().forEach(marker -> markerSources.add(marker.getSource()));
+                    filtersScope |= rules.filtersScope();
+                    int sourceModulesInScope = 0;
+                    Map<URI, MD> owners = conf.getModulesByObject();
+                    Map<MdoReference, Set<String>> subsystemsByObject = rules.needsSubsystemMembership()
+                            ? SubsystemFilter.membership(conf) : Map.of();
+                    for (Module module : conf.getAllModules()) {
+                        if (module.isProtected() || !Files.exists(Path.of(module.getUri()))) {
+                            logger.info("Skipping module without source text: {}", module.getUri());
+                            continue;
+                        }
+                        MD mdObj = owners.get(module.getUri());
+
+                        String mdObjUuid = mdObj.getUuid();
+
+                        String key = getUriKey(mdObjUuid, module.getModuleType(), mdObj);
+                        if (metadataOptions.hasMultipleSources()) {
+                            key = SourceKey.qualify(key, source.getKey(), "");
+                        }
+                        URI previous = uriListByKey.putIfAbsent(key, module.getUri());
+                        if (previous != null && !previous.equals(module.getUri())) {
+                            throw new IllegalArgumentException("Duplicate module key in source " + source.getKey() + ": " + key);
+                        }
+                        if (metadataOptions.hasMultipleSources() && coverageData.containsKey(module.getUri())) {
+                            throw new IllegalArgumentException("Module belongs to more than one source: " + module.getUri());
+                        }
+
+                        ModuleId moduleId = moduleId(projectUri, module, mdObj,
+                                SubsystemFilter.subsystemsOf(mdObj.getMdoReference(), subsystemsByObject));
+                        for (ExclusionRules.ScopePrefix prefix : rules.getPrefixes()) {
+                            if (prefix.matches(moduleId)) {
+                                prefixModules.merge(prefix.getSource(), 1, Integer::sum);
+                            }
+                        }
+                        boolean inScope = rules.inScope(moduleId);
+                        if (!inScope && !rules.scopesRoutines()) {
+                            report.addModuleOutOfScope();
+                            rulesOutsideScope.addAll(moduleRuleSources(rules, moduleId));
+                            addModuleOutside(coverageData, module.getUri(), moduleId, rules, report);
+                            continue;
+                        }
+                        if (inScope) {
+                            modulesInScope++;
+                            sourceModulesInScope++;
+                        }
+
+                        if (metadataOptions.getRemoveSupport() != SupportVariant.NONE) {
+                            SupportVariant moduleSupportVariant = module.getSupportVariant();
+                            if (moduleSupportVariant.compareTo(metadataOptions.getRemoveSupport()) <= 0) {
+                                if (!inScope) {
+                                    report.addModuleOutOfScope();
+                                }
+                                rulesOutsideScope.addAll(moduleRuleSources(rules, moduleId));
+                                addModuleOutside(coverageData, module.getUri(), moduleId, rules, report);
+                                continue;
+                            }
+                        }
+
+                        if (inScope) {
+                            addCoverageData(coverageData, module.getUri(), moduleId, rules, report);
+                            continue;
+                        }
+                        // prefixScope.routines: a module outside scope is partly in it when it has prefixed methods.
+                        addModuleOutsideScope(coverageData, module.getUri(), moduleId, rules, report);
+                        if (report.moduleHasPrefixRoutines(moduleId.getPath())) {
+                            modulesInScope++;
+                            sourceModulesInScope++;
+                        } else {
+                            report.addModuleOutOfScope();
+                            rulesOutsideScope.addAll(moduleRuleSources(rules, moduleId));
+                        }
+
+                    }
+                    if (metadataOptions.hasMultipleSources() && rules.filtersScope() && sourceModulesInScope == 0) {
+                        String name = source.getKey().isEmpty() ? "<main>" : source.getKey();
+                        report.info("Source '" + name + "' has no modules in coverage scope: "
+                                + rootPath.toAbsolutePath() + "; only changeMarkers blocks can remain");
+                    }
+
+                } else {
+
+                    if (metadataOptions.getConfigFile() != null) {
+                        throw new IllegalArgumentException("Coverage configuration is not supported for external data processors");
+                    }
+
+                    readExternalDataProcessorSources(rootPath, projectUri, uriListByKey, coverageData, report);
+                }
+
+            }
+            report.verifyExactSubsystems();
+            report.warnUnmatchedScopes();
+            for (ExclusionRules.ScopePrefix prefix : prefixes.values()) {
+                int modules = prefixModules.getOrDefault(prefix.getSource(), 0);
+                ExclusionReport.PrefixRoutinesEntry routines = report.prefixRoutines(prefix.getSource());
+                boolean matchesRoutines = report.hasPrefixRoutines(prefix.getSource());
+                if (modules == 0 && !matchesRoutines) {
+                    report.warn(prefix.getSource() + ": rule does not match anything");
+                }
+                if (modules > 0) {
+                    report.info(prefix.getSource() + ": " + prefix.getPrefix() + " matches " + modules
+                            + " module(s)");
+                }
+                if (matchesRoutines) {
+                    report.info(prefix.getSource() + ": " + prefix.getPrefix() + " matches " + routines.getRoutines()
+                            + " method(s) in " + routines.getRoutineModules() + " module(s)");
+                }
+            }
+            for (String source : markerSources) {
+                if (!report.hasChangeBlocks(source)) {
+                    report.warn(source + ": rule does not match anything");
+                }
+            }
+            if (filtersScope && modulesInScope == 0) {
+                report.warn("Coverage scope is empty: no module matches includeSubsystems or includePrefix");
             }
 
+            for (ExclusionRules.Rule rule : allRules.values()) {
+                if (report.hasEntry(rule.getSource())) {
+                    continue;
+                }
+                if (rulesOutsideScope.contains(rule.getSource())) {
+                    logger.info("{}: rule matches only modules outside coverage scope", rule.getSource());
+                } else {
+                    report.warn(rule.getSource() + ": rule does not match anything");
+                }
+            }
+
+            report.logSummary();
+            File exclusionReportFile = metadataOptions.getExclusionReportFile() != null
+                    ? metadataOptions.getExclusionReportFile() : configExclusionReportFile;
+            if (exclusionReportFile != null) {
+                report.writeJson(exclusionReportFile);
+                logger.info("Exclusion report written to {}", exclusionReportFile.getAbsolutePath());
+            }
             logger.info("Configuration sources reading DONE");
         }
 
         return uriListByKey;
     }
 
-    private static void readSources(Path rootPath,
-                                    String extensionName,
-                                    MetadataOptions metadataOptions,
-                                    Map<String, URI> uriListByKey,
-                                    Map<URI, Map<BigDecimal, Integer>> coverageData)
-            throws IOException, ParserConfigurationException, SAXException, XPathExpressionException {
-
-        if (extensionName.isEmpty()) {
-            logger.info("Reading configuration sources from root path: {}", rootPath.toAbsolutePath());
-        } else {
-            logger.info("Reading extension {} sources from root path: {}", extensionName, rootPath.toAbsolutePath());
-        }
-
-        if (Files.isDirectory(rootPath)) {
-            readConfigurationSources(rootPath, extensionName, metadataOptions.getRemoveSupport(),
-                    uriListByKey, coverageData);
-        } else {
-            readExternalDataProcessorSources(rootPath, extensionName, uriListByKey, coverageData);
-        }
-    }
-
-    private static void readConfigurationSources(Path rootPath,
-                                                 String extensionName,
-                                                 SupportVariant removeSupport,
-                                                 Map<String, URI> uriListByKey,
-                                                 Map<URI, Map<BigDecimal, Integer>> coverageData) {
-
-        if (!(MDClasses.createConfiguration(rootPath) instanceof CF conf)) {
-            throw new IllegalArgumentException("Unknown source format: " + rootPath);
-        }
-
-        Map<URI, MD> moduleOwners = conf.getModulesByObject();
-        for (Module module : conf.getAllModules()) {
-            if (module.isProtected() || !Files.exists(Path.of(module.getUri()))) {
-                // no source code: module is protected with password (Module.bin) or empty (not exported)
-                continue;
-            }
-            MD mdObj = moduleOwners.get(module.getUri());
-
-            uriListByKey.put(getExtensionUriKey(extensionName, getUriKey(mdObj.getUuid(), module.getModuleType(), mdObj)),
-                    module.getUri());
-
-            if (isSupportRemoved(module, removeSupport)) {
-                coverageData.put(module.getUri(), new HashMap<>());
-            } else {
-                addCoverageData(coverageData, module.getUri());
-            }
-        }
-    }
-
-    private static boolean isSupportRemoved(Module module, SupportVariant removeSupport) {
-        return removeSupport != SupportVariant.NONE
-                && module.getSupportVariant().compareTo(removeSupport) <= 0;
-    }
-
     private static void readExternalDataProcessorSources(Path rootPath,
-                                                         String extensionName,
+                                                         URI projectUri,
                                                          Map<String, URI> uriListByKey,
-                                                         Map<URI, Map<BigDecimal, Integer>> coverageData)
+                                                         Map<URI, Map<BigDecimal, Integer>> coverageData,
+                                                         ExclusionReport report)
             throws IOException, ParserConfigurationException, SAXException, XPathExpressionException {
 
         DocumentBuilder builder = DocumentBuilderFactory.newInstance().newDocumentBuilder();
@@ -337,8 +500,9 @@ public class Utils {
         }
 
         externalDataProcessorUriListByKey.forEach((key, uri) -> {
-            uriListByKey.put(getExtensionUriKey(extensionName, key), uri);
-            addCoverageData(coverageData, uri);
+            uriListByKey.put(key, uri);
+            addCoverageData(coverageData, uri, new ModuleId(modulePath(projectUri, uri), List.of(), Set.of()),
+                    ExclusionRules.empty(), report);
         });
     }
 
@@ -357,6 +521,9 @@ public class Utils {
                 parentPath.resolve(Paths.get(externalDataProcessorName, "Ext", "ObjectModule.bsl")).toUri());
 
         Path formsPath = parentPath.resolve(Paths.get(externalDataProcessorName, "Forms"));
+        if (!Files.isDirectory(formsPath)) {
+            return uriListByKey;
+        }
         XPathExpression formUuidExpression = xPath.compile("/MetaDataObject/Form/@uuid");
         XPathExpression formNameExpression = xPath.compile("/MetaDataObject/Form/Properties/Name/text()");
         try (Stream<Path> walk = Files.list(formsPath)) {
@@ -419,185 +586,207 @@ public class Utils {
 
     public static void dumpCoverageFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
                                         MetadataOptions metadataOptions,
-                                        OutputOptions outputOptions) {
-        if (outputOptions.getOutputFormat() == OutputOptions.OutputFormat.GENERIC_COVERAGE) {
-            dumpGenericCoverageFile(coverageData, metadataOptions, outputOptions);
-        } else if (outputOptions.getOutputFormat() == OutputOptions.OutputFormat.LCOV) {
-            dumpLcovFile(coverageData, metadataOptions, outputOptions);
-        } else if (outputOptions.getOutputFormat() == OutputOptions.OutputFormat.COBERTURA) {
-            dumpCoberturaFile(coverageData, metadataOptions, outputOptions);
+                                        OutputOptions outputOptions) throws IOException {
+        URI projectUri = Path.of(metadataOptions.getProjectDirName()).toUri();
+        File outputFile = outputOptions.getOutputFile();
+        try (OutputStream output = outputFile == null ? standardOutput() : new FileOutputStream(outputFile)) {
+            switch (outputOptions.getOutputFormat()) {
+                case LCOV:
+                    writeLcov(coverageData, projectUri, output);
+                    break;
+                case COBERTURA:
+                    writeCobertura(coverageData, projectUri, output);
+                    break;
+                default:
+                    writeGenericCoverage(coverageData, projectUri, output, metadataOptions.isRawMode());
+            }
+        } catch (ParserConfigurationException | TransformerException e) {
+            throw new IOException("Cannot write coverage file: " + e.getLocalizedMessage(), e);
+        }
+        logCoverageStats(coverageData);
+    }
+
+    // start can dump coverage several times, so standard output stays open.
+    private static OutputStream standardOutput() {
+        return new FilterOutputStream(System.out) {
+            @Override
+            public void write(byte[] bytes, int offset, int length) {
+                System.out.write(bytes, offset, length);
+            }
+
+            @Override
+            public void close() {
+                System.out.flush();
+            }
+        };
+    }
+
+    private static long linesToCover(Map<BigDecimal, Integer> coverMap) {
+        return coverMap.values().stream().filter(value -> value >= 0).count();
+    }
+
+    private static long coveredLines(Map<BigDecimal, Integer> coverMap) {
+        return coverMap.values().stream().filter(value -> value > 0).count();
+    }
+
+    private static void logCoverageStats(Map<URI, Map<BigDecimal, Integer>> coverageData) {
+        long linesToCover = 0;
+        long coveredLinesCount = 0;
+        for (Map<BigDecimal, Integer> coverMap : coverageData.values()) {
+            linesToCover += linesToCover(coverMap);
+            coveredLinesCount += coveredLines(coverMap);
+        }
+        logger.info("Lines to cover: {}", linesToCover);
+        logger.info("Covered lines: {}", coveredLinesCount);
+        if (linesToCover > 0) {
+            logger.info("Coverage: {}%", Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100.);
+        }
+    }
+
+    private static String lineRate(long covered, long toCover) {
+        return toCover > 0 ? String.valueOf(Math.floorDiv(covered * 100, toCover) / 100.) : "0.0";
+    }
+
+    private static void writeXml(Document doc, OutputStream output) throws TransformerException {
+        Transformer transformer = TransformerFactory.newInstance().newTransformer();
+        transformer.setOutputProperty(OutputKeys.INDENT, "yes");
+        transformer.transform(new DOMSource(doc), new StreamResult(output));
+    }
+
+    private static void writeCobertura(Map<URI, Map<BigDecimal, Integer>> coverageData, URI projectUri,
+                                       OutputStream output) throws ParserConfigurationException, TransformerException {
+        long linesToCover = 0;
+        long coveredLinesCount = 0;
+        for (Map<BigDecimal, Integer> coverMap : coverageData.values()) {
+            linesToCover += linesToCover(coverMap);
+            coveredLinesCount += coveredLines(coverMap);
+        }
+
+        Document doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument();
+        Element mainRootElement = doc.createElement("coverage");
+        String lineRate = lineRate(coveredLinesCount, linesToCover);
+        mainRootElement.setAttribute("line-rate", lineRate);
+        mainRootElement.setAttribute("branch-rate", "0.0");
+        mainRootElement.setAttribute("lines-covered", String.valueOf(coveredLinesCount));
+        mainRootElement.setAttribute("lines-valid", String.valueOf(linesToCover));
+        mainRootElement.setAttribute("branches-covered", "0");
+        mainRootElement.setAttribute("branches-valid", "0");
+        mainRootElement.setAttribute("complexity", "0");
+        mainRootElement.setAttribute("version", "0");
+        mainRootElement.setAttribute("timestamp", String.valueOf(Instant.now().getEpochSecond()));
+        doc.appendChild(mainRootElement);
+
+        Element sourcesElement = doc.createElement("sources");
+        mainRootElement.appendChild(sourcesElement);
+
+        Element sourceElement = doc.createElement("source");
+        String[] projectDirArray = projectUri.getPath().split("/");
+        if (projectDirArray.length > 2) {
+            sourceElement.setTextContent("/builds/" + projectDirArray[projectDirArray.length - 2] + "/" + projectDirArray[projectDirArray.length - 1] + "/");
         } else {
-            logger.info("Unknown format");
+            sourcesElement.setTextContent(projectUri.getPath());
         }
+        sourcesElement.appendChild(sourceElement);
+
+        Element packagesElement = doc.createElement("packages");
+        mainRootElement.appendChild(packagesElement);
+
+        Element packageElement = doc.createElement("package");
+        packageElement.setAttribute("name", "Main");
+        packageElement.setAttribute("line-rate", lineRate);
+        packageElement.setAttribute("branch-rate", "0.0");
+        packageElement.setAttribute("complexity", "0");
+        packagesElement.appendChild(packageElement);
+
+        Element classesElement = doc.createElement("classes");
+        packageElement.appendChild(classesElement);
+
+        coverageData.forEach((uri, coverMap) -> {
+            if (coverMap.isEmpty()) {
+                return;
+            }
+
+            Element classElement = doc.createElement("class");
+            classElement.setAttribute("name", projectUri.relativize(uri).getPath());
+            classElement.setAttribute("line-rate", lineRate(coveredLines(coverMap), linesToCover(coverMap)));
+            classElement.setAttribute("branch-rate", "0.0");
+            classElement.setAttribute("complexity", "0");
+            classElement.setAttribute("filename", projectUri.relativize(uri).getPath());
+            classesElement.appendChild(classElement);
+
+            classElement.appendChild(doc.createElement("methods"));
+            Element linesElement = doc.createElement("lines");
+            classElement.appendChild(linesElement);
+
+            coverMap.forEach((lineNumber, hits) -> {
+                if (hits >= 0) {
+                    Element lineElement = doc.createElement("line");
+                    lineElement.setAttribute("hits", String.valueOf(hits));
+                    lineElement.setAttribute("number", lineNumber.toString());
+                    lineElement.setAttribute("branch", "false");
+                    linesElement.appendChild(lineElement);
+                }
+            });
+        });
+        writeXml(doc, output);
     }
 
-    private static void dumpCoberturaFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
-                                          MetadataOptions metadataOptions,
-                                          OutputOptions outputOptions) {
-        DocumentBuilderFactory icFactory = DocumentBuilderFactory.newInstance();
-        DocumentBuilder icBuilder;
-        try {
-            long linesToCover = 0;
-            long coveredLinesCount = 0;
-            for (Map<BigDecimal, Integer> bigDecimalMap : coverageData.values()) {
-                linesToCover += bigDecimalMap.values().stream().filter(value -> value >= 0).count();
-                coveredLinesCount += bigDecimalMap.values().stream().filter(value -> value > 0).count();
-            }
-            logger.info("Lines to cover: {}", linesToCover);
-            logger.info("Covered lines: {}", coveredLinesCount);
-            if (linesToCover > 0) {
-                logger.info("Coverage: {}%", Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100.);
-            }
-
-            URI projectUri = Path.of(metadataOptions.getProjectDirName()).toUri();
-            icBuilder = icFactory.newDocumentBuilder();
-            Document doc = icBuilder.newDocument();
-            Element mainRootElement = doc.createElement("coverage");
-            String lineRate = "0.0";
-            if (linesToCover > 0) {
-                lineRate = String.valueOf(Math.floorDiv(coveredLinesCount * 100, linesToCover) / 100.);
-            }
-            mainRootElement.setAttribute("line-rate", lineRate);
-            mainRootElement.setAttribute("branch-rate", "0.0");
-            mainRootElement.setAttribute("lines-covered", String.valueOf(coveredLinesCount));
-            mainRootElement.setAttribute("lines-valid", String.valueOf(linesToCover));
-            mainRootElement.setAttribute("branches-covered", "0");
-            mainRootElement.setAttribute("branches-valid", "0");
-            mainRootElement.setAttribute("complexity", "0");
-            mainRootElement.setAttribute("version", "0");
-            mainRootElement.setAttribute("timestamp", String.valueOf(Instant.now().getEpochSecond()));
-            doc.appendChild(mainRootElement);
-
-            Element sourcesElement = doc.createElement("sources");
-            mainRootElement.appendChild(sourcesElement);
-
-            Element sourceElement = doc.createElement("source");
-            String[] projectDirArray = projectUri.getPath().split("/");
-            if (projectDirArray.length > 2) {
-                sourceElement.setTextContent("/builds/" + projectDirArray[projectDirArray.length - 2] + "/" + projectDirArray[projectDirArray.length - 1] + "/");
-            } else {
-                sourcesElement.setTextContent(projectUri.getPath());
-            }
-            sourcesElement.appendChild(sourceElement);
-
-            Element packagesElement = doc.createElement("packages");
-            mainRootElement.appendChild(packagesElement);
-
-            Element packageElement = doc.createElement("package");
-            packageElement.setAttribute("name", "Main");
-            packageElement.setAttribute("line-rate", lineRate);
-            packageElement.setAttribute("branch-rate", "0.0");
-            packageElement.setAttribute("complexity", "0");
-            packagesElement.appendChild(packageElement);
-
-            Element classesElement = doc.createElement("classes");
-            packageElement.appendChild(classesElement);
-
-            coverageData.forEach((uri, bigDecimalsMap) -> {
-                if (bigDecimalsMap.isEmpty()) {
-                    return;
-                }
-
-                long fileLinesToCover = bigDecimalsMap.values().stream().filter(value -> value >= 0).count();
-                long fileCoveredLinesCount = bigDecimalsMap.values().stream().filter(value -> value > 0).count();
-                String fileLineRate = "0.0";
-                if (fileLinesToCover > 0) {
-                    fileLineRate = String.valueOf(Math.floorDiv(fileCoveredLinesCount * 100, fileLinesToCover) / 100.);
-                }
-
-                Element classElement = doc.createElement("class");
-                classElement.setAttribute("name", projectUri.relativize(uri).getPath());
-                classElement.setAttribute("line-rate", fileLineRate);
-                classElement.setAttribute("branch-rate", "0.0");
-                classElement.setAttribute("complexity", "0");
-                classElement.setAttribute("filename", projectUri.relativize(uri).getPath());
-                classesElement.appendChild(classElement);
-
-                Element methodsElement = doc.createElement("methods");
-                classElement.appendChild(methodsElement);
-
-                bigDecimalsMap.forEach((bigDecimal, hits) -> {
-                    if (hits >= 0) {
-                        Element lineElement = doc.createElement("line");
-                        lineElement.setAttribute("hits", String.valueOf(hits));
-                        lineElement.setAttribute("number", bigDecimal.toString());
-                        lineElement.setAttribute("branch", "false");
-                        classElement.appendChild(lineElement);
-                    }
-                });
-            });
-            Transformer transformer = TransformerFactory.newInstance().newTransformer();
-            transformer.setOutputProperty(OutputKeys.INDENT, "yes");
-            DOMSource source = new DOMSource(doc);
-            StreamResult outputStream;
-            if (outputOptions.getOutputFile() == null) {
-                outputStream = new StreamResult(System.out);
-            } else {
-                outputStream = new StreamResult(new FileOutputStream(outputOptions.getOutputFile()));
-            }
-            transformer.transform(source, outputStream);
-        } catch (Exception e) {
-            logger.error(e.getLocalizedMessage());
+    private static void writeGenericCoverage(Map<URI, Map<BigDecimal, Integer>> coverageData, URI projectUri,
+                                             OutputStream output, boolean raw) throws ParserConfigurationException, TransformerException {
+        Document doc = DocumentBuilderFactory.newInstance().newDocumentBuilder().newDocument();
+        Element mainRootElement = doc.createElement("coverage");
+        mainRootElement.setAttribute("version", "1");
+        if (raw) {
+            mainRootElement.setAttribute("sourceIdentity", "true");
         }
+        doc.appendChild(mainRootElement);
+        coverageData.forEach((uri, coverMap) -> {
+            if (coverMap.isEmpty()) {
+                return;
+            }
+            Element fileElement = doc.createElement("file");
+            fileElement.setAttribute("path", projectUri.relativize(uri).getPath());
+            String extension = getRawExtensionName(uri);
+            if (!extension.isEmpty()) {
+                fileElement.setAttribute("extension", extension);
+            }
+            if (uri.getQuery() != null) {
+                fileElement.setAttribute("sourceUrl", uri.getQuery());
+            }
+            coverMap.forEach((lineNumber, hits) -> {
+                if (hits >= 0) {
+                    Element lineElement = doc.createElement("lineToCover");
+                    lineElement.setAttribute("covered", Boolean.toString(hits > 0));
+                    lineElement.setAttribute("lineNumber", lineNumber.toString());
+                    fileElement.appendChild(lineElement);
+                }
+            });
+            mainRootElement.appendChild(fileElement);
+        });
+        writeXml(doc, output);
     }
 
-    private static void dumpGenericCoverageFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
-                                                MetadataOptions metadataOptions,
-                                                OutputOptions outputOptions) {
-        DocumentBuilderFactory icFactory = DocumentBuilderFactory.newInstance();
-        DocumentBuilder icBuilder;
-        try {
-
-            URI projectUri = Path.of(metadataOptions.getProjectDirName()).toUri();
-            icBuilder = icFactory.newDocumentBuilder();
-            Document doc = icBuilder.newDocument();
-            Element mainRootElement = doc.createElement("coverage");
-            mainRootElement.setAttribute("version", "1");
-            doc.appendChild(mainRootElement);
-            coverageData.forEach((uri, bigDecimalsMap) -> {
-                if (bigDecimalsMap.isEmpty()) {
-                    return;
+    private static void writeLcov(Map<URI, Map<BigDecimal, Integer>> coverageData, URI projectUri,
+                                  OutputStream output) throws IOException {
+        PrintWriter writer = new PrintWriter(new OutputStreamWriter(output, StandardCharsets.UTF_8));
+        coverageData.forEach((uri, coverMap) -> {
+            if (coverMap.isEmpty()) {
+                return;
+            }
+            writer.println("TN:");
+            writer.printf("SF:%s\n", projectUri.relativize(uri).getPath());
+            coverMap.forEach((lineNumber, hits) -> {
+                if (hits >= 0) {
+                    writer.printf("DA:%s,%d\n", lineNumber.toString(), hits);
                 }
-                Element fileElement = doc.createElement("file");
-                fileElement.setAttribute("path", projectUri.relativize(uri).getPath());
-                String extensionName = getRawExtensionName(uri);
-                if (!extensionName.isEmpty()) {
-                    // RAW mode: module of extension, no attribute - configuration
-                    fileElement.setAttribute("extension", extensionName);
-                }
-                bigDecimalsMap.forEach((bigDecimal, integer) -> {
-                    if (integer >= 0) {
-                        Element lineElement = doc.createElement("lineToCover");
-                        lineElement.setAttribute("covered", Boolean.toString(integer > 0));
-                        lineElement.setAttribute("lineNumber", bigDecimal.toString());
-                        fileElement.appendChild(lineElement);
-                    }
-                });
-                mainRootElement.appendChild(fileElement);
             });
-            long linesToCover = 0;
-            long coveredLinesCount = 0;
-            for (Map<BigDecimal, Integer> bigDecimalMap : coverageData.values()) {
-                linesToCover += bigDecimalMap.values().stream().filter(value -> value >= 0).count();
-                coveredLinesCount += bigDecimalMap.values().stream().filter(value -> value > 0).count();
-            }
-            logger.info("Lines to cover: {}", linesToCover);
-            logger.info("Covered lines: {}", coveredLinesCount);
-            if (linesToCover > 0) {
-                logger.info("Coverage: {}%", Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100.);
-            }
-            Transformer transformer = TransformerFactory.newInstance().newTransformer();
-            transformer.setOutputProperty(OutputKeys.INDENT, "yes");
-            DOMSource source = new DOMSource(doc);
-            StreamResult outputStream;
-            if (outputOptions.getOutputFile() == null) {
-                outputStream = new StreamResult(System.out);
-            } else {
-                outputStream = new StreamResult(new FileOutputStream(outputOptions.getOutputFile()));
-            }
-            transformer.transform(source, outputStream);
-        } catch (Exception e) {
-            logger.error(e.getLocalizedMessage());
+            writer.printf("LH:%d\n", coveredLines(coverMap));
+            writer.printf("LF:%d\n", linesToCover(coverMap));
+            writer.println("end_of_record");
+        });
+        writer.flush();
+        if (writer.checkError()) {
+            throw new IOException("Cannot write coverage file");
         }
     }
 
@@ -640,65 +829,18 @@ public class Utils {
         return result;
     }
 
-    private static void dumpLcovFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
-                                     MetadataOptions metadataOptions,
-                                     OutputOptions outputOptions) {
-
-        try {
-            OutputStreamWriter outputStream;
-            if (outputOptions.getOutputFile() == null) {
-                outputStream = new OutputStreamWriter(System.out);
-            } else {
-                outputStream = new OutputStreamWriter(new FileOutputStream(outputOptions.getOutputFile()), StandardCharsets.UTF_8);
-            }
-            PrintWriter writer = new PrintWriter(outputStream);
-
-            URI projectUri = Path.of(metadataOptions.getProjectDirName()).toUri();
-
-            coverageData.forEach((uri, bigDecimalsMap) -> {
-                if (bigDecimalsMap.isEmpty()) {
-                    return;
-                }
-                writer.println("TN:");
-                writer.printf("SF:%s\n", projectUri.relativize(uri).getPath());
-                bigDecimalsMap.forEach((bigDecimal, integer) -> {
-                    if (integer >= 0) {
-                        writer.printf("DA:%s,%d\n", bigDecimal.toString(), integer);
-                    }
-                });
-                writer.printf("LH:%d\n", bigDecimalsMap.values().stream().filter(aInteger -> aInteger > 0).count());
-                writer.printf("LF:%d\n", bigDecimalsMap.size());
-                writer.println("end_of_record");
-            });
-            long linesToCover = 0;
-            long coveredLinesCount = 0;
-            for (Map<BigDecimal, Integer> bigDecimalMap : coverageData.values()) {
-                linesToCover += bigDecimalMap.values().stream().filter(value -> value >= 0).count();
-                coveredLinesCount += bigDecimalMap.values().stream().filter(value -> value > 0).count();
-            }
-            logger.info("Lines to cover: {}", linesToCover);
-            logger.info("Covered lines: {}", coveredLinesCount);
-            if (linesToCover > 0) {
-                logger.info("Coverage: {}%", Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100.);
-            }
-
-            writer.close();
-        } catch (Exception e) {
-            logger.error(e.getLocalizedMessage());
-        }
-    }
 
     public static void printCoverageStats(Map<URI, Map<BigDecimal, Integer>> coverageData,
                                           MetadataOptions metadataOptions) {
         List<Object[]> dataList = new LinkedList<>();
         URI projectUri = Path.of(metadataOptions.getProjectDirName()).toUri();
         coverageData.forEach((uri, bigDecimalsMap) -> {
-            if (bigDecimalsMap.isEmpty()) {
+            long linesToCover = linesToCover(bigDecimalsMap);
+            if (linesToCover == 0) {
                 return;
             }
             String path = projectUri.relativize(uri).getPath();
-            long linesToCover = bigDecimalsMap.values().stream().filter(aInteger -> aInteger >= 0).count();
-            long coveredLinesCount = bigDecimalsMap.values().stream().filter(aInteger -> aInteger > 0).count();
+            long coveredLinesCount = coveredLines(bigDecimalsMap);
             double coverage = Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100.;
             Object[] dataRow = {
                     path,
@@ -726,56 +868,22 @@ public class Utils {
         boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
 
         URI debugUri = URI.create(connectionOptions.getDebugServerUrl());
-        String pipeId = connectionOptions.getInfobaseAlias() + "_"
-                + debugUri.toString().replaceAll("[^a-zA-Z0-9-_.]", "_");
         String pipeName;
         if (isWindows) {
-            pipeName = "\\\\.\\pipe\\COVER_" + pipeId;
+            pipeName = String.format("\\\\.\\pipe\\COVER_%s_%s", connectionOptions.getInfobaseAlias(),
+                    debugUri.toString().replaceAll("[^a-zA-Z0-9-_.]", "_"));
         } else {
             File tempDirFile = new File("/tmp/coverage41c/");
             tempDirFile.mkdirs();
             Path tempDir = tempDirFile.toPath();
-            Path sock = tempDir.resolve(pipeId + ".sock");
+            Path sock = tempDir.resolve(String.format("%s_%s.sock", connectionOptions.getInfobaseAlias(),
+                    debugUri.toString().replaceAll("[^a-zA-Z0-9-_.]", "_")));
             pipeName = sock.toString();
         }
         return pipeName;
     }
 
     public static boolean isProcessStillAlive(Integer pid) {
-        String OS = System.getProperty("os.name").toLowerCase();
-        String command;
-        if (OS.contains("win")) {
-            logger.debug("Check alive Windows mode. Pid: [{}]", pid);
-            command = "cmd /c tasklist /FI \"PID eq " + pid + "\"";
-        } else if (OS.contains("nix") || OS.contains("nux")) {
-            logger.debug("Check alive Linux/Unix mode. Pid: [{}]", pid);
-            command = "ps -p " + pid;
-        } else {
-            logger.warn("Unsuported OS: Check alive for Pid: [{}] return false", pid);
-            return false;
-        }
-        return isProcessIdRunning(String.valueOf(pid), command);
-    }
-
-    private static boolean isProcessIdRunning(String pid, String command) {
-        logger.debug("Command [{}]", command);
-        try {
-            Runtime rt = Runtime.getRuntime();
-            Process pr = rt.exec(command);
-
-            InputStreamReader isReader = new InputStreamReader(pr.getInputStream());
-            BufferedReader bReader = new BufferedReader(isReader);
-            String strLine;
-            while ((strLine = bReader.readLine()) != null) {
-                if (strLine.contains(" " + pid + " ")) {
-                    return true;
-                }
-            }
-
-            return false;
-        } catch (Exception ex) {
-            logger.warn("Got exception using system command [{}].", command, ex);
-            return true;
-        }
+        return ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false);
     }
 }

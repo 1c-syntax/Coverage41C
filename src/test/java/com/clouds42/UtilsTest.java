@@ -125,7 +125,7 @@ class UtilsTest {
             Element line = (Element) file.getElementsByTagName("lineToCover").item(0);
             lineByExtension.put(file.getAttribute("extension"), line.getAttribute("lineNumber"));
         }
-        // configuration module - without attribute, as in previous versions
+        // The main configuration has no named extension.
         assertEquals("2", lineByExtension.get(""));
         assertEquals("6", lineByExtension.get("Доработки"));
         assertFalse(lineByExtension.containsKey("Второе"));

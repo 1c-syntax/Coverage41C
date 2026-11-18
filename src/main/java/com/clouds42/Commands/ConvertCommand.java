@@ -25,6 +25,7 @@ import com.clouds42.BuildConfig;
 import com.clouds42.CommandLineOptions.*;
 import com.clouds42.PipeMessages;
 import com.clouds42.Utils;
+import com.clouds42.SourceKey;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
@@ -43,9 +44,10 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.HashSet;
+import java.util.TreeSet;
 import java.util.concurrent.Callable;
 import java.util.stream.Stream;
 
@@ -68,104 +70,163 @@ public class ConvertCommand implements Callable<Integer> {
     @Mixin
     private LoggingOptions loggingOptions;
 
-    @Override
-    public Integer call() throws Exception {
+    @Mixin
+    private FilterOptions filterOptions;
 
-        String srcDirExtensionName = convertOptions.getExtensionName();
-        metadataOptions.validate(srcDirExtensionName);
+    private final Map<String, URI> legacySources = new HashMap<>();
+    private final Set<String> ambiguousLegacyKeys = new HashSet<>();
 
-        Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<URI,Map<BigDecimal, Integer>>();
-
-        Map<String, URI> uriListByKey = Utils.readMetadata(metadataOptions, srcDirExtensionName, coverageData);
-
-        FileInputStream fileIS = new FileInputStream(convertOptions.getInputRawXmlFile());
-        DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
-        DocumentBuilder builder = builderFactory.newDocumentBuilder();
-        Document xmlDocument = builder.parse(fileIS);
-        NodeList fileNodeList = xmlDocument.getElementsByTagName("file");
-
-        // without -e and --extension the extension attribute is ignored: -s may point to sources of any extension, as before
-        boolean matchExtensions = !srcDirExtensionName.isEmpty() || !metadataOptions.getExtensionSources().isEmpty();
-        if (matchExtensions && !hasExtensionAttribute(fileNodeList)) {
-            logger.warn("RAW file doesn't contain modules of extensions: it was made by previous version" +
-                    " or extensions code wasn't executed. All modules are treated as modules of --srcDir sources");
-            matchExtensions = false;
-        }
-
-        // configuration and extensions with sources, other modules are skipped
-        Set<String> sourcesExtensionNames = new HashSet<>();
-        sourcesExtensionNames.add(srcDirExtensionName);
-        metadataOptions.getExtensionSources().forEach(source -> sourcesExtensionNames.add(source.getName()));
-        int skippedModulesCount = 0;
-
-        for(int fileNodeNumber = 0; fileNodeNumber < fileNodeList.getLength(); fileNodeNumber++) {
-            Node fileNode = fileNodeList.item(fileNodeNumber);
-            String fileKey = fileNode.getAttributes().getNamedItem("path").getTextContent();
-            if (fileKey.startsWith("/")) {
-                fileKey = fileKey.substring(1);
+    private URI resolveFileKey(String key, Map<String, URI> sources) {
+        if (SourceKey.isQualified(key)) {
+            String legacy = SourceKey.legacy(key);
+            if (metadataOptions.hasMultipleSources()) {
+                return sources.get(key);
             }
-            String extensionName = matchExtensions ? getExtensionName(fileNode) : srcDirExtensionName;
-            boolean hasSources = sourcesExtensionNames.contains(extensionName);
-            fileKey = Utils.getExtensionUriKey(extensionName, fileKey);
-            URI fileUri = hasSources ? uriListByKey.get(fileKey) : null;
-            if (fileUri == null) {
-                if (hasSources) {
-                    logger.error("Can't find file key: {}", fileKey);
-                } else {
-                    skippedModulesCount++;
-                }
-                continue;
-            }
-            Map<BigDecimal, Integer> coverMap = coverageData.get(fileUri);
-            if (!coverMap.isEmpty()) {
-                NodeList lineNoNodeList = fileNode.getChildNodes();
-                for (int lineNoNodeNumber = 0; lineNoNodeNumber < lineNoNodeList.getLength(); lineNoNodeNumber++) {
-                    Node lineNoNode = lineNoNodeList.item(lineNoNodeNumber);
-                    if (!lineNoNode.getNodeName().equals("lineToCover")) {
-                        continue;
-                    }
-                    if (!lineNoNode.getAttributes().getNamedItem("covered").getTextContent().equals("true")) {
-                        continue;
-                    }
-                    BigDecimal lineNo = new BigDecimal(lineNoNode.getAttributes().getNamedItem("lineNumber").getTextContent());
-                    if (!coverMap.containsKey(lineNo)) {
-                        if (loggingOptions.isVerbose()) {
-                            logger.info("Can't find line to cover {} in module {}", lineNo, fileUri);
-                            try {
-                                Stream<String> all_lines = Files.lines(Paths.get(fileUri));
-                                String specific_line_n = all_lines.skip(lineNo.longValue() - 1).findFirst().get();
-                                logger.info(">>> {}", specific_line_n);
-                            } catch (Exception e) {
-                                logger.error(e.getLocalizedMessage());
-                            }
-                        }
-                    } else {
-                        coverMap.put(lineNo, 1);
-                    }
-                }
-            }
+            // A single root still selects one source; do not attribute another extension's hits to it.
+            String selected = SourceKey.qualify(legacy, filterOptions.getExtensionName(),
+                    filterOptions.getExternalDataProcessorUrl());
+            return selected.equals(key) ? sources.get(legacy) : null;
         }
-        if (skippedModulesCount > 0) {
-            logger.info("Skipped {} modules of configuration or extensions without sources", skippedModulesCount);
+        if (!metadataOptions.hasMultipleSources()) {
+            return sources.get(key);
         }
-        Utils.dumpCoverageFile(coverageData, metadataOptions, outputOptions);
-        logger.info("Convert done");
-
-        return CommandLine.ExitCode.OK;
+        if (ambiguousLegacyKeys.contains(key)) {
+            throw new IllegalArgumentException("Ambiguous legacy module key: " + key
+                    + "; collect RAW data again with a version that preserves source identity");
+        }
+        return legacySources.get(key);
     }
 
-    private static boolean hasExtensionAttribute(NodeList fileNodeList) {
-        for (int fileNodeNumber = 0; fileNodeNumber < fileNodeList.getLength(); fileNodeNumber++) {
-            if (fileNodeList.item(fileNodeNumber).getAttributes().getNamedItem("extension") != null) {
+    private String rawFileKey(Node fileNode, boolean sourceIdentity, boolean includesExtensionAttributes) {
+        String path = attribute(fileNode, "path");
+        String key = path.startsWith("/") ? path.substring(1) : path;
+        if (SourceKey.isQualified(key)) {
+            return key;
+        }
+        String url = attribute(fileNode, "sourceUrl");
+        if (sourceIdentity || !url.isEmpty()) {
+            return SourceKey.qualify(key, attribute(fileNode, "extension"), url);
+        }
+        if (includesExtensionAttributes && (metadataOptions.hasMultipleSources()
+                || !filterOptions.getExtensionName().isEmpty())) {
+            return SourceKey.qualify(key, attribute(fileNode, "extension"), "");
+        }
+        if (metadataOptions.hasMultipleSources() && !metadataOptions.usesNamedSources()) {
+            // Historical RAW files without extension attributes belong to the tree passed via -s.
+            return SourceKey.qualify(key, filterOptions.getExtensionName(), "");
+        }
+        return key;
+    }
+
+    private static String attribute(Node fileNode, String name) {
+        Node attribute = fileNode.getAttributes().getNamedItem(name);
+        return attribute == null ? "" : attribute.getTextContent();
+    }
+
+    private static boolean includesExtensionAttributes(NodeList files) {
+        for (int index = 0; index < files.getLength(); index++) {
+            if (files.item(index).getAttributes().getNamedItem("extension") != null) {
                 return true;
             }
         }
         return false;
     }
 
-    // no attribute - configuration
-    private static String getExtensionName(Node fileNode) {
-        Node extensionNode = fileNode.getAttributes().getNamedItem("extension");
-        return extensionNode == null ? "" : extensionNode.getTextContent();
+    // Check the whole input first: a mixed raw file legitimately contains other sources
+    // with the same UUID. Failing on the first such key would reject a valid selection.
+    private void verifySelectedSource(NodeList files, Map<String, URI> sources,
+                                      boolean sourceIdentity, boolean includesExtensionAttributes) {
+        if (metadataOptions.hasMultipleSources()) {
+            return;
+        }
+        boolean selectedSourceFound = false;
+        Set<String> otherSources = new TreeSet<>();
+        for (int index = 0; index < files.getLength(); index++) {
+            String key = rawFileKey(files.item(index), sourceIdentity, includesExtensionAttributes);
+            if (resolveFileKey(key, sources) != null) {
+                selectedSourceFound = true;
+            } else if (SourceKey.isQualified(key) && sources.containsKey(SourceKey.legacy(key))) {
+                otherSources.add(SourceKey.selectionHint(key));
+            }
+        }
+        if (!otherSources.isEmpty() && !selectedSourceFound) {
+            throw new IllegalArgumentException("No RAW measurements for the selected source; "
+                    + "known module UUIDs belong to other sources. Select the matching source: "
+                    + String.join("; ", otherSources));
+        }
+        otherSources.forEach(hint -> logger.warn("Ignoring RAW source with known module UUIDs; "
+                + "to convert that source use {} with its sources directory", hint));
+    }
+
+    @Override
+    public Integer call() throws Exception {
+
+        metadataOptions.validateSourceFilters(filterOptions.getExtensionName(), filterOptions.getExternalDataProcessorUrl());
+        Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<URI,Map<BigDecimal, Integer>>();
+
+        Map<String, URI> uriListByKey = Utils.readMetadata(metadataOptions, filterOptions.getExtensionName(), coverageData, false);
+        legacySources.clear();
+        ambiguousLegacyKeys.clear();
+        if (metadataOptions.hasMultipleSources()) {
+            uriListByKey.forEach((key, uri) -> {
+                String legacy = SourceKey.legacy(key);
+                if (legacySources.putIfAbsent(legacy, uri) != null) {
+                    ambiguousLegacyKeys.add(legacy);
+                }
+            });
+        }
+
+        try (FileInputStream fileIS = new FileInputStream(convertOptions.getInputRawXmlFile())) {
+            DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
+            DocumentBuilder builder = builderFactory.newDocumentBuilder();
+            Document xmlDocument = builder.parse(fileIS);
+            NodeList fileNodeList = xmlDocument.getElementsByTagName("file");
+            boolean includesExtensions = includesExtensionAttributes(fileNodeList);
+            boolean sourceIdentity = "true".equals(xmlDocument.getDocumentElement().getAttribute("sourceIdentity"));
+            verifySelectedSource(fileNodeList, uriListByKey, sourceIdentity, includesExtensions);
+            for(int fileNodeNumber = 0; fileNodeNumber < fileNodeList.getLength(); fileNodeNumber++) {
+                Node fileNode = fileNodeList.item(fileNodeNumber);
+                String fileKey = rawFileKey(fileNode, sourceIdentity, includesExtensions);
+                URI fileUri = resolveFileKey(fileKey, uriListByKey);
+                if (fileUri == null) {
+                    if (metadataOptions.hasMultipleSources() || !SourceKey.isQualified(fileKey)
+                            || !uriListByKey.containsKey(SourceKey.legacy(fileKey))) {
+                        logger.error("Can't find file key: {}", fileKey);
+                    }
+                    continue;
+                }
+                Map<BigDecimal, Integer> coverMap = coverageData.get(fileUri);
+                if (!coverMap.isEmpty()) {
+                    NodeList lineNoNodeList = fileNode.getChildNodes();
+                    for (int lineNoNodeNumber = 0; lineNoNodeNumber < lineNoNodeList.getLength(); lineNoNodeNumber++) {
+                        Node lineNoNode = lineNoNodeList.item(lineNoNodeNumber);
+                        if (!lineNoNode.getNodeName().equals("lineToCover")) {
+                            continue;
+                        }
+                        if (!lineNoNode.getAttributes().getNamedItem("covered").getTextContent().equals("true")) {
+                            continue;
+                        }
+                        BigDecimal lineNo = new BigDecimal(lineNoNode.getAttributes().getNamedItem("lineNumber").getTextContent());
+                        if (!coverMap.containsKey(lineNo)) {
+                            if (loggingOptions.isVerbose()) {
+                                logger.info("Can't find line to cover {} in module {}", lineNo, fileUri);
+                                try (Stream<String> lines = Files.lines(Paths.get(fileUri))) {
+                                    lines.skip(lineNo.longValue() - 1).findFirst()
+                                            .ifPresent(line -> logger.info(">>> {}", line));
+                                } catch (Exception e) {
+                                    logger.error(e.getLocalizedMessage());
+                                }
+                            }
+                        } else {
+                            coverMap.put(lineNo, 1);
+                        }
+                    }
+                }
+            }
+        }
+        Utils.dumpCoverageFile(coverageData, metadataOptions, outputOptions);
+        logger.info("Convert done");
+
+        return CommandLine.ExitCode.OK;
     }
 }

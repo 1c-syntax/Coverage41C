@@ -22,6 +22,7 @@ repositories {
 
 configurations {
     providedCompile
+    testCompileOnly.extendsFrom(providedCompile)
 }
 
 dependencies {
@@ -83,8 +84,7 @@ dependencies {
     testImplementation 'org.hamcrest:hamcrest:3.0'
     testImplementation 'org.xmlunit:xmlunit-core:2.14.0'
     testImplementation 'org.xmlunit:xmlunit-matchers:2.14.0'
-    testImplementation 'com.fasterxml.jackson.core:jackson-core:2.22.2'
-    testImplementation 'com.fasterxml.jackson.core:jackson-databind:2.22.2'
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.22.2'
 }
 
 tasks.withType(JavaCompile) {
@@ -101,8 +101,21 @@ run {
 test {
     finalizedBy jacocoTestReport
     classpath += configurations.providedCompile
-    useJUnitPlatform()
+    useJUnitPlatform {
+        excludeTags 'integration'
+    }
+    jvmArgs = ['--add-opens=java.base/java.net=ALL-UNNAMED']
     testLogging.showStandardStreams = true
+}
+
+tasks.register('integrationTest', Test) {
+    description = 'Runs the tests requiring a local 1C installation and vrunner'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath + configurations.providedCompile
+    useJUnitPlatform {
+        includeTags 'integration'
+    }
 }
 
 startScripts {
@@ -112,6 +125,7 @@ startScripts {
 
 application {
     mainClass = 'com.clouds42.Coverage41C'
+    applicationDefaultJvmArgs = ['--add-opens=java.base/java.net=ALL-UNNAMED']
 }
 
 jacocoTestReport {
