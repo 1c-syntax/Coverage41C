@@ -64,7 +64,9 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystemLoopException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
@@ -241,16 +243,31 @@ public class Utils {
                                                 String mainExtension,
                                                 Map<URI, Map<BigDecimal, Integer>> coverageData,
                                                 boolean measuring, boolean hasUserFilter) throws Exception {
-        return readMetadata(metadataOptions, mainExtension, coverageData, new ExclusionReport(),
-                measuring, hasUserFilter, null);
+        return readMetadata(metadataOptions, mainExtension, "", coverageData, measuring, hasUserFilter);
+    }
+
+    public static Map<String, URI> readMetadata(MetadataOptions metadataOptions,
+                                                String mainExtension, String mainSourceUrl,
+                                                Map<URI, Map<BigDecimal, Integer>> coverageData,
+                                                boolean measuring, boolean hasUserFilter) throws Exception {
+        return readMetadata(metadataOptions, mainExtension, mainSourceUrl, coverageData, new ExclusionReport(),
+                measuring, hasUserFilter, null, null);
     }
 
     public static Map<String, URI> readMetadataForConversion(MetadataOptions metadataOptions,
                                                              String mainExtension,
                                                              Map<URI, Map<BigDecimal, Integer>> coverageData,
                                                              File rawInput) throws Exception {
-        return readMetadata(metadataOptions, mainExtension, coverageData, new ExclusionReport(),
-                false, false, rawInput);
+        return readMetadataForConversion(metadataOptions, mainExtension, "", coverageData, rawInput, null);
+    }
+
+    public static Map<String, URI> readMetadataForConversion(MetadataOptions metadataOptions,
+                                                             String mainExtension,
+                                                             String mainSourceUrl,
+                                                             Map<URI, Map<BigDecimal, Integer>> coverageData,
+                                                             File rawInput, File coverageOutput) throws Exception {
+        return readMetadata(metadataOptions, mainExtension, mainSourceUrl, coverageData, new ExclusionReport(),
+                false, false, rawInput, coverageOutput);
     }
 
     public static List<String> validateMetadata(MetadataOptions metadataOptions) throws Exception {
@@ -259,15 +276,15 @@ public class Utils {
         }
         ExclusionReport report = new ExclusionReport();
         metadataOptions.validateSourceFilters("", "");
-        readMetadata(metadataOptions, "", new HashMap<>(), report, false, false, null);
+        readMetadata(metadataOptions, "", "", new HashMap<>(), report, false, false, null, null);
         return report.getWarnings();
     }
 
     private static Map<String, URI> readMetadata(MetadataOptions metadataOptions,
-                                                 String mainExtension,
+                                                 String mainExtension, String mainSourceUrl,
                                                  Map<URI, Map<BigDecimal, Integer>> coverageData,
                                                  ExclusionReport report, boolean measuring,
-                                                 boolean hasUserFilter, File rawInput) throws Exception {
+                                                 boolean hasUserFilter, File rawInput, File coverageOutput) throws Exception {
 
         boolean rawMode = false;
         if (metadataOptions.isRawMode()) {
@@ -449,7 +466,8 @@ public class Utils {
                         throw new IllegalArgumentException("Coverage configuration is not supported for external data processors");
                     }
 
-                    readExternalDataProcessorSources(rootPath, projectUri, uriListByKey, coverageData, report);
+                    readExternalDataProcessorSources(rootPath, source.getKey(), mainSourceUrl,
+                            metadataOptions.hasMultipleSources(), projectUri, uriListByKey, coverageData, report);
                 }
 
             }
@@ -504,6 +522,10 @@ public class Utils {
                         rejectReportOverwritingInput(destination, input);
                     }
                 }
+                if (coverageOutput != null && sameOutputFile(destination, coverageOutput.toPath().toAbsolutePath())) {
+                    throw new IllegalArgumentException("Exclusion report and coverage output must use different files: "
+                            + destination + " and " + coverageOutput.toPath().toAbsolutePath());
+                }
                 report.writeJson(exclusionReportFile);
                 logger.info("Exclusion report written to {}", exclusionReportFile.getAbsolutePath());
             }
@@ -511,6 +533,35 @@ public class Utils {
         }
 
         return uriListByKey;
+    }
+
+    private static boolean sameOutputFile(Path report, Path coverage) throws IOException {
+        return report.equals(coverage)
+                || (Files.exists(report) && Files.exists(coverage) && Files.isSameFile(report, coverage))
+                || resolveOutputPath(report, new HashSet<>()).equals(resolveOutputPath(coverage, new HashSet<>()));
+    }
+
+    // The exclusion report creates missing directories and can write through a dangling symlink.
+    private static Path resolveOutputPath(Path path, Set<Path> links) throws IOException {
+        try {
+            return path.toRealPath();
+        } catch (NoSuchFileException missing) {
+            if (path.getParent() == null) {
+                throw missing;
+            }
+            Path candidate = resolveOutputPath(path.getParent(), links).resolve(path.getFileName()).normalize();
+            if (!Files.isSymbolicLink(candidate)) {
+                return candidate;
+            }
+            if (!links.add(candidate)) {
+                throw new FileSystemLoopException(candidate.toString());
+            }
+            try {
+                return resolveOutputPath(candidate.resolveSibling(Files.readSymbolicLink(candidate)), links);
+            } finally {
+                links.remove(candidate);
+            }
+        }
     }
 
     private static void rejectReportOverwritingInput(Path report, File input) throws IOException {
@@ -522,6 +573,7 @@ public class Utils {
     }
 
     private static void readExternalDataProcessorSources(Path rootPath,
+                                                         String sourceName, String sourceUrl, boolean multipleSources,
                                                          URI projectUri,
                                                          Map<String, URI> uriListByKey,
                                                          Map<URI, Map<BigDecimal, Integer>> coverageData,
@@ -542,7 +594,7 @@ public class Utils {
         }
 
         externalDataProcessorUriListByKey.forEach((key, uri) -> {
-            uriListByKey.put(key, uri);
+            uriListByKey.put(multipleSources ? SourceKey.qualify(key, sourceName, sourceUrl) : key, uri);
             addCoverageData(coverageData, uri, new ModuleId(modulePath(projectUri, uri), List.of(), Set.of()),
                     ExclusionRules.empty(), report);
         });

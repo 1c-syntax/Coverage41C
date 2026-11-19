@@ -191,8 +191,8 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
             RuntimeDebugModelXmlSerializer serializer = new MyRuntimeDebugModelXmlSerializer();
             client = new DebugClient(serializer);
             rawMode = metadataOptions.isRawMode();
-            uriListByKey = Utils.readMetadata(metadataOptions, filterOptions.getExtensionName(), coverageData,
-                    true, includeUsers.isActive());
+            uriListByKey = Utils.readMetadata(metadataOptions, filterOptions.getExtensionName(),
+                    filterOptions.getExternalDataProcessorUrl(), coverageData, true, includeUsers.isActive());
             coverageData.forEach((uri, coverMap) -> initialCoverageData.put(uri, new HashMap<>(coverMap)));
             startSystem(UUID.randomUUID());
         } catch (Exception e) {

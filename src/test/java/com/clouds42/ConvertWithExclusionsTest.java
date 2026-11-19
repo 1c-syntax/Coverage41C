@@ -122,6 +122,19 @@ class ConvertWithExclusionsTest {
     }
 
     @Test
+    void convertRejectsNonBlankTextAndCdataInRawStructure() throws Exception {
+        String fileStart = "<file path=\"" + MODULE_KEY + "\">";
+        String lineStart = "<lineToCover covered=\"true\" lineNumber=\"2\">";
+        for (String structure : List.of("measurements unavailable", "<![CDATA[measurements unavailable]]>",
+                fileStart + "measurements unavailable</file>",
+                fileStart + lineStart + "measurements unavailable</lineToCover></file>")) {
+            String input = "<coverage>" + structure + "</coverage>";
+            assertEquals(CommandLine.ExitCode.SOFTWARE, convertSyntheticReport(input), input);
+            assertFalse(Files.exists(tempDir.resolve("converted.xml")));
+        }
+    }
+
+    @Test
     void convertRejectsNestedRawLineData() throws Exception {
         String raw = "<coverage><file path=\"" + MODULE_KEY
                 + "\"><details><lineToCover covered=\"true\" lineNumber=\"2\"/></details></file></coverage>";
@@ -363,6 +376,65 @@ class ConvertWithExclusionsTest {
 
         assertReportCollision(project, Path.of(INTERNAL_XML), config,
                 "--config", configDir.toString(), "--exclusion-report", alias.toString());
+    }
+
+    @Test
+    void rejectsCoverageOutputThatMatchesConfiguredExclusionReport() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path config = Files.writeString(tempDir.resolve("team.json"), "{\"exclusionReport\":\"result.xml\"}");
+        Path output = project.resolve("result.xml");
+
+        assertCoverageOutputCollision(project, output, "--config", config.toString());
+        assertFalse(Files.exists(output));
+    }
+
+    @Test
+    void rejectsCoverageOutputThroughSymlinkedDirectoryBeforeCreatingFiles() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path dir = Files.createDirectory(tempDir.resolve("reports"));
+        Path aliasDir = tempDir.resolve("alias");
+        createSymbolicLink(aliasDir, dir);
+        Path report = dir.resolve("new/result.xml");
+
+        assertCoverageOutputCollision(project, aliasDir.resolve("new/result.xml"),
+                "--exclusion-report", report.toString());
+        assertFalse(Files.exists(report.getParent()));
+    }
+
+    @Test
+    void rejectsCoverageOutputThatIsATargetOfAnExclusionReportSymlink() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path output = tempDir.resolve("result.xml");
+        Path alias = tempDir.resolve("report.json");
+        createSymbolicLink(alias, output.getFileName());
+
+        assertCoverageOutputCollision(project, output, "--exclusion-report", alias.toString());
+        assertTrue(Files.isSymbolicLink(alias));
+        assertFalse(Files.exists(output));
+    }
+
+    @Test
+    void rejectsCoverageOutputThatIsAHardLinkToAnExclusionReport() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path report = Files.writeString(tempDir.resolve("report.json"), "original");
+        Path output = tempDir.resolve("result.xml");
+        try {
+            Files.createLink(output, report);
+        } catch (IOException | UnsupportedOperationException error) {
+            assumeTrue(false, () -> "Cannot create a hard link: " + error.getMessage());
+        }
+
+        assertCoverageOutputCollision(project, output, "--exclusion-report", report.toString());
+        assertEquals("original", Files.readString(report));
+        assertEquals("original", Files.readString(output));
+    }
+
+    private void assertCoverageOutputCollision(Path project, Path output, String... options) throws Exception {
+        StringWriter stderr = new StringWriter();
+        assertEquals(CommandLine.ExitCode.SOFTWARE,
+                convert(project, Path.of(INTERNAL_XML), output, stderr, options), stderr.toString());
+        assertTrue(stderr.toString().contains("Exclusion report and coverage output must use different files"),
+                stderr.toString());
     }
 
     @Test

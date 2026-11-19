@@ -115,13 +115,16 @@ public class MetadataOptions {
                 directories.put(extension.getName(), project.resolve(extension.getPath()));
             }
             if (!extensionSources.isEmpty()) {
-                Set<Path> physicalDirectories = new HashSet<>();
-                for (Path directory : directories.values()) {
-                    if (!Files.isDirectory(directory)) {
-                        throw new IllegalArgumentException("Multiple sources require a directory: " + directory);
+                Set<Path> physicalSources = new HashSet<>();
+                for (Map.Entry<String, Path> source : directories.entrySet()) {
+                    Path path = source.getValue();
+                    // -s may point to an external data processor descriptor.
+                    boolean isMainSource = source.getKey().equals(mainExtension);
+                    if (!Files.isDirectory(path) && (!isMainSource || !Files.isRegularFile(path))) {
+                        throw new IllegalArgumentException("Multiple sources require a directory: " + path);
                     }
-                    if (!physicalDirectories.add(directory.toRealPath())) {
-                        throw new IllegalArgumentException("Duplicate source directory: " + directory);
+                    if (!physicalSources.add(path.toRealPath())) {
+                        throw new IllegalArgumentException("Duplicate source directory: " + path);
                     }
                 }
             }

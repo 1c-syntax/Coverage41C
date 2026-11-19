@@ -39,6 +39,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Stream;
@@ -71,6 +72,49 @@ class ExternalDataProcessorTest {
         assertEquals(Set.of("ВнешняяОбработка/Ext/ObjectModule.bsl:2 → Cover:off",
                         "ВнешняяОбработка/Forms/Форма/Ext/Form/Module.bsl:3 → Cover:off"),
                 exclusionSources(project, "ВнешняяОбработка.xml"));
+    }
+
+    @Test
+    void convertsConfiguratorProcessorAndExtensionTogether() throws Exception {
+        Path project = tempDir.resolve("project");
+        TestUtils.copyDirectory(EXTERNAL_PROCESSOR.resolve("configurator"), project);
+        TestUtils.copyDirectory(Path.of("src/test/resources/extensions/src/cfe/Доработки"), project.resolve("A"));
+        Path raw = tempDir.resolve("raw.xml");
+        Files.writeString(raw, """
+                <coverage version="1">
+                    <file path="/8fe68a1c-d99b-4417-9ee7-27dfaf75ded0/a637f77f-3840-441d-a1c3-699c8c5cb7e0">
+                        <lineToCover covered="true" lineNumber="2"/>
+                    </file>
+                    <file extension="A" path="/888c0948-df1b-462b-809c-2a3dbef0b13f/d5963243-262e-4398-b4d7-fb16d06484f6">
+                        <lineToCover covered="true" lineNumber="5"/>
+                    </file>
+                </coverage>
+                """);
+        Path output = tempDir.resolve("coverage.xml");
+        StringWriter stderr = new StringWriter();
+
+        int exitCode = execute(stderr, PipeMessages.CONVERT_COMMAND,
+                "-P", project.toString(), "-s", "ВнешняяОбработка.xml", "--extension", "A=A",
+                "-c", raw.toString(), "-o", output.toString());
+
+        assertEquals(CommandLine.ExitCode.OK, exitCode, stderr.toString());
+        Map<String, Map<Integer, Boolean>> coverage = MultipleSourcesTest.coverage(output);
+        assertEquals(Map.of(2, true, 3, false), coverage.get("ВнешняяОбработка/Ext/ObjectModule.bsl"));
+        assertEquals(true, coverage.get("A/CommonModules/Калькулятор/Ext/Module.bsl").get(5));
+    }
+
+    @Test
+    void rejectsProcessorDescriptorAsNamedOrExtensionSource() {
+        for (String option : List.of("--source", "--extension")) {
+            StringWriter stderr = new StringWriter();
+
+            int exitCode = execute(stderr, PipeMessages.VALIDATE_COMMAND,
+                    "-P", EXTERNAL_PROCESSOR.resolve("configurator").toAbsolutePath().toString(),
+                    option, "A=ВнешняяОбработка.xml");
+
+            assertEquals(CommandLine.ExitCode.SOFTWARE, exitCode, option);
+            assertTrue(stderr.toString().contains("directory:"), stderr.toString());
+        }
     }
 
     @Test

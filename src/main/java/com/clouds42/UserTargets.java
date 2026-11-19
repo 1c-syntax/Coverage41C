@@ -113,7 +113,7 @@ public final class UserTargets {
     // A nameless packet may need a fresh list even if dbgs already announced the target id.
     public boolean needsLookup(DBGUIExtCmdInfoMeasure command) {
         DebugTargetId target = targetOf(command);
-        if (!isActive() || target == null || userOf(target) != null) {
+        if (!isActive() || target == null || packetUserOf(command, target) != null) {
             return false;
         }
         String id = target.getId();
@@ -139,7 +139,7 @@ public final class UserTargets {
         }
         DebugTargetId target = targetOf(command);
         String id = target == null ? null : target.getId();
-        String user = target == null ? null : userOf(target);
+        String user = target == null ? null : packetUserOf(command, target);
         if (id != null) {
             String known = usersById.get(id);
             if (user == null && known != null && !known.isEmpty()) {
@@ -264,6 +264,18 @@ public final class UserTargets {
             target = command.getTargetID();
         }
         return target == null || target.getId() == null ? null : target;
+    }
+
+    private static String packetUserOf(DBGUIExtCmdInfoMeasure command, DebugTargetId target) {
+        String user = userOf(target);
+        if (user != null) {
+            return user;
+        }
+        DebugTargetId commandTarget = command.getTargetID();
+        if (commandTarget != null && target.getId().equals(commandTarget.getId())) {
+            return userOf(commandTarget);
+        }
+        return null;
     }
 
     private static String userOf(DebugTargetId target) {

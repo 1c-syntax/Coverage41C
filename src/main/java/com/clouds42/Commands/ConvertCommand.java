@@ -33,6 +33,7 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
+import org.w3c.dom.Text;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
@@ -173,6 +174,9 @@ public class ConvertCommand implements Callable<Integer> {
         }
         boolean sourceIdentity = "true".equals(coverage.getAttribute("sourceIdentity"));
         for (Node node = coverage.getFirstChild(); node != null; node = node.getNextSibling()) {
+            if (isNonBlankText(node)) {
+                throw new IllegalArgumentException("Unexpected text in the RAW coverage report");
+            }
             if (!(node instanceof Element file)) {
                 continue;
             }
@@ -182,18 +186,29 @@ public class ConvertCommand implements Callable<Integer> {
             SourceKey.validateRawKey(rawPath(file),
                     sourceIdentity || file.hasAttribute("extension") || file.hasAttribute("sourceUrl"));
             for (Node child = file.getFirstChild(); child != null; child = child.getNextSibling()) {
+                if (isNonBlankText(child)) {
+                    throw new IllegalArgumentException("Unexpected text in the RAW coverage file entry");
+                }
                 if (!(child instanceof Element line)) {
                     continue;
                 }
                 String covered = line.getAttribute("covered");
-                if (!"lineToCover".equals(line.getTagName()) || !("true".equals(covered) || "false".equals(covered))
-                        || line.getElementsByTagName("*").getLength() != 0) {
+                if (!"lineToCover".equals(line.getTagName()) || !("true".equals(covered) || "false".equals(covered))) {
                     throw new IllegalArgumentException("Invalid line entry in the RAW coverage report");
+                }
+                for (Node content = line.getFirstChild(); content != null; content = content.getNextSibling()) {
+                    if (content instanceof Element || isNonBlankText(content)) {
+                        throw new IllegalArgumentException("Unexpected content in the RAW coverage line entry");
+                    }
                 }
                 parseRawLineNumber(line.getAttribute("lineNumber"));
             }
         }
         return coverage;
+    }
+
+    private static boolean isNonBlankText(Node node) {
+        return node instanceof Text text && !text.getData().isBlank();
     }
 
     private static BigDecimal parseRawLineNumber(String number) {
@@ -218,7 +233,8 @@ public class ConvertCommand implements Callable<Integer> {
             Element coverage = validateRawReport(builder.parse(fileIS));
 
             Map<String, URI> uriListByKey = Utils.readMetadataForConversion(metadataOptions,
-                    filterOptions.getExtensionName(), coverageData, rawInput);
+                    filterOptions.getExtensionName(), filterOptions.getExternalDataProcessorUrl(),
+                    coverageData, rawInput, outputOptions.getOutputFile());
             legacySources.clear();
             ambiguousLegacyKeys.clear();
             if (metadataOptions.hasMultipleSources()) {

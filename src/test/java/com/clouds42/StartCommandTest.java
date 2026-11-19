@@ -755,6 +755,44 @@ class StartCommandTest {
     }
 
     @Test
+    void directAndDeferredCoverageAgreeForProcessorWithExtension() throws Exception {
+        Path project = tempDir.resolve("project");
+        TestUtils.copyDirectory(Path.of("src/test/resources/externalprocessor/configurator"), project);
+        TestUtils.copyDirectory(TestUtils.CONFIGURATION, project.resolve("A"));
+        Files.writeString(project.resolve("A/" + MultipleSourcesTest.MODULE), MultipleSourcesTest.TEXT);
+        String url = "file:///ВнешняяОбработка.epf";
+        DBGUIExtCmdInfoMeasure processor = FakeDebugServer.measure(
+                "8fe68a1c-d99b-4417-9ee7-27dfaf75ded0", "a637f77f-3840-441d-a1c3-699c8c5cb7e0", 2, 1);
+        processor.getMeasure().getModuleData().getFirst().getModuleID().setURL(url);
+        DBGUIExtCmdInfoMeasure extension = FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, "A", 4, 1);
+        List<String> sources = List.of("-P", project.toString(), "-s", "ВнешняяОбработка.xml",
+                "-x", url, "--extension", "A=A");
+        List<String> startArgs = new ArrayList<>(List.of("start", "-i", infobase, "-u", dbgs.url(),
+                "-o", output.toString(), "-t", "10"));
+        startArgs.addAll(sources);
+
+        Future<Integer> start = submit(startArgs);
+        dbgs.deliver(processor, extension);
+        assertEquals(0, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(0, start.get(TIMEOUT, TimeUnit.SECONDS));
+        Map<String, Map<Integer, Boolean>> direct = MultipleSourcesTest.coverage(output);
+        assertEquals(Map.of(2, true, 3, false), direct.get("ВнешняяОбработка/Ext/ObjectModule.bsl"));
+        assertEquals(Map.of(2, false, 4, true, 6, false), direct.get("A/" + MultipleSourcesTest.MODULE));
+
+        Future<Integer> raw = startRaw();
+        dbgs.deliver(processor, extension);
+        assertEquals(0, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(0, raw.get(TIMEOUT, TimeUnit.SECONDS));
+
+        Path converted = tempDir.resolve("converted.xml");
+        List<String> convertArgs = new ArrayList<>(List.of("convert", "-c", output.toString(),
+                "-o", converted.toString()));
+        convertArgs.addAll(sources);
+        assertEquals(0, Coverage41C.getCommandLine().execute(convertArgs.toArray(String[]::new)));
+        assertEquals(direct, MultipleSourcesTest.coverage(converted));
+    }
+
+    @Test
     void rawFromMainDoesNotCoverAnExtensionWithTheSameModuleId() throws Exception {
         Future<Integer> start = startRaw();
         dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
@@ -1248,6 +1286,44 @@ class StartCommandTest {
         assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
         assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
         assertEquals(Map.of(2, false, 10, true, 11, false), coverage());
+    }
+
+    @Test
+    void stopUsesCommandUserForMatchingFinalTarget() throws Exception {
+        DebugTargetId established = user("suite");
+        DebugTargetId finalTarget = user("suite");
+        dbgs.setTargets(established);
+        Future<Integer> collector = start("--include-user", "suite");
+        dbgs.deliver(FakeDebugServer.measure(established, OBJECT_ID, PROPERTY_ID, 2, 1));
+        int listRequests = dbgs.requests("getDbgTargets").size();
+
+        var finalPacket = FakeDebugServer.measure(finalTarget, OBJECT_ID, PROPERTY_ID, 10, 1);
+        finalPacket.getMeasure().getTargetID().unsetUserName();
+        dbgs.deliverOnMeasureOff(FakeDebugServer.targetQuit(finalTarget), finalPacket);
+
+        int stopResult = send(PipeMessages.EXIT_COMMAND);
+        int collectorResult = collector.get(TIMEOUT, TimeUnit.SECONDS);
+        assertEquals(Map.of(2, true, 10, true, 11, false), coverage());
+        assertEquals(CommandLine.ExitCode.OK, stopResult);
+        assertEquals(CommandLine.ExitCode.OK, collectorResult);
+        assertEquals(listRequests, dbgs.requests("getDbgTargets").size());
+    }
+
+    @Test
+    void stopKeepsFinalTargetUnresolvedWhenCommandNamesDifferentTarget() throws Exception {
+        DebugTargetId allowed = user("suite");
+        dbgs.setTargets(allowed);
+        Future<Integer> collector = start("--include-user", "suite");
+        dbgs.deliver(FakeDebugServer.measure(allowed, OBJECT_ID, PROPERTY_ID, 2, 1));
+
+        var unknown = FakeDebugServer.target(UUID.randomUUID(), DebugTargetType.MANAGED_CLIENT, null);
+        var mismatched = FakeDebugServer.measure(unknown, OBJECT_ID, PROPERTY_ID, 11, 1);
+        mismatched.setTargetID(allowed);
+        dbgs.deliverOnMeasureOff(mismatched, FakeDebugServer.measure(allowed, OBJECT_ID, PROPERTY_ID, 10, 1));
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(Map.of(2, true, 10, true, 11, false), coverage());
     }
 
     @Test

@@ -83,6 +83,8 @@ class UserTargetsTest {
         assertEquals(REJECTED, targets.verdict(measure(null, target("y", "smoke")), false));
         assertEquals(ACCEPTED, targets.verdict(measure(target("r", null), null), false));
         assertEquals(ACCEPTED, targets.verdict(measure(null, target("r", null)), false));
+        assertEquals(REJECTED, targets.verdict(measure(target("r", null), target("r", "smoke")), false));
+        assertEquals(ACCEPTED, targets.verdict(measure(target("r", "unit"), target("r", "smoke")), false));
         assertEquals(UNKNOWN, targets.verdict(measure(target("z", null), null), false));
         assertEquals(UNKNOWN, targets.verdict(measure(null, null), false));
         var bothTargets = measure(target("x", "unit"), target("y", "smoke"));
