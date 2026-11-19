@@ -114,8 +114,38 @@ class ValidateCommandTest {
 
     @Test
     void rejectsExclusionReportLinkedToConfigurationDescriptorInStrictMode() throws Exception {
-        Path project = TestUtils.copyConfiguration(tempDir);
-        Path descriptor = project.resolve("configuration/Configuration.xml");
+        assertConfigurationInputProtected("configuration/Configuration.xml");
+    }
+
+    @Test
+    void rejectsExclusionReportLinkedToModuleInStrictMode() throws Exception {
+        assertConfigurationInputProtected(SIMPLE_MODULE);
+    }
+
+    @Test
+    void rejectsExclusionReportLinkedToFormDataInStrictMode() throws Exception {
+        assertConfigurationInputProtected("configuration/DataProcessors/Обработка1/Forms/Форма/Ext/Form.xml");
+    }
+
+    @Test
+    void rejectsExclusionReportLinkedToNestedSubsystem() throws Exception {
+        assertConfigurationInputProtected("configuration/Subsystems/ПерваяПодсистема/Subsystems/ПодчиненнаяПодсистема.xml");
+    }
+
+    @Test
+    void rejectsExclusionReportLinkedToNestedEdtForm() throws Exception {
+        Path project = tempDir.resolve("project");
+        TestUtils.copyDirectory(Path.of("src/test/resources/edt/pc"), project.resolve("configuration"));
+        assertConfigurationInputProtected(project, "configuration/src/DataProcessors/Обработка1/Forms/Форма/Form.form");
+    }
+
+    private void assertConfigurationInputProtected(String relativeInput) throws Exception {
+        assertConfigurationInputProtected(TestUtils.copyConfiguration(tempDir), relativeInput);
+    }
+
+    private void assertConfigurationInputProtected(Path project, String relativeInput) throws Exception {
+        Path descriptor = project.resolve(relativeInput);
+        assertTrue(Files.isRegularFile(descriptor), descriptor.toString());
         Path report = tempDir.resolve("report.json");
         try {
             Files.createLink(report, descriptor);

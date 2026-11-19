@@ -30,6 +30,8 @@ import com.github._1c_syntax.bsl.mdo.MD;
 import com.github._1c_syntax.bsl.mdo.Module;
 import com.github._1c_syntax.bsl.mdo.SettingsStorage;
 import com.github._1c_syntax.bsl.mdclasses.Configuration;
+import com.github._1c_syntax.bsl.types.ConfigurationSource;
+import com.github._1c_syntax.bsl.types.MDOType;
 import com.github._1c_syntax.bsl.types.MdoReference;
 import com.github._1c_syntax.bsl.types.ModuleType;
 import com.github._1c_syntax.bsl.support.SupportVariant;
@@ -104,11 +106,25 @@ public class Utils {
     }
 
     private static String getUriKey(String mdObjUuid, ModuleType moduleType, MD mdObj) {
-        return mdObjUuid + "/" + getModuleTypeUuid(moduleType, mdObj);
+        return getUriKey(mdObjUuid, getModuleTypeUuid(moduleType, mdObj));
+    }
+
+    private static final Pattern UUID_TEXT = Pattern.compile("[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}");
+
+    static boolean isUuid(String id) {
+        return id != null && UUID_TEXT.matcher(id).matches();
+    }
+
+    static String normalizeUuid(String id) {
+        if (id == null) {
+            return null;
+        }
+        String lower = id.toLowerCase(Locale.ROOT);
+        return !lower.equals(id) && isUuid(id) ? lower : id;
     }
 
     public static String getUriKey(String objectId, String propertyId) {
-        return objectId + "/" + propertyId;
+        return normalizeUuid(objectId) + "/" + normalizeUuid(propertyId);
     }
 
     /**
@@ -316,7 +332,7 @@ public class Utils {
         }
 
         Map<String, URI> uriListByKey = new HashMap<>();
-        List<Path> inputFiles = new ArrayList<>();
+        Set<Path> inputFiles = new LinkedHashSet<>();
         if (rawInput != null) {
             inputFiles.add(rawInput.toPath());
         }
@@ -384,6 +400,12 @@ public class Utils {
                                     String.join(", ", rules.getIncludeUsersSources()));
                             includeUsersReported = true;
                         }
+                    }
+
+                    File reportFile = metadataOptions.getExclusionReportFile() == null
+                            ? configExclusionReportFile : metadataOptions.getExclusionReportFile();
+                    if (existingFile(coverageOutput) || existingFile(reportFile)) {
+                        addMetadataInputs(rootPath, conf, inputFiles);
                     }
 
                     // Module rules that hit only modules outside the scope are a precaution, not a typo.
@@ -483,7 +505,7 @@ public class Utils {
                     inputFiles.add(rootPath);
 
                     readExternalDataProcessorSources(rootPath, source.getKey(), mainSourceUrl,
-                            metadataOptions.hasMultipleSources(), projectUri, uriListByKey, coverageData, report);
+                            metadataOptions.hasMultipleSources(), projectUri, uriListByKey, coverageData, report, inputFiles);
                 }
 
             }
@@ -530,6 +552,9 @@ public class Utils {
 
         File exclusionReportFile = metadataOptions.getExclusionReportFile() != null
                 ? metadataOptions.getExclusionReportFile() : configExclusionReportFile;
+        if (existingFile(coverageOutput) || existingFile(exclusionReportFile)) {
+            uriListByKey.values().stream().map(Path::of).filter(Files::isRegularFile).forEach(inputFiles::add);
+        }
         validateOutputFiles(coverageOutput, exclusionReportFile, metadataOptions.getConfigFile(), inputFiles);
         if (exclusionReportFile != null) {
             report.writeJson(exclusionReportFile);
@@ -541,7 +566,7 @@ public class Utils {
         return uriListByKey;
     }
 
-    private static boolean sameOutputFile(Path report, Path coverage) throws IOException {
+    static boolean sameOutputFile(Path report, Path coverage) throws IOException {
         if (Files.exists(report) && Files.exists(coverage)) {
             return Files.isSameFile(report, coverage);
         }
@@ -622,18 +647,66 @@ public class Utils {
         }
     }
 
-    private static void addConfigurationInputs(Path root, List<Path> inputs) {
-        for (String relativePath : List.of("Configuration.xml", "ConfigDumpInfo.xml",
-                "Configuration/Configuration.mdo", "src/Configuration/Configuration.mdo")) {
-            Path input = root.resolve(relativePath);
-            if (Files.isRegularFile(input)) {
-                inputs.add(input);
+    private static boolean existingFile(File file) {
+        return file != null && file.isFile();
+    }
+
+    private static void addMetadataInputs(Path root, CF configuration, Set<Path> inputs) {
+        boolean edt = configuration.getConfigurationSource() == ConfigurationSource.EDT;
+        Path source = edt ? root.resolve("src") : root;
+        for (MD metadata : configuration.getPlainChildren()) {
+            Path object = source;
+            String[] parts = metadata.getMdoReference().getMdoRef().split("\\.");
+            for (int index = 0; index + 1 < parts.length; index += 2) {
+                MDOType type = MDOType.fromValue(parts[index]).orElse(MDOType.UNKNOWN);
+                object = object.resolve(type.groupName()).resolve(parts[index + 1]);
+            }
+            if (object.equals(source)) {
+                continue;
+            }
+            Path descriptor = edt ? object.resolve(object.getFileName() + ".mdo")
+                    : object.resolveSibling(object.getFileName() + ".xml");
+            addExistingInput(descriptor, inputs);
+            MDOType type = metadata.getMdoType();
+            if (edt && (type == MDOType.INTERFACE || type == MDOType.STYLE)) {
+                addExistingInput(root.resolve("unknown").resolve(type.groupName()).resolve(metadata.getName() + ".xml"),
+                        inputs);
+            }
+            Path data = edt ? object : object.resolve("Ext");
+            if (!edt) {
+                addExistingInput(data.resolve("Predefined.xml"), inputs);
+            }
+            switch (type) {
+                case FORM, COMMON_FORM -> addExistingInput(data.resolve(edt ? "Form.form" : "Form.xml"), inputs);
+                case TEMPLATE, COMMON_TEMPLATE -> addExistingInput(data.resolve(edt ? "Template.dcs" : "Template.xml"), inputs);
+                case ROLE -> addExistingInput(data.resolve(edt ? "Rights.rights" : "Rights.xml"), inputs);
+                case XDTO_PACKAGE -> addExistingInput(data.resolve(edt ? "Package.xdto" : "Package.bin"), inputs);
+                case EXCHANGE_PLAN -> {
+                    if (!edt) {
+                        addExistingInput(data.resolve("Content.xml"), inputs);
+                    }
+                }
+                default -> { }
             }
         }
     }
 
+    private static void addConfigurationInputs(Path root, Set<Path> inputs) {
+        for (String relativePath : List.of("Configuration.xml", "ConfigDumpInfo.xml",
+                "Configuration/Configuration.mdo", "src/Configuration/Configuration.mdo", "Ext/ParentConfigurations.bin",
+                "src/Configuration/ParentConfigurations.bin", "src/Configuration/Configuration.distr")) {
+            addExistingInput(root.resolve(relativePath), inputs);
+        }
+    }
+
+    private static void addExistingInput(Path path, Set<Path> inputs) {
+        if (Files.isRegularFile(path)) {
+            inputs.add(path);
+        }
+    }
+
     private static void validateOutputFiles(File coverageOutput, File exclusionReport, File config,
-                                            List<Path> inputs) throws IOException {
+                                            Set<Path> inputs) throws IOException {
         if (coverageOutput == null && exclusionReport == null) {
             return;
         }
@@ -642,6 +715,7 @@ public class Utils {
         }
         if (coverageOutput != null) {
             rejectOutputOverwritingInputs(coverageOutput.toPath().toAbsolutePath(), inputs, "Coverage output");
+            ExclusionRules.rejectReportInsideConfigDirectory(config, coverageOutput, "-o");
         }
         if (exclusionReport != null) {
             Path destination = exclusionReport.toPath().toAbsolutePath();
@@ -653,7 +727,7 @@ public class Utils {
         }
     }
 
-    private static void rejectOutputOverwritingInputs(Path output, List<Path> inputs, String outputLabel)
+    private static void rejectOutputOverwritingInputs(Path output, Set<Path> inputs, String outputLabel)
             throws IOException {
         boolean outputExists = Files.exists(output);
         for (Path input : inputs) {
@@ -683,7 +757,7 @@ public class Utils {
                                                          URI projectUri,
                                                          Map<String, URI> uriListByKey,
                                                          Map<URI, Map<BigDecimal, Integer>> coverageData,
-                                                         ExclusionReport report)
+                                                         ExclusionReport report, Set<Path> inputFiles)
             throws IOException, ParserConfigurationException, SAXException, XPathExpressionException {
 
         DocumentBuilder builder = newInputXmlBuilder();
@@ -692,10 +766,10 @@ public class Utils {
 
         Map<String, URI> externalDataProcessorUriListByKey;
         if (documentRootTagName.equals("MetaDataObject")) {
-            externalDataProcessorUriListByKey = readConfiguratorExternalSource(rootPath, xmlDocument, builder);
+            externalDataProcessorUriListByKey = readConfiguratorExternalSource(rootPath, xmlDocument, builder, inputFiles);
         } else if (documentRootTagName.equals("mdclass:ExternalDataProcessor")
                 || documentRootTagName.equals("mdclass:ExternalReport")) {
-            externalDataProcessorUriListByKey = readEdtExternalSource(rootPath, xmlDocument);
+            externalDataProcessorUriListByKey = readEdtExternalSource(rootPath, xmlDocument, inputFiles);
         } else if (documentRootTagName.equals("mdclass:Configuration")) {
             throw new IllegalArgumentException("Pass the configuration directory to -s: " + rootPath);
         } else {
@@ -710,7 +784,7 @@ public class Utils {
     }
 
     private static Map<String, URI> readConfiguratorExternalSource(Path rootPath, Document xmlDocument,
-                                                                   DocumentBuilder builder)
+                                                                   DocumentBuilder builder, Set<Path> inputFiles)
             throws XPathExpressionException {
 
         Map<String, URI> uriListByKey = new HashMap<>();
@@ -733,9 +807,11 @@ public class Utils {
             walk.filter(formXmlFile -> formXmlFile.toString().endsWith(".xml"))
                     .forEach(formXmlFile -> {
                         try {
+                            addExistingInput(formXmlFile, inputFiles);
                             Document formXmlDocument = builder.parse(formXmlFile.toFile());
                             String formUuid = (String) formUuidExpression.evaluate(formXmlDocument, XPathConstants.STRING);
                             String formName = (String) formNameExpression.evaluate(formXmlDocument, XPathConstants.STRING);
+                            addExistingInput(formsPath.resolve(formName).resolve("Ext/Form.xml"), inputFiles);
                             uriListByKey.put(getUriKey(formUuid, ModuleType.FormModule, null),
                                     formsPath.resolve(Paths.get(formName, "Ext", "Form", "Module.bsl")).toUri());
                         } catch (Exception e) {
@@ -748,7 +824,7 @@ public class Utils {
         return uriListByKey;
     }
 
-    private static Map<String, URI> readEdtExternalSource(Path rootPath, Document xmlDocument)
+    private static Map<String, URI> readEdtExternalSource(Path rootPath, Document xmlDocument, Set<Path> inputFiles)
             throws XPathExpressionException {
 
         Map<String, URI> uriListByKey = new HashMap<>();
@@ -770,6 +846,7 @@ public class Utils {
                 logger.error("Can't find form name: {}", formUuid);
                 continue;
             }
+            addExistingInput(formsPath.resolve(formName).resolve("Form.form"), inputFiles);
             uriListByKey.put(getUriKey(formUuid, ModuleType.FormModule, null),
                     formsPath.resolve(Paths.get(formName, "Module.bsl")).toUri());
         }

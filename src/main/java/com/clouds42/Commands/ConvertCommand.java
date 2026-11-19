@@ -41,6 +41,7 @@ import picocli.CommandLine.Mixin;
 import javax.xml.parsers.DocumentBuilder;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.math.BigDecimal;
 import java.net.URI;
@@ -94,9 +95,15 @@ public class ConvertCommand implements Callable<Integer> {
         return legacySources.get(key);
     }
 
-    private boolean matchesSelectedSource(String key) {
-        return key.equals(SourceKey.qualify(SourceKey.legacy(key), filterOptions.getExtensionName(),
-                filterOptions.getExternalDataProcessorUrl()));
+    private Map<String, String> selectedSourceUrls() throws IOException {
+        String url = filterOptions.getExternalDataProcessorUrl();
+        if (!metadataOptions.hasMultipleSources()) {
+            return Map.of(filterOptions.getExtensionName(), url);
+        }
+        Map<String, String> selected = new HashMap<>();
+        metadataOptions.getSourceDirectories(filterOptions.getExtensionName()).forEach((extension, path) ->
+                selected.put(extension, Files.isRegularFile(path) ? url : ""));
+        return selected;
     }
 
     private String rawFileKey(Node fileNode, boolean sourceIdentity, boolean includesExtensionAttributes,
@@ -153,22 +160,19 @@ public class ConvertCommand implements Callable<Integer> {
     // A mixed RAW file can contain other sources. Check every record before rejecting the selection.
     private void verifySelectedSource(NodeList files, Map<String, URI> sources,
                                       boolean sourceIdentity, boolean includesExtensionAttributes,
-                                      boolean singleProcessorSelected) {
-        if (metadataOptions.hasMultipleSources()) {
-            return;
-        }
+                                      boolean singleProcessorSelected, Map<String, String> selectedUrls) {
         boolean selectedSourceFound = false;
         Set<String> otherSources = new TreeSet<>();
         for (int index = 0; index < files.getLength(); index++) {
             String key = rawFileKey(files.item(index), sourceIdentity, includesExtensionAttributes,
                     singleProcessorSelected, sources);
             if (SourceKey.isQualified(key)) {
-                if (matchesSelectedSource(key)) {
+                if (SourceKey.matchesSource(key, selectedUrls)) {
                     selectedSourceFound = true;
                 } else {
-                    otherSources.add(SourceKey.selectionHint(key));
+                    otherSources.add(SourceKey.selectionHint(key, metadataOptions.usesNamedSources()));
                 }
-            } else if (sources.containsKey(key)) {
+            } else if (resolveFileKey(key, sources) != null) {
                 selectedSourceFound = true;
             }
         }
@@ -196,8 +200,9 @@ public class ConvertCommand implements Callable<Integer> {
             if (!"file".equals(file.getTagName()) || file.getAttribute("path").isBlank()) {
                 throw new IllegalArgumentException("Expected a file with a path in the RAW coverage report");
             }
-            SourceKey.validateRawKey(rawPath(file),
+            String moduleKey = SourceKey.normalizeRawKey(rawPath(file),
                     sourceIdentity || file.hasAttribute("extension") || file.hasAttribute("sourceUrl"));
+            file.setAttribute("path", moduleKey);
             for (Node child = file.getFirstChild(); child != null; child = child.getNextSibling()) {
                 if (isNonBlankText(child)) {
                     throw new IllegalArgumentException("Unexpected text in the RAW coverage file entry");
@@ -264,13 +269,14 @@ public class ConvertCommand implements Callable<Integer> {
                     && !filterOptions.getExternalDataProcessorUrl().isEmpty()
                     && Files.isRegularFile(Paths.get(metadataOptions.getProjectDirName())
                     .resolve(metadataOptions.getSrcDirName()));
-            verifySelectedSource(fileNodeList, uriListByKey, sourceIdentity, includesExtensions, singleProcessorSelected);
+            Map<String, String> selectedUrls = selectedSourceUrls();
+            verifySelectedSource(fileNodeList, uriListByKey, sourceIdentity, includesExtensions, singleProcessorSelected,
+                    selectedUrls);
             for(int fileNodeNumber = 0; fileNodeNumber < fileNodeList.getLength(); fileNodeNumber++) {
                 Node fileNode = fileNodeList.item(fileNodeNumber);
                 String fileKey = rawFileKey(fileNode, sourceIdentity, includesExtensions,
                         singleProcessorSelected, uriListByKey);
-                if (!metadataOptions.hasMultipleSources() && SourceKey.isQualified(fileKey)
-                        && !matchesSelectedSource(fileKey)) {
+                if (SourceKey.isQualified(fileKey) && !SourceKey.matchesSource(fileKey, selectedUrls)) {
                     continue;
                 }
                 URI fileUri = resolveFileKey(fileKey, uriListByKey);

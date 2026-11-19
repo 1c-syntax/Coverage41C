@@ -381,6 +381,50 @@ class ConvertWithExclusionsTest {
     }
 
     @Test
+    void rejectsCoverageOutputThroughDanglingLinkIntoConfigDirectory() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path rules = Files.createDirectory(tempDir.resolve("rules"));
+        Path config = Files.writeString(rules.resolve("team.json"), "{\"includeUsers\":[\"unit\"]}");
+        byte[] original = Files.readAllBytes(config);
+        Path generated = rules.resolve("generated.json");
+        Path output = tempDir.resolve("result.xml");
+        createSymbolicLink(output, generated);
+        Path report = tempDir.resolve("exclusions.json");
+        StringWriter stderr = new StringWriter();
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, convert(project, Path.of(INTERNAL_XML), output, stderr,
+                "--config", rules.toString(), "--exclusion-report", report.toString()), stderr.toString());
+        assertTrue(stderr.toString().contains("would be read as a config"), stderr.toString());
+        assertArrayEquals(original, Files.readAllBytes(config));
+        assertFalse(Files.exists(generated));
+        assertFalse(Files.exists(report));
+    }
+
+    @Test
+    void rejectsCoverageOutputThatWouldActivateDanglingConfigLink() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path rules = Files.createDirectory(tempDir.resolve("rules"));
+        Path config = Files.writeString(rules.resolve("team.json"), "{\"includeUsers\":[\"unit\"]}");
+        Path links = Files.createDirectory(tempDir.resolve("links"));
+        Path output = tempDir.resolve("result.xml");
+        Path intermediate = links.resolve("destination");
+        createSymbolicLink(intermediate, links.relativize(output));
+        Path generated = rules.resolve("generated.json");
+        createSymbolicLink(generated, rules.relativize(intermediate));
+        byte[] original = Files.readAllBytes(config);
+        Path report = tempDir.resolve("exclusions.json");
+        StringWriter stderr = new StringWriter();
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, convert(project, Path.of(INTERNAL_XML), output, stderr,
+                "--config", rules.toString(), "--exclusion-report", report.toString()), stderr.toString());
+        assertTrue(stderr.toString().contains("would be read as a config"), stderr.toString());
+        assertArrayEquals(original, Files.readAllBytes(config));
+        assertFalse(Files.exists(output));
+        assertFalse(Files.exists(report));
+        assertTrue(Files.isSymbolicLink(generated));
+    }
+
+    @Test
     void rejectsCoverageOutputLinkedToRawBeforeWritingExclusionReport() throws Exception {
         Path raw = Files.copy(Path.of(INTERNAL_XML), tempDir.resolve("raw.xml"));
         assertCoverageOutputDoesNotOverwriteInput(raw, raw);

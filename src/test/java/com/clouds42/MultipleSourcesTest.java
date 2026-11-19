@@ -45,6 +45,7 @@ import java.util.Comparator;
 import java.util.stream.Stream;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -393,9 +394,56 @@ class MultipleSourcesTest {
     @Test
     void qualifiedUnknownSourceDoesNotFallBackToMatchingUuid() throws Exception {
         writeRaw("source-v1/Qg/-/" + KEY, 4, "source-v1/Qg/-/" + KEY, 2);
-        assertEquals(0, convert("--source", "=configuration", "--source", "A=extensions/A"));
-        assertEquals(Map.of(2, false, 4, false, 6, false), coverage(output).get("configuration/" + MODULE));
+        StringWriter error = new StringWriter();
+        assertEquals(1, convert(error, "--source", "=configuration", "--source", "A=extensions/A"));
+        assertTrue(error.toString().contains("--source B=DIR"), error.toString());
+        assertFalse(Files.exists(output));
+    }
+
+    @Test
+    void namedSourceRequiresMatchingRawAttributesEvenWithKnownModuleUuid() throws Exception {
+        Files.writeString(raw, "<coverage sourceIdentity=\"true\"><file path=\"/" + KEY
+                + "\" extension=\"A\"><lineToCover covered=\"true\" lineNumber=\"2\"/></file></coverage>");
+        assertEquals(1, convert("--source", "=configuration"));
+        assertFalse(Files.exists(output));
+        assertEquals(0, convert("--source", "A=extensions/A"));
+        assertEquals(Map.of(2, true, 4, false, 6, false), coverage(output).get("extensions/A/" + MODULE));
+    }
+
+    @Test
+    void namedSourceCanMatchWithoutAnyKnownModuleOrHit() throws Exception {
+        writeRaw(SourceKey.qualify(UNKNOWN_KEY, "A", ""), 4, SourceKey.qualify(KEY, "B", ""), 2);
+        assertEquals(0, convert("--source", "A=extensions/A"));
         assertEquals(Map.of(2, false, 4, false, 6, false), coverage(output).get("extensions/A/" + MODULE));
+    }
+
+    @Test
+    void moduleUuidsIgnoreCaseInLegacyAndQualifiedRaw() throws Exception {
+        String upper = KEY.toUpperCase(Locale.ROOT);
+        writeRaw(upper, 2, upper, 4);
+        assertEquals(0, convert("-s", "configuration"));
+        assertEquals(Map.of(2, true, 4, true, 6, false), coverage(output).get("configuration/" + MODULE));
+        writeRaw(SourceKey.qualify(upper, "A", ""), 2, SourceKey.qualify(upper, "a", ""), 4);
+        assertEquals(0, convert("--source", "A=extensions/A"));
+        assertEquals(Map.of(2, true, 4, false, 6, false), coverage(output).get("extensions/A/" + MODULE));
+    }
+
+    @Test
+    void moduleKeysKeepOpaqueComponentsCaseSensitive() {
+        String object = KEY.substring(0, KEY.indexOf('/'));
+        String property = KEY.substring(KEY.indexOf('/') + 1);
+        assertEquals(object + "/Opaque", SourceKey.moduleKey(object.toUpperCase(Locale.ROOT), "Opaque"));
+        assertEquals("Opaque/" + property, SourceKey.moduleKey("Opaque", property.toUpperCase(Locale.ROOT)));
+    }
+
+    @Test
+    void extensionSourceListRejectsForeignRawAndKeepsPartialMatches() throws Exception {
+        writeRaw(SourceKey.qualify(KEY, "B", ""), 2, SourceKey.qualify(KEY, "B", ""), 4);
+        assertEquals(1, convert("-s", "configuration", "--extension", "A=extensions/A"));
+        assertFalse(Files.exists(output));
+        writeRaw(SourceKey.qualify(KEY, "A", ""), 2, SourceKey.qualify(KEY, "B", ""), 4);
+        assertEquals(0, convert("-s", "configuration", "--extension", "A=extensions/A"));
+        assertEquals(Map.of(2, true, 4, false, 6, false), coverage(output).get("extensions/A/" + MODULE));
     }
 
     @Test

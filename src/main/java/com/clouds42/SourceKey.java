@@ -24,6 +24,7 @@ package com.clouds42;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Locale;
+import java.util.Map;
 
 /** Source identity is encoded in the raw path, so it survives the existing XML transport. */
 public final class SourceKey {
@@ -60,29 +61,43 @@ public final class SourceKey {
         return key.startsWith(PREFIX);
     }
 
-    public static void validateRawKey(String key, boolean declaredRaw) {
+    public static String normalizeRawKey(String key, boolean declaredRaw) {
         boolean qualified = isQualified(key);
         String[] module = legacy(key).split("/", -1);
         // Legacy RAW has no format marker. Finished reports identify modules by BSL file paths.
         if (module.length != 2 || (!declaredRaw && !qualified && module[1].toLowerCase(Locale.ROOT).endsWith(".bsl"))) {
             throw new IllegalArgumentException("Invalid RAW module path: " + key);
         }
+        String moduleKey;
         try {
-            moduleKey(module[0], module[1]);
+            moduleKey = moduleKey(module[0], module[1]);
         } catch (IllegalArgumentException error) {
             throw new IllegalArgumentException("Invalid RAW module path: " + key, error);
         }
         if (qualified) {
             String[] parts = qualifiedParts(key);
-            decodeSourcePart(key, parts[1]);
-            decodeSourcePart(key, parts[2]);
+            return qualify(moduleKey, decodeSourcePart(key, parts[1]), decodeSourcePart(key, parts[2]));
         }
+        return moduleKey;
+    }
+
+    public static boolean matchesSource(String key, Map<String, String> selectedUrls) {
+        String[] parts = qualifiedParts(key);
+        String extension = decodeSourcePart(key, parts[1]);
+        return decodeSourcePart(key, parts[2]).equals(selectedUrls.get(extension));
     }
 
     public static String selectionHint(String key) {
+        return selectionHint(key, false);
+    }
+
+    public static String selectionHint(String key, boolean namedSources) {
         String[] parts = qualifiedParts(key);
         String extension = decodeSourcePart(key, parts[1]);
         String url = decodeSourcePart(key, parts[2]);
+        if (namedSources && url.isEmpty()) {
+            return "--source " + extension + "=DIR";
+        }
         if (extension.isEmpty() && url.isEmpty()) {
             return "main configuration (omit -e and -x)";
         }

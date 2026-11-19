@@ -229,6 +229,33 @@ class ExternalDataProcessorTest {
         assertFalse(Files.exists(report));
     }
 
+    @Test
+    void rejectsCoverageOutputLinkedToExternalFormDescriptor() throws Exception {
+        assertExternalSourceFileProtected("ВнешняяОбработка/Forms/Форма.xml");
+    }
+
+    @Test
+    void rejectsCoverageOutputLinkedToExternalFormModule() throws Exception {
+        assertExternalSourceFileProtected("ВнешняяОбработка/Forms/Форма/Ext/Form/Module.bsl");
+    }
+
+    private void assertExternalSourceFileProtected(String relativeInput) throws Exception {
+        Path descriptor = copyProcessorDescriptor();
+        Path input = descriptor.resolveSibling(relativeInput);
+        Path output = tempDir.resolve("result.xml");
+        try {
+            Files.createLink(output, input);
+        } catch (IOException | UnsupportedOperationException error) {
+            assumeTrue(false, () -> "Cannot create a hard link: " + error.getMessage());
+        }
+        byte[] original = Files.readAllBytes(input);
+        Path report = tempDir.resolve("exclusions.json");
+
+        assertDescriptorOutputRejected(descriptor, report, output, "Coverage output");
+        assertArrayEquals(original, Files.readAllBytes(input));
+        assertFalse(Files.exists(report));
+    }
+
     private Path copyProcessorDescriptor() throws IOException {
         Path project = tempDir.resolve("project");
         TestUtils.copyDirectory(EXTERNAL_PROCESSOR.resolve("configurator"), project);

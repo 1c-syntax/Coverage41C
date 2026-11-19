@@ -29,6 +29,7 @@ import com.github._1c_syntax.bsl.mdclasses.CF;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.DirectoryStream;
 import java.nio.file.FileSystemLoopException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -263,6 +264,18 @@ final class ExclusionRules {
         }
         Path report = reportFile.toPath().toAbsolutePath();
         Path configDirectory = configPath.toPath().toAbsolutePath();
+        if (Files.notExists(report)) {
+            // A JSON link in the rules directory may point out of it to a future report.
+            try (DirectoryStream<Path> links = Files.newDirectoryStream(configDirectory,
+                    path -> isConfigFileName(path.toFile()) && Files.isSymbolicLink(path) && Files.notExists(path))) {
+                for (Path link : links) {
+                    if (Utils.sameOutputFile(link, report)) {
+                        throw new IllegalArgumentException(source + ": " + report + " is the target of " + link
+                                + " and would be read as a config on the next run");
+                    }
+                }
+            }
+        }
         Set<Path> visited = new HashSet<>();
         for (Path candidate = report; candidate.getParent() != null; ) {
             Path parent = candidate.getParent();

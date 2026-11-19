@@ -38,7 +38,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.LongSupplier;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 // Debug targets of a start run and their infobase users. Decides which targets to attach and whether
@@ -50,7 +49,6 @@ public final class UserTargets {
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     private static final String NO_USER = "";
-    private static final Pattern UUID_TEXT = Pattern.compile("[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}");
     private static final long LOOKUP_INTERVAL_NANOS = TimeUnit.SECONDS.toNanos(1);
 
     private final IncludeUsers users;
@@ -82,7 +80,7 @@ public final class UserTargets {
     // Remembers the target and tells whether to attach it: without a filter every target, with a filter
     // targets of allowed users; a target is attached once, after attached() confirms success.
     public boolean register(DebugTargetId target) {
-        String id = target == null ? null : targetKey(target.getId());
+        String id = target == null ? null : Utils.normalizeUuid(target.getId());
         if (id == null) {
             logger.warn("Debug target without id skipped");
             return false;
@@ -109,7 +107,7 @@ public final class UserTargets {
 
     // The target was attached; later announcements of it do not attach it again.
     public void attached(String targetId) {
-        attachedIds.add(targetKey(targetId));
+        attachedIds.add(Utils.normalizeUuid(targetId));
     }
 
     // A nameless packet may need a fresh list even if dbgs already announced the target id.
@@ -118,7 +116,7 @@ public final class UserTargets {
             return false;
         }
         DebugTargetId target = targetOf(command);
-        String id = target == null ? null : targetKey(target.getId());
+        String id = target == null ? null : Utils.normalizeUuid(target.getId());
         if (id == null || packetUserOf(command, target, id) != null) {
             return false;
         }
@@ -128,13 +126,13 @@ public final class UserTargets {
     }
 
     public boolean knows(String targetId) {
-        String id = targetKey(targetId);
+        String id = Utils.normalizeUuid(targetId);
         return id != null && (usersById.containsKey(id) || unknownIds.containsKey(id));
     }
 
     // A successful lookup found no user. Give dbgs time to learn the name before trying again.
     public void markUnknown(String targetId) {
-        String id = targetKey(targetId);
+        String id = Utils.normalizeUuid(targetId);
         if (id != null && usersById.getOrDefault(id, NO_USER).isEmpty()) {
             unknownIds.put(id, nanoTime.getAsLong());
         }
@@ -145,7 +143,7 @@ public final class UserTargets {
             return Verdict.ACCEPTED;
         }
         DebugTargetId target = targetOf(command);
-        String id = target == null ? null : targetKey(target.getId());
+        String id = target == null ? null : Utils.normalizeUuid(target.getId());
         String user = target == null ? null : packetUserOf(command, target, id);
         if (id != null) {
             String known = usersById.get(id);
@@ -274,15 +272,7 @@ public final class UserTargets {
     }
 
     public static boolean isValidTargetUuid(String id) {
-        return id != null && UUID_TEXT.matcher(id).matches();
-    }
-
-    private static String targetKey(String id) {
-        if (id == null) {
-            return null;
-        }
-        String lower = id.toLowerCase(Locale.ROOT);
-        return !lower.equals(id) && isValidTargetUuid(id) ? lower : id;
+        return Utils.isUuid(id);
     }
 
     private static String packetUserOf(DBGUIExtCmdInfoMeasure command, DebugTargetId target, String id) {
@@ -291,7 +281,7 @@ public final class UserTargets {
             return user;
         }
         DebugTargetId commandTarget = command.getTargetID();
-        if (commandTarget != null && id.equals(targetKey(commandTarget.getId()))) {
+        if (commandTarget != null && id.equals(Utils.normalizeUuid(commandTarget.getId()))) {
             return userOf(commandTarget);
         }
         return null;
