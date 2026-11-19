@@ -33,6 +33,8 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static com.clouds42.UserTargets.Verdict.ACCEPTED;
 import static com.clouds42.UserTargets.Verdict.REJECTED;
@@ -119,7 +121,8 @@ class UserTargetsTest {
     // Пакет без имени требует поиска, пока имя предмета неизвестно.
     @Test
     void lookupIsNeededForTargetWithoutKnownUser() throws Exception {
-        UserTargets targets = new UserTargets(IncludeUsers.load(null, List.of("unit")));
+        AtomicLong time = new AtomicLong();
+        UserTargets targets = new UserTargets(IncludeUsers.load(null, List.of("unit")), time::get);
         targets.register(target("k", null));
         assertTrue(targets.needsLookup(measure(target("z", null), null)));
         assertFalse(targets.needsLookup(measure(target("z", "smoke"), null)));
@@ -138,6 +141,11 @@ class UserTargetsTest {
                 "  rejected: smoke (1 target(s), 0 packet(s))",
                 "  unknown: 2 target(s) without user name, 0 packet(s) without target or user"), targets.summary());
         assertFalse(new UserTargets(IncludeUsers.NONE).needsLookup(measure(target("z", null), null)));
+
+        time.set(TimeUnit.SECONDS.toNanos(1) - 1);
+        assertFalse(targets.needsLookup(measure(target("z", null), null)));
+        time.incrementAndGet();
+        assertTrue(targets.needsLookup(measure(target("z", null), null)));
     }
 
     // Предмет без имени не подключался; когда dbgs назвал пользователя, подключить надо ровно один раз.

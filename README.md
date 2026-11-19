@@ -138,7 +138,7 @@ Coverage41C stop -i DefAlias
 Coverage41C convert -c raw.xml -P . -s src --config coverage41c.json -o genericCoverage.xml
 ```
 
-`convert` отклоняет RAW XML с объявлением `DOCTYPE`.
+На вход `convert` подавайте сырой XML с замерами. Команда отклоняет готовый отчёт с путями к BSL-файлам, RAW с объявлением `DOCTYPE` и повреждённые ключи источника. Старые RAW с ключами модулей читаются.
 
 ### Проверка правил и отчёт об исключениях
 

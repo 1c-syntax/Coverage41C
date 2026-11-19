@@ -27,6 +27,7 @@ import com._1c.g5.v8.dt.debug.model.base.data.DebugTargetType;
 import com._1c.g5.v8.dt.debug.model.dbgui.commands.DBGUIExtCmdInfoMeasure;
 import com._1c.g5.v8.dt.debug.model.dbgui.commands.DBGUIExtCmds;
 import com.clouds42.CommandLineOptions.ConnectionOptions;
+import com.clouds42.Commands.CoverageCommand;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -1187,7 +1188,17 @@ class StartCommandTest {
         DebugTargetId allowed = user("suite");
         DebugTargetId nameless = FakeDebugServer.target(UUID.randomUUID(), DebugTargetType.MANAGED_CLIENT, null);
         dbgs.setTargets(allowed, nameless);
-        Future<Integer> collector = start("--include-user", "suite");
+        CommandLine.IFactory defaultFactory = CommandLine.defaultFactory();
+        CommandLine collectorCommand = new CommandLine(new Coverage41C(), new CommandLine.IFactory() {
+            @Override
+            public <T> T create(Class<T> type) throws Exception {
+                if (type == CoverageCommand.class) {
+                    return type.cast(new CoverageCommand(() -> 0L));
+                }
+                return defaultFactory.create(type);
+            }
+        });
+        Future<Integer> collector = start(collectorCommand, "--include-user", "suite");
         dbgs.deliver(FakeDebugServer.measure(allowed, OBJECT_ID, PROPERTY_ID, 2, 1));
         int requestsBeforeLookup = dbgs.requests("getDbgTargets").size();
 
@@ -1458,6 +1469,10 @@ class StartCommandTest {
     }
 
     private Future<Integer> start(String... options) throws Exception {
+        return start(Coverage41C.getCommandLine(), options);
+    }
+
+    private Future<Integer> start(CommandLine command, String... options) throws Exception {
         Path project = tempDir.resolve("project");
         if (!Files.exists(project)) {
             TestUtils.copyConfiguration(tempDir);
@@ -1472,12 +1487,15 @@ class StartCommandTest {
                 "-o", output.toString(),
                 "-t", "10"));
         arguments.addAll(Arrays.asList(options));
-        return submit(arguments);
+        return submit(command, arguments);
     }
 
     private Future<Integer> submit(List<String> arguments) throws Exception {
-        Future<Integer> start = executor.submit(() -> Coverage41C.getCommandLine()
-                .execute(arguments.toArray(new String[0])));
+        return submit(Coverage41C.getCommandLine(), arguments);
+    }
+
+    private Future<Integer> submit(CommandLine command, List<String> arguments) throws Exception {
+        Future<Integer> start = executor.submit(() -> command.execute(arguments.toArray(new String[0])));
         awaitStarted(start);
         return start;
     }

@@ -187,6 +187,42 @@ class MultipleSourcesTest {
     }
 
     @Test
+    void finishedCoverageWithTwoPartPathIsRejectedAsRaw() throws Exception {
+        Files.writeString(raw, "<coverage version=\"1\"><file path=\"Ext/SessionModule.bsl\">"
+                + "<lineToCover covered=\"true\" lineNumber=\"2\"/></file></coverage>");
+
+        for (List<String> options : List.of(List.of("-s", "configuration"), List.of("--source", "=configuration"))) {
+            StringWriter error = new StringWriter();
+            assertEquals(1, convert(error, options.toArray(new String[0])), options.toString());
+            assertTrue(error.toString().contains("Invalid RAW module path"), error.toString());
+            assertFalse(Files.exists(output));
+        }
+    }
+
+    @Test
+    void malformedRawSourceIdentityIsRejectedWithBothSourceOptions() throws Exception {
+        for (String prefix : List.of("source-v1/!/-/", "source-v1/-/!/", "source-v1/-/_w/")) {
+            writeRaw(KEY, 4, prefix + KEY, 2);
+            for (List<String> options : List.of(List.of("-s", "configuration"), List.of("--source", "=configuration"))) {
+                StringWriter error = new StringWriter();
+                assertEquals(1, convert(error, options.toArray(new String[0])), prefix + options);
+                assertTrue(error.toString().contains("Invalid raw source key"), error.toString());
+                assertFalse(Files.exists(output));
+            }
+        }
+    }
+
+    @Test
+    void opaqueModuleIdsStillWorkWithRawCoverage() throws Exception {
+        for (String key : List.of("sample-object_v1/module.2", "source-v1/-/-/sample-object_v1/module.bsl")) {
+            writeRaw(key, 2, KEY, 4);
+
+            assertEquals(0, convert("-s", "configuration"), key);
+            assertEquals(true, coverage(output).get("configuration/" + MODULE).get(4));
+        }
+    }
+
+    @Test
     void legacyProjectAndNestedSourceKeepRelativePathsAndConfiguration() throws Exception {
         Files.createDirectories(project.resolve("src_folder"));
         Files.move(project.resolve("configuration"), project.resolve("src_folder/main"));

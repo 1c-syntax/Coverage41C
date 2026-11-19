@@ -100,8 +100,7 @@ public class ConvertCommand implements Callable<Integer> {
     }
 
     private String rawFileKey(Node fileNode, boolean sourceIdentity, boolean includesExtensionAttributes) {
-        String path = attribute(fileNode, "path");
-        String key = path.startsWith("/") ? path.substring(1) : path;
+        String key = rawPath(fileNode);
         if (SourceKey.isQualified(key)) {
             return key;
         }
@@ -118,6 +117,11 @@ public class ConvertCommand implements Callable<Integer> {
             return SourceKey.qualify(key, filterOptions.getExtensionName(), "");
         }
         return key;
+    }
+
+    private static String rawPath(Node fileNode) {
+        String path = attribute(fileNode, "path");
+        return path.startsWith("/") ? path.substring(1) : path;
     }
 
     private static String attribute(Node fileNode, String name) {
@@ -167,6 +171,7 @@ public class ConvertCommand implements Callable<Integer> {
         if (!"coverage".equals(coverage.getTagName())) {
             throw new IllegalArgumentException("Expected a RAW coverage XML report");
         }
+        boolean sourceIdentity = "true".equals(coverage.getAttribute("sourceIdentity"));
         for (Node node = coverage.getFirstChild(); node != null; node = node.getNextSibling()) {
             if (!(node instanceof Element file)) {
                 continue;
@@ -174,6 +179,8 @@ public class ConvertCommand implements Callable<Integer> {
             if (!"file".equals(file.getTagName()) || file.getAttribute("path").isBlank()) {
                 throw new IllegalArgumentException("Expected a file with a path in the RAW coverage report");
             }
+            SourceKey.validateRawKey(rawPath(file),
+                    sourceIdentity || file.hasAttribute("extension") || file.hasAttribute("sourceUrl"));
             for (Node child = file.getFirstChild(); child != null; child = child.getNextSibling()) {
                 if (!(child instanceof Element line)) {
                     continue;
@@ -205,6 +212,11 @@ public class ConvertCommand implements Callable<Integer> {
 
         File rawInput = convertOptions.getInputRawXmlFile();
         try (FileInputStream fileIS = new FileInputStream(rawInput)) {
+            DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
+            builderFactory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            DocumentBuilder builder = builderFactory.newDocumentBuilder();
+            Element coverage = validateRawReport(builder.parse(fileIS));
+
             Map<String, URI> uriListByKey = Utils.readMetadataForConversion(metadataOptions,
                     filterOptions.getExtensionName(), coverageData, rawInput);
             legacySources.clear();
@@ -218,10 +230,6 @@ public class ConvertCommand implements Callable<Integer> {
                 });
             }
 
-            DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
-            builderFactory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-            DocumentBuilder builder = builderFactory.newDocumentBuilder();
-            Element coverage = validateRawReport(builder.parse(fileIS));
             NodeList fileNodeList = coverage.getElementsByTagName("file");
             boolean includesExtensions = includesExtensionAttributes(fileNodeList);
             boolean sourceIdentity = "true".equals(coverage.getAttribute("sourceIdentity"));

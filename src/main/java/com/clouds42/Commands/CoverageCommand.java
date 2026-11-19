@@ -62,6 +62,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongSupplier;
 import java.util.stream.Stream;
 
 @Command(name = PipeMessages.START_COMMAND, mixinStandardHelpOptions = true,
@@ -100,6 +101,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     private DebugClient client;
     // Debug targets and their users; decides what to attach and which measures to merge.
     private UserTargets targets;
+    private final LongSupplier targetLookupClock;
 
     private final Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<>() {
         @Override
@@ -132,6 +134,14 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     private static final long FINAL_MEASURES_TIMEOUT_SECONDS = 10;
     private static final long FAILED_LOOKUP_INTERVAL_NANOS = TimeUnit.SECONDS.toNanos(1);
     private long targetLookupAllowedAt = System.nanoTime();
+
+    public CoverageCommand() {
+        this(System::nanoTime);
+    }
+
+    public CoverageCommand(LongSupplier targetLookupClock) {
+        this.targetLookupClock = targetLookupClock;
+    }
 
     private void connectAllTargets(List<DebugTargetId> debugTargets) {
         logger.info("Current debug targets size: {}", debugTargets.size());
@@ -170,7 +180,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         int result = CommandLine.ExitCode.OK;
         metadataOptions.validateSourceFilters(filterOptions.getExtensionName(), filterOptions.getExternalDataProcessorUrl());
         IncludeUsers includeUsers = IncludeUsers.load(metadataOptions.getConfigFile(), includeUserNames);
-        targets = new UserTargets(includeUsers);
+        targets = new UserTargets(includeUsers, targetLookupClock);
         if (includeUsers.isActive()) {
             logger.info(includeUsers.describe());
         }

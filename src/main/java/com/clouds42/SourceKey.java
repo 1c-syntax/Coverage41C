@@ -23,6 +23,7 @@ package com.clouds42;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.Locale;
 
 /** Source identity is encoded in the raw path, so it survives the existing XML transport. */
 public final class SourceKey {
@@ -59,19 +60,46 @@ public final class SourceKey {
         return key.startsWith(PREFIX);
     }
 
-    public static String selectionHint(String key) {
-        legacy(key); // Validate structure before decoding source identity.
-        String[] parts = key.split("/", -1);
+    public static void validateRawKey(String key, boolean declaredRaw) {
+        boolean qualified = isQualified(key);
+        String[] module = legacy(key).split("/", -1);
+        // Legacy RAW has no format marker. Finished reports identify modules by BSL file paths.
+        if (module.length != 2 || (!declaredRaw && !qualified && module[1].toLowerCase(Locale.ROOT).endsWith(".bsl"))) {
+            throw new IllegalArgumentException("Invalid RAW module path: " + key);
+        }
         try {
-            String extension = parts[1].equals("-") ? ""
-                    : new String(Base64.getUrlDecoder().decode(parts[1]), StandardCharsets.UTF_8);
-            String url = parts[2].equals("-") ? ""
-                    : new String(Base64.getUrlDecoder().decode(parts[2]), StandardCharsets.UTF_8);
-            if (extension.isEmpty() && url.isEmpty()) {
-                return "main configuration (omit -e and -x)";
+            moduleKey(module[0], module[1]);
+        } catch (IllegalArgumentException error) {
+            throw new IllegalArgumentException("Invalid RAW module path: " + key, error);
+        }
+        if (qualified) {
+            String[] parts = qualifiedParts(key);
+            decodeSourcePart(key, parts[1]);
+            decodeSourcePart(key, parts[2]);
+        }
+    }
+
+    public static String selectionHint(String key) {
+        String[] parts = qualifiedParts(key);
+        String extension = decodeSourcePart(key, parts[1]);
+        String url = decodeSourcePart(key, parts[2]);
+        if (extension.isEmpty() && url.isEmpty()) {
+            return "main configuration (omit -e and -x)";
+        }
+        return ((extension.isEmpty() ? "" : "-e " + extension + " ")
+                + (url.isEmpty() ? "" : "-x " + url)).trim();
+    }
+
+    private static String decodeSourcePart(String key, String part) {
+        if (part.equals("-")) {
+            return "";
+        }
+        try {
+            String decoded = new String(Base64.getUrlDecoder().decode(part), StandardCharsets.UTF_8);
+            if (!encode(decoded).equals(part)) {
+                throw new IllegalArgumentException("Expected unpadded Base64 URL-safe UTF-8");
             }
-            return ((extension.isEmpty() ? "" : "-e " + extension + " ")
-                    + (url.isEmpty() ? "" : "-x " + url)).trim();
+            return decoded;
         } catch (IllegalArgumentException error) {
             throw new IllegalArgumentException("Invalid raw source key: " + key, error);
         }
@@ -81,11 +109,16 @@ public final class SourceKey {
         if (!isQualified(key)) {
             return key;
         }
+        String[] parts = qualifiedParts(key);
+        return parts[3] + "/" + parts[4];
+    }
+
+    private static String[] qualifiedParts(String key) {
         String[] parts = key.split("/", -1);
         if (parts.length != 5 || parts[1].isEmpty() || parts[2].isEmpty()
                 || parts[3].isEmpty() || parts[4].isEmpty()) {
             throw new IllegalArgumentException("Invalid raw source key: " + key);
         }
-        return parts[3] + "/" + parts[4];
+        return parts;
     }
 }

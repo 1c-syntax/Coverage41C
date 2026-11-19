@@ -37,6 +37,7 @@ import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.function.LongSupplier;
 import java.util.stream.Collectors;
 
 // Debug targets of a start run and their infobase users. Decides which targets to attach and whether
@@ -51,6 +52,7 @@ public final class UserTargets {
     private static final long LOOKUP_INTERVAL_NANOS = TimeUnit.SECONDS.toNanos(1);
 
     private final IncludeUsers users;
+    private final LongSupplier nanoTime;
     private final Map<String, String> usersById = new ConcurrentHashMap<>();
     private final Map<String, Long> unknownIds = new ConcurrentHashMap<>();
     private final Set<String> attachedIds = ConcurrentHashMap.newKeySet();
@@ -63,7 +65,12 @@ public final class UserTargets {
     private volatile boolean matchedUser;
 
     public UserTargets(IncludeUsers users) {
+        this(users, System::nanoTime);
+    }
+
+    public UserTargets(IncludeUsers users, LongSupplier nanoTime) {
         this.users = users;
+        this.nanoTime = nanoTime;
     }
 
     public boolean isActive() {
@@ -112,7 +119,7 @@ public final class UserTargets {
         String id = target.getId();
         Long lastLookup = unknownIds.get(id);
         return usersById.getOrDefault(id, NO_USER).isEmpty()
-                && (lastLookup == null || System.nanoTime() - lastLookup >= LOOKUP_INTERVAL_NANOS);
+                && (lastLookup == null || nanoTime.getAsLong() - lastLookup >= LOOKUP_INTERVAL_NANOS);
     }
 
     public boolean knows(String targetId) {
@@ -122,7 +129,7 @@ public final class UserTargets {
     // A successful lookup found no user. Give dbgs time to learn the name before trying again.
     public void markUnknown(String targetId) {
         if (targetId != null && usersById.getOrDefault(targetId, NO_USER).isEmpty()) {
-            unknownIds.put(targetId, System.nanoTime());
+            unknownIds.put(targetId, nanoTime.getAsLong());
         }
     }
 
