@@ -51,6 +51,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ExternalDataProcessorTest {
 
     private static final Path EXTERNAL_PROCESSOR = Path.of("src/test/resources/externalprocessor");
+    private static final String PROCESSOR_URL = "file:///processor.epf";
+    private static final String PROCESSOR_KEY = "8fe68a1c-d99b-4417-9ee7-27dfaf75ded0/a637f77f-3840-441d-a1c3-699c8c5cb7e0";
     private static final String OBJECT_MODULE = "Процедура ПроцедураМодуляОбработки() Экспорт\n"
             + "\tНичегоНеДелать(); // Cover:off\n"
             + "КонецПроцедуры\n";
@@ -76,31 +78,28 @@ class ExternalDataProcessorTest {
 
     @Test
     void convertsConfiguratorProcessorAndExtensionTogether() throws Exception {
-        Path project = tempDir.resolve("project");
-        TestUtils.copyDirectory(EXTERNAL_PROCESSOR.resolve("configurator"), project);
-        TestUtils.copyDirectory(Path.of("src/test/resources/extensions/src/cfe/Доработки"), project.resolve("A"));
-        Path raw = tempDir.resolve("raw.xml");
-        Files.writeString(raw, """
-                <coverage version="1">
-                    <file path="/8fe68a1c-d99b-4417-9ee7-27dfaf75ded0/a637f77f-3840-441d-a1c3-699c8c5cb7e0">
-                        <lineToCover covered="true" lineNumber="2"/>
-                    </file>
-                    <file extension="A" path="/888c0948-df1b-462b-809c-2a3dbef0b13f/d5963243-262e-4398-b4d7-fb16d06484f6">
-                        <lineToCover covered="true" lineNumber="5"/>
-                    </file>
-                </coverage>
-                """);
-        Path output = tempDir.resolve("coverage.xml");
-        StringWriter stderr = new StringWriter();
+        Path project = copyProcessorWithExtension();
 
-        int exitCode = execute(stderr, PipeMessages.CONVERT_COMMAND,
-                "-P", project.toString(), "-s", "ВнешняяОбработка.xml", "--extension", "A=A",
-                "-c", raw.toString(), "-o", output.toString());
+        assertProcessorConversion(project, "", PROCESSOR_KEY, "", true);
+        assertProcessorConversion(project, "", PROCESSOR_KEY, "", true, "-x", PROCESSOR_URL);
+        assertProcessorConversion(project, "", PROCESSOR_KEY, "extension=\"B\"", true,
+                "-x", PROCESSOR_URL, "-e", "B");
+    }
 
-        assertEquals(CommandLine.ExitCode.OK, exitCode, stderr.toString());
-        Map<String, Map<Integer, Boolean>> coverage = MultipleSourcesTest.coverage(output);
-        assertEquals(Map.of(2, true, 3, false), coverage.get("ВнешняяОбработка/Ext/ObjectModule.bsl"));
-        assertEquals(true, coverage.get("A/CommonModules/Калькулятор/Ext/Module.bsl").get(5));
+    @Test
+    void keepsExplicitSourceIdentityDuringProcessorConversion() throws Exception {
+        Path project = copyProcessorWithExtension();
+
+        assertProcessorConversion(project, "sourceIdentity=\"true\"", PROCESSOR_KEY, "",
+                false, "-x", PROCESSOR_URL);
+        assertProcessorConversion(project, "", PROCESSOR_KEY, "sourceUrl=\"file:///different.epf\"",
+                false, "-x", PROCESSOR_URL);
+        assertProcessorConversion(project, "", PROCESSOR_KEY, "sourceUrl=\"\"",
+                false, "-x", PROCESSOR_URL);
+        assertProcessorConversion(project, "", "source-v1/-/-/" + PROCESSOR_KEY, "",
+                false, "-x", PROCESSOR_URL);
+        assertProcessorConversion(project, "", PROCESSOR_KEY, "",
+                false, "-x", PROCESSOR_URL, "-e", "B");
     }
 
     @Test
@@ -227,6 +226,41 @@ class ExternalDataProcessorTest {
             result.add(entry.get("source").asText());
         }
         return result;
+    }
+
+    private Path copyProcessorWithExtension() throws IOException {
+        Path project = tempDir.resolve("project");
+        TestUtils.copyDirectory(EXTERNAL_PROCESSOR.resolve("configurator"), project);
+        TestUtils.copyDirectory(Path.of("src/test/resources/extensions/src/cfe/Доработки"), project.resolve("A"));
+        return project;
+    }
+
+    private void assertProcessorConversion(Path project, String coverageAttributes, String processorKey,
+                                           String processorAttributes, boolean processorCovered,
+                                           String... selection) throws Exception {
+        Path raw = tempDir.resolve("raw.xml");
+        Files.writeString(raw, """
+                <coverage version="1" %s>
+                    <file path="/%s" %s>
+                        <lineToCover covered="true" lineNumber="2"/>
+                    </file>
+                    <file extension="A" path="/888c0948-df1b-462b-809c-2a3dbef0b13f/d5963243-262e-4398-b4d7-fb16d06484f6">
+                        <lineToCover covered="true" lineNumber="5"/>
+                    </file>
+                </coverage>
+                """.formatted(coverageAttributes, processorKey, processorAttributes));
+        Path output = tempDir.resolve("coverage.xml");
+        StringWriter stderr = new StringWriter();
+        List<String> arguments = new ArrayList<>(List.of(PipeMessages.CONVERT_COMMAND,
+                "-P", project.toString(), "-s", "ВнешняяОбработка.xml", "--extension", "A=A",
+                "-c", raw.toString(), "-o", output.toString()));
+        arguments.addAll(Arrays.asList(selection));
+
+        assertEquals(CommandLine.ExitCode.OK, execute(stderr, arguments.toArray(String[]::new)), stderr.toString());
+        Map<String, Map<Integer, Boolean>> coverage = MultipleSourcesTest.coverage(output);
+        assertEquals(Map.of(2, processorCovered, 3, false), coverage.get("ВнешняяОбработка/Ext/ObjectModule.bsl"),
+                coverageAttributes + " " + processorKey + " " + processorAttributes + " " + Arrays.toString(selection));
+        assertEquals(true, coverage.get("A/CommonModules/Калькулятор/Ext/Module.bsl").get(5));
     }
 
     private static int execute(StringWriter stderr, String... arguments) {

@@ -57,6 +57,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
@@ -158,6 +159,26 @@ class StartCommandTest {
         assertTrue(measureModes.get(measureModes.size() - 2).body.contains("measureModeSeanceID"));
         assertFalse(measureModes.get(measureModes.size() - 1).body.contains("measureModeSeanceID"));
         assertTrue(dbgs.commands().contains("detachDebugUI"));
+    }
+
+    @Test
+    void startRejectsSharedReportAndCoveragePathBeforeMeasuring() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Files.writeString(output, "existing coverage");
+        StringWriter stderr = new StringWriter();
+        CommandLine command = Coverage41C.getCommandLine();
+        command.setErr(new PrintWriter(stderr, true));
+
+        dbgs.fail("attachDebugUI", 503);
+        int result = command.execute(PipeMessages.START_COMMAND, "-i", infobase, "-u", dbgs.url(),
+                "-P", project.toString(), "-s", "configuration", "-o", output.toString(),
+                "--exclusion-report", output.toString());
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, result, stderr.toString());
+        assertTrue(stderr.toString().contains("Exclusion report and coverage output must use different files"),
+                stderr.toString());
+        assertEquals("existing coverage", Files.readString(output));
+        assertTrue(dbgs.requests("attachDebugUI").isEmpty());
     }
 
     @Test
@@ -1291,7 +1312,8 @@ class StartCommandTest {
     @Test
     void stopUsesCommandUserForMatchingFinalTarget() throws Exception {
         DebugTargetId established = user("suite");
-        DebugTargetId finalTarget = user("suite");
+        DebugTargetId finalTarget = FakeDebugServer.target(
+                UUID.fromString("ab12cd34-01ef-2345-6789-abcdef012345"), DebugTargetType.MANAGED_CLIENT, "suite");
         dbgs.setTargets(established);
         Future<Integer> collector = start("--include-user", "suite");
         dbgs.deliver(FakeDebugServer.measure(established, OBJECT_ID, PROPERTY_ID, 2, 1));
@@ -1299,6 +1321,7 @@ class StartCommandTest {
 
         var finalPacket = FakeDebugServer.measure(finalTarget, OBJECT_ID, PROPERTY_ID, 10, 1);
         finalPacket.getMeasure().getTargetID().unsetUserName();
+        finalPacket.getTargetID().setId(finalTarget.getId().toUpperCase(Locale.ROOT));
         dbgs.deliverOnMeasureOff(FakeDebugServer.targetQuit(finalTarget), finalPacket);
 
         int stopResult = send(PipeMessages.EXIT_COMMAND);

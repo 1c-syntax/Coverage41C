@@ -389,6 +389,29 @@ class ConvertWithExclusionsTest {
     }
 
     @Test
+    void checksCaseOnlyReportPathsOnTheDestinationFileSystem() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path probe = Files.createFile(tempDir.resolve("CaseProbe"));
+        boolean ignoresCase = Files.exists(tempDir.resolve("caseprobe"));
+        Files.delete(probe);
+        Path report = tempDir.resolve("Result.xml");
+        Path output = tempDir.resolve("result.xml");
+        String[] options = {"--exclusion-report", report.toString()};
+
+        if (ignoresCase) {
+            assertCoverageOutputCollision(project, output, options);
+            assertFalse(Files.exists(report));
+            assertFalse(Files.exists(output));
+        } else {
+            StringWriter stderr = new StringWriter();
+            assertEquals(CommandLine.ExitCode.OK, convert(project, Path.of(INTERNAL_XML), output, stderr, options),
+                    stderr.toString());
+            assertTrue(new ObjectMapper().readTree(report.toFile()).has("totalLines"));
+            assertFalse(genericCoverage(output).isEmpty());
+        }
+    }
+
+    @Test
     void rejectsCoverageOutputThroughSymlinkedDirectoryBeforeCreatingFiles() throws Exception {
         Path project = TestUtils.copyConfiguration(tempDir);
         Path dir = Files.createDirectory(tempDir.resolve("reports"));

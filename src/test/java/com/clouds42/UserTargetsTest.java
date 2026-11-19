@@ -110,6 +110,47 @@ class UserTargetsTest {
         assertTrue(targets.matchedAnyTarget());
     }
 
+    @Test
+    void uuidCaseVariantsShareRegisteredUserAndAttachment() throws Exception {
+        UserTargets targets = new UserTargets(IncludeUsers.load(null, List.of("unit")));
+        String lower = "ab12cd34-01ef-2345-6789-abcdef012345";
+        String upper = "AB12CD34-01EF-2345-6789-ABCDEF012345";
+        var packet = measure(target(upper, null), null);
+
+        assertTrue(targets.register(target(lower, "unit")));
+        assertTrue(targets.knows(upper));
+        assertFalse(targets.needsLookup(packet));
+        assertEquals(ACCEPTED, targets.verdict(packet, false));
+        targets.attached(upper);
+        assertFalse(targets.register(target(lower, "unit")));
+        assertFalse(targets.register(target(upper, "unit")));
+        assertTrue(targets.summary().get(0).contains("1 target(s) accepted"));
+    }
+
+    @Test
+    void uuidCaseVariantsShareLookupCooldown() throws Exception {
+        UserTargets targets = new UserTargets(IncludeUsers.load(null, List.of("unit")), () -> 0L);
+        String lower = "ab12cd34-01ef-2345-6789-abcdef012345";
+        var packet = measure(target(lower, null), null);
+        assertTrue(targets.needsLookup(packet));
+
+        targets.markUnknown("AB12CD34-01EF-2345-6789-ABCDEF012345");
+
+        assertTrue(targets.knows(lower));
+        assertFalse(targets.needsLookup(packet));
+    }
+
+    @Test
+    void opaqueTargetIdsRemainCaseSensitive() throws Exception {
+        UserTargets targets = new UserTargets(IncludeUsers.load(null, List.of("unit")));
+        targets.register(target("A-B-C-D-E", "unit"));
+        var packet = measure(target("a-b-c-d-e", null), target("A-B-C-D-E", "unit"));
+
+        assertFalse(targets.knows("a-b-c-d-e"));
+        assertTrue(targets.needsLookup(packet));
+        assertEquals(UNKNOWN, targets.verdict(packet, false));
+    }
+
     // Подключение не удалось — следующее объявление того же предмета пробует снова.
     @Test
     void failedAttachIsRetriedOnNextAnnouncement() throws Exception {

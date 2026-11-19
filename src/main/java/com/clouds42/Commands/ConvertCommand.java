@@ -100,24 +100,35 @@ public class ConvertCommand implements Callable<Integer> {
                 filterOptions.getExternalDataProcessorUrl()));
     }
 
-    private String rawFileKey(Node fileNode, boolean sourceIdentity, boolean includesExtensionAttributes) {
+    private String rawFileKey(Node fileNode, boolean sourceIdentity, boolean includesExtensionAttributes,
+                              Map<String, URI> sources) {
         String key = rawPath(fileNode);
         if (SourceKey.isQualified(key)) {
             return key;
         }
-        String url = attribute(fileNode, "sourceUrl");
-        if (sourceIdentity || !url.isEmpty()) {
-            return SourceKey.qualify(key, attribute(fileNode, "extension"), url);
+        String extension = attribute(fileNode, "extension");
+        if (sourceIdentity || fileNode.getAttributes().getNamedItem("sourceUrl") != null) {
+            return SourceKey.qualify(key, extension, attribute(fileNode, "sourceUrl"));
         }
-        if (includesExtensionAttributes && (metadataOptions.hasMultipleSources()
-                || !filterOptions.getExtensionName().isEmpty())) {
-            return SourceKey.qualify(key, attribute(fileNode, "extension"), "");
-        }
-        if (metadataOptions.hasMultipleSources() && !metadataOptions.usesNamedSources()) {
+
+        boolean multipleSources = metadataOptions.hasMultipleSources();
+        String selectedExtension = filterOptions.getExtensionName();
+        if (!includesExtensionAttributes && multipleSources && !metadataOptions.usesNamedSources()) {
             // Historical RAW files without extension attributes belong to the tree passed via -s.
-            return SourceKey.qualify(key, filterOptions.getExtensionName(), "");
+            extension = selectedExtension;
+        } else if (!includesExtensionAttributes || (!multipleSources && selectedExtension.isEmpty())) {
+            return key;
         }
-        return key;
+
+        String selectedUrl = filterOptions.getExternalDataProcessorUrl();
+        if (multipleSources && !selectedUrl.isEmpty() && extension.equals(selectedExtension)) {
+            // Legacy RAW omitted processor URLs. Recover only an exact key of the selected descriptor.
+            String selectedKey = SourceKey.qualify(key, extension, selectedUrl);
+            if (sources.containsKey(selectedKey)) {
+                return selectedKey;
+            }
+        }
+        return SourceKey.qualify(key, extension, "");
     }
 
     private static String rawPath(Node fileNode) {
@@ -148,7 +159,7 @@ public class ConvertCommand implements Callable<Integer> {
         boolean selectedSourceFound = false;
         Set<String> otherSources = new TreeSet<>();
         for (int index = 0; index < files.getLength(); index++) {
-            String key = rawFileKey(files.item(index), sourceIdentity, includesExtensionAttributes);
+            String key = rawFileKey(files.item(index), sourceIdentity, includesExtensionAttributes, sources);
             if (SourceKey.isQualified(key)) {
                 if (matchesSelectedSource(key)) {
                     selectedSourceFound = true;
@@ -252,7 +263,7 @@ public class ConvertCommand implements Callable<Integer> {
             verifySelectedSource(fileNodeList, uriListByKey, sourceIdentity, includesExtensions);
             for(int fileNodeNumber = 0; fileNodeNumber < fileNodeList.getLength(); fileNodeNumber++) {
                 Node fileNode = fileNodeList.item(fileNodeNumber);
-                String fileKey = rawFileKey(fileNode, sourceIdentity, includesExtensions);
+                String fileKey = rawFileKey(fileNode, sourceIdentity, includesExtensions, uriListByKey);
                 if (!metadataOptions.hasMultipleSources() && SourceKey.isQualified(fileKey)
                         && !matchesSelectedSource(fileKey)) {
                     continue;

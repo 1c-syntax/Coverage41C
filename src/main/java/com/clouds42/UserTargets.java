@@ -38,6 +38,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.LongSupplier;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 // Debug targets of a start run and their infobase users. Decides which targets to attach and whether
@@ -49,6 +50,7 @@ public final class UserTargets {
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     private static final String NO_USER = "";
+    private static final Pattern UUID_TEXT = Pattern.compile("[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}");
     private static final long LOOKUP_INTERVAL_NANOS = TimeUnit.SECONDS.toNanos(1);
 
     private final IncludeUsers users;
@@ -80,7 +82,7 @@ public final class UserTargets {
     // Remembers the target and tells whether to attach it: without a filter every target, with a filter
     // targets of allowed users; a target is attached once, after attached() confirms success.
     public boolean register(DebugTargetId target) {
-        String id = target == null ? null : target.getId();
+        String id = target == null ? null : targetKey(target.getId());
         if (id == null) {
             logger.warn("Debug target without id skipped");
             return false;
@@ -107,29 +109,34 @@ public final class UserTargets {
 
     // The target was attached; later announcements of it do not attach it again.
     public void attached(String targetId) {
-        attachedIds.add(targetId);
+        attachedIds.add(targetKey(targetId));
     }
 
     // A nameless packet may need a fresh list even if dbgs already announced the target id.
     public boolean needsLookup(DBGUIExtCmdInfoMeasure command) {
-        DebugTargetId target = targetOf(command);
-        if (!isActive() || target == null || packetUserOf(command, target) != null) {
+        if (!isActive()) {
             return false;
         }
-        String id = target.getId();
+        DebugTargetId target = targetOf(command);
+        String id = target == null ? null : targetKey(target.getId());
+        if (id == null || packetUserOf(command, target, id) != null) {
+            return false;
+        }
         Long lastLookup = unknownIds.get(id);
         return usersById.getOrDefault(id, NO_USER).isEmpty()
                 && (lastLookup == null || nanoTime.getAsLong() - lastLookup >= LOOKUP_INTERVAL_NANOS);
     }
 
     public boolean knows(String targetId) {
-        return targetId != null && (usersById.containsKey(targetId) || unknownIds.containsKey(targetId));
+        String id = targetKey(targetId);
+        return id != null && (usersById.containsKey(id) || unknownIds.containsKey(id));
     }
 
     // A successful lookup found no user. Give dbgs time to learn the name before trying again.
     public void markUnknown(String targetId) {
-        if (targetId != null && usersById.getOrDefault(targetId, NO_USER).isEmpty()) {
-            unknownIds.put(targetId, nanoTime.getAsLong());
+        String id = targetKey(targetId);
+        if (id != null && usersById.getOrDefault(id, NO_USER).isEmpty()) {
+            unknownIds.put(id, nanoTime.getAsLong());
         }
     }
 
@@ -138,8 +145,8 @@ public final class UserTargets {
             return Verdict.ACCEPTED;
         }
         DebugTargetId target = targetOf(command);
-        String id = target == null ? null : target.getId();
-        String user = target == null ? null : packetUserOf(command, target);
+        String id = target == null ? null : targetKey(target.getId());
+        String user = target == null ? null : packetUserOf(command, target, id);
         if (id != null) {
             String known = usersById.get(id);
             if (user == null && known != null && !known.isEmpty()) {
@@ -266,13 +273,21 @@ public final class UserTargets {
         return target == null || target.getId() == null ? null : target;
     }
 
-    private static String packetUserOf(DBGUIExtCmdInfoMeasure command, DebugTargetId target) {
+    private static String targetKey(String id) {
+        if (id == null) {
+            return null;
+        }
+        String lower = id.toLowerCase(Locale.ROOT);
+        return !lower.equals(id) && UUID_TEXT.matcher(id).matches() ? lower : id;
+    }
+
+    private static String packetUserOf(DBGUIExtCmdInfoMeasure command, DebugTargetId target, String id) {
         String user = userOf(target);
         if (user != null) {
             return user;
         }
         DebugTargetId commandTarget = command.getTargetID();
-        if (commandTarget != null && target.getId().equals(commandTarget.getId())) {
+        if (commandTarget != null && id.equals(targetKey(commandTarget.getId()))) {
             return userOf(commandTarget);
         }
         return null;

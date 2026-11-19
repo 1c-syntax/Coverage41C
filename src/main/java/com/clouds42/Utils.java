@@ -250,8 +250,15 @@ public class Utils {
                                                 String mainExtension, String mainSourceUrl,
                                                 Map<URI, Map<BigDecimal, Integer>> coverageData,
                                                 boolean measuring, boolean hasUserFilter) throws Exception {
+        return readMetadata(metadataOptions, mainExtension, mainSourceUrl, coverageData, measuring, hasUserFilter, null);
+    }
+
+    public static Map<String, URI> readMetadata(MetadataOptions metadataOptions,
+                                                String mainExtension, String mainSourceUrl,
+                                                Map<URI, Map<BigDecimal, Integer>> coverageData,
+                                                boolean measuring, boolean hasUserFilter, File coverageOutput) throws Exception {
         return readMetadata(metadataOptions, mainExtension, mainSourceUrl, coverageData, new ExclusionReport(),
-                measuring, hasUserFilter, null, null);
+                measuring, hasUserFilter, null, coverageOutput);
     }
 
     public static Map<String, URI> readMetadataForConversion(MetadataOptions metadataOptions,
@@ -536,9 +543,40 @@ public class Utils {
     }
 
     private static boolean sameOutputFile(Path report, Path coverage) throws IOException {
-        return report.equals(coverage)
-                || (Files.exists(report) && Files.exists(coverage) && Files.isSameFile(report, coverage))
-                || resolveOutputPath(report, new HashSet<>()).equals(resolveOutputPath(coverage, new HashSet<>()));
+        if (report.equals(coverage)
+                || (Files.exists(report) && Files.exists(coverage) && Files.isSameFile(report, coverage))) {
+            return true;
+        }
+        Path reportDestination = resolveOutputPath(report, new HashSet<>());
+        Path coverageDestination = resolveOutputPath(coverage, new HashSet<>());
+        if (reportDestination.equals(coverageDestination)) {
+            return true;
+        }
+        if (!reportDestination.toString().equalsIgnoreCase(coverageDestination.toString())) {
+            return false;
+        }
+        Path reportDirectory = existingOutputDirectory(reportDestination.getParent());
+        Path coverageDirectory = existingOutputDirectory(coverageDestination.getParent());
+        return reportDirectory != null && coverageDirectory != null
+                && Files.isSameFile(reportDirectory, coverageDirectory) && ignoresFileNameCase(reportDirectory);
+    }
+
+    private static Path existingOutputDirectory(Path directory) {
+        while (directory != null && !Files.isDirectory(directory)) {
+            directory = directory.getParent();
+        }
+        return directory;
+    }
+
+    // Case sensitivity depends on the destination volume, even for a Linux process.
+    private static boolean ignoresFileNameCase(Path directory) throws IOException {
+        Path probe = Files.createTempFile(directory, ".coverage41c-Case-", ".probe");
+        try {
+            Path alternative = probe.resolveSibling(probe.getFileName().toString().toLowerCase(Locale.ROOT));
+            return Files.exists(alternative) && Files.isSameFile(probe, alternative);
+        } finally {
+            Files.deleteIfExists(probe);
+        }
     }
 
     // The exclusion report creates missing directories and can write through a dangling symlink.
