@@ -26,6 +26,7 @@ import com._1c.g5.v8.dt.debug.model.rdbg.request.response.ResponseFactory;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.client.Request;
 import org.eclipse.jetty.http.HttpMethod;
+import org.eclipse.jetty.util.ssl.SslContextFactory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import com.sun.net.httpserver.HttpServer;
@@ -39,6 +40,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -56,6 +58,13 @@ class DebugClientTest {
                 responseServer.stop(0);
             }
         }
+    }
+
+    @Test
+    void httpsValidatesCertificatesAndHostnames() {
+        SslContextFactory ssl = client.createHttpClient().getSslContextFactory();
+        assertFalse(ssl.isTrustAll());
+        assertEquals("HTTPS", ssl.getEndpointIdentificationAlgorithm());
     }
 
     @Test

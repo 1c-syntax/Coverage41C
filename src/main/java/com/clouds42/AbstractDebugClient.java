@@ -72,7 +72,6 @@ public abstract class AbstractDebugClient {
 
     protected HttpClient createHttpClient(long idleTimeout) {
         SslContextFactory.Client sslContextFactory = new SslContextFactory.Client();
-        sslContextFactory.setTrustAll(true);
 
         ClientConnector clientConnector = new ClientConnector();
         clientConnector.setSslContextFactory(sslContextFactory);
