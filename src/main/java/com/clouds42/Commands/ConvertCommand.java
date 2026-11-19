@@ -39,7 +39,6 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
 
 import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.File;
 import java.io.FileInputStream;
 import java.lang.invoke.MethodHandles;
@@ -241,9 +240,7 @@ public class ConvertCommand implements Callable<Integer> {
 
         File rawInput = convertOptions.getInputRawXmlFile();
         try (FileInputStream fileIS = new FileInputStream(rawInput)) {
-            DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
-            builderFactory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-            DocumentBuilder builder = builderFactory.newDocumentBuilder();
+            DocumentBuilder builder = Utils.newInputXmlBuilder();
             Element coverage = validateRawReport(builder.parse(fileIS));
 
             Map<String, URI> uriListByKey = Utils.readMetadataForConversion(metadataOptions,

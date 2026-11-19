@@ -42,9 +42,11 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Pattern;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class ValidateCommandTest {
 
@@ -108,6 +110,25 @@ class ValidateCommandTest {
         JsonNode root = new ObjectMapper().readTree(report.toFile());
         assertEquals(1, root.get("entries").size());
         assertEquals("team.json → exclude.objects[0]", root.get("entries").get(0).get("source").asText());
+    }
+
+    @Test
+    void rejectsExclusionReportLinkedToConfigurationDescriptorInStrictMode() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path descriptor = project.resolve("configuration/Configuration.xml");
+        Path report = tempDir.resolve("report.json");
+        try {
+            Files.createLink(report, descriptor);
+        } catch (IOException | UnsupportedOperationException error) {
+            assumeTrue(false, () -> "Cannot create a hard link: " + error.getMessage());
+        }
+        byte[] original = Files.readAllBytes(descriptor);
+        StringWriter stderr = new StringWriter();
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, validateProject(project, stderr, "--strict",
+                "--exclusion-report", report.toString()), stderr.toString());
+        assertTrue(stderr.toString().contains("Exclusion report would overwrite input file"), stderr.toString());
+        assertArrayEquals(original, Files.readAllBytes(descriptor));
     }
 
     @Test

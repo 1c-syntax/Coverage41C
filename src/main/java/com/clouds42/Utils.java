@@ -316,10 +316,14 @@ public class Utils {
         }
 
         Map<String, URI> uriListByKey = new HashMap<>();
+        List<Path> inputFiles = new ArrayList<>();
+        if (rawInput != null) {
+            inputFiles.add(rawInput.toPath());
+        }
 
+        File configExclusionReportFile = null;
         if (!rawMode) {
             Map<String, Path> sourceDirectories = metadataOptions.getSourceDirectories(mainExtension);
-            File configExclusionReportFile = null;
             Set<String> rulesOutsideScope = new HashSet<>();
             Map<String, Integer> prefixModules = new HashMap<>();
             Map<String, ExclusionRules.ScopePrefix> prefixes = new LinkedHashMap<>();
@@ -339,6 +343,7 @@ public class Utils {
                 }
 
                 if (Files.isDirectory(rootPath)) {
+                    addConfigurationInputs(rootPath, inputFiles);
 
                     String sourceName = source.getKey().isEmpty() ? "<main>" : source.getKey();
                     String sourceError = "Cannot read configuration metadata for source '" + sourceName
@@ -475,15 +480,7 @@ public class Utils {
                     if (metadataOptions.getConfigFile() != null) {
                         throw new IllegalArgumentException("Coverage configuration is not supported for external data processors");
                     }
-                    File descriptor = rootPath.toFile();
-                    File descriptorReport = metadataOptions.getExclusionReportFile();
-                    if (descriptorReport != null) {
-                        rejectOutputOverwritingInput(descriptorReport.toPath().toAbsolutePath(), descriptor,
-                                "Exclusion report");
-                    }
-                    if (coverageOutput != null) {
-                        rejectOutputOverwritingInput(coverageOutput.toPath().toAbsolutePath(), descriptor, "Coverage output");
-                    }
+                    inputFiles.add(rootPath);
 
                     readExternalDataProcessorSources(rootPath, source.getKey(), mainSourceUrl,
                             metadataOptions.hasMultipleSources(), projectUri, uriListByKey, coverageData, report);
@@ -529,28 +526,18 @@ public class Utils {
             }
 
             report.logSummary();
-            File exclusionReportFile = metadataOptions.getExclusionReportFile() != null
-                    ? metadataOptions.getExclusionReportFile() : configExclusionReportFile;
-            if (exclusionReportFile != null) {
-                Path destination = exclusionReportFile.toPath().toAbsolutePath();
-                if (rawInput != null) {
-                    rejectOutputOverwritingInput(destination, rawInput, "Exclusion report");
-                }
-                if (metadataOptions.getConfigFile() != null) {
-                    for (File input : ExclusionRules.configFiles(metadataOptions.getConfigFile())) {
-                        rejectOutputOverwritingInput(destination, input, "Exclusion report");
-                    }
-                }
-                if (coverageOutput != null && sameOutputFile(destination, coverageOutput.toPath().toAbsolutePath())) {
-                    throw new IllegalArgumentException("Exclusion report and coverage output must use different files: "
-                            + destination + " and " + coverageOutput.toPath().toAbsolutePath());
-                }
-                report.writeJson(exclusionReportFile);
-                logger.info("Exclusion report written to {}", exclusionReportFile.getAbsolutePath());
-            }
-            logger.info("Configuration sources reading DONE");
         }
 
+        File exclusionReportFile = metadataOptions.getExclusionReportFile() != null
+                ? metadataOptions.getExclusionReportFile() : configExclusionReportFile;
+        validateOutputFiles(coverageOutput, exclusionReportFile, metadataOptions.getConfigFile(), inputFiles);
+        if (exclusionReportFile != null) {
+            report.writeJson(exclusionReportFile);
+            logger.info("Exclusion report written to {}", exclusionReportFile.getAbsolutePath());
+        }
+        if (!rawMode) {
+            logger.info("Configuration sources reading DONE");
+        }
         return uriListByKey;
     }
 
@@ -635,12 +622,60 @@ public class Utils {
         }
     }
 
-    private static void rejectOutputOverwritingInput(Path output, File input, String outputLabel) throws IOException {
-        Path inputPath = input.toPath().toAbsolutePath();
-        if (output.equals(inputPath)
-                || (Files.exists(output) && Files.exists(inputPath) && Files.isSameFile(output, inputPath))) {
-            throw new IllegalArgumentException(outputLabel + " would overwrite input file: " + inputPath);
+    private static void addConfigurationInputs(Path root, List<Path> inputs) {
+        for (String relativePath : List.of("Configuration.xml", "ConfigDumpInfo.xml",
+                "Configuration/Configuration.mdo", "src/Configuration/Configuration.mdo")) {
+            Path input = root.resolve(relativePath);
+            if (Files.isRegularFile(input)) {
+                inputs.add(input);
+            }
         }
+    }
+
+    private static void validateOutputFiles(File coverageOutput, File exclusionReport, File config,
+                                            List<Path> inputs) throws IOException {
+        if (coverageOutput == null && exclusionReport == null) {
+            return;
+        }
+        if (config != null) {
+            ExclusionRules.configFiles(config).forEach(file -> inputs.add(file.toPath()));
+        }
+        if (coverageOutput != null) {
+            rejectOutputOverwritingInputs(coverageOutput.toPath().toAbsolutePath(), inputs, "Coverage output");
+        }
+        if (exclusionReport != null) {
+            Path destination = exclusionReport.toPath().toAbsolutePath();
+            rejectOutputOverwritingInputs(destination, inputs, "Exclusion report");
+            if (coverageOutput != null && sameOutputFile(destination, coverageOutput.toPath().toAbsolutePath())) {
+                throw new IllegalArgumentException("Exclusion report and coverage output must use different files: "
+                        + destination + " and " + coverageOutput.toPath().toAbsolutePath());
+            }
+        }
+    }
+
+    private static void rejectOutputOverwritingInputs(Path output, List<Path> inputs, String outputLabel)
+            throws IOException {
+        boolean outputExists = Files.exists(output);
+        for (Path input : inputs) {
+            Path inputPath = input.toAbsolutePath();
+            if (output.equals(inputPath) || (outputExists && Files.isSameFile(output, inputPath))) {
+                throw new IllegalArgumentException(outputLabel + " would overwrite input file: " + inputPath);
+            }
+        }
+    }
+
+    public static DocumentBuilder newInputXmlBuilder() throws ParserConfigurationException {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        return factory.newDocumentBuilder();
+    }
+
+    private static String requireExternalObjectUuid(Path descriptor, String uuid) {
+        if (uuid.isEmpty()) {
+            throw new IllegalArgumentException("Expected an external data processor or report descriptor; "
+                    + "pass the configuration directory to -s: " + descriptor);
+        }
+        return uuid;
     }
 
     private static void readExternalDataProcessorSources(Path rootPath,
@@ -651,7 +686,7 @@ public class Utils {
                                                          ExclusionReport report)
             throws IOException, ParserConfigurationException, SAXException, XPathExpressionException {
 
-        DocumentBuilder builder = DocumentBuilderFactory.newInstance().newDocumentBuilder();
+        DocumentBuilder builder = newInputXmlBuilder();
         Document xmlDocument = builder.parse(rootPath.toFile());
         String documentRootTagName = xmlDocument.getDocumentElement().getTagName();
 
@@ -661,6 +696,8 @@ public class Utils {
         } else if (documentRootTagName.equals("mdclass:ExternalDataProcessor")
                 || documentRootTagName.equals("mdclass:ExternalReport")) {
             externalDataProcessorUriListByKey = readEdtExternalSource(rootPath, xmlDocument);
+        } else if (documentRootTagName.equals("mdclass:Configuration")) {
+            throw new IllegalArgumentException("Pass the configuration directory to -s: " + rootPath);
         } else {
             throw new IllegalArgumentException("Unknown source format: " + rootPath);
         }
@@ -683,7 +720,7 @@ public class Utils {
         String externalObjectUuid = (String) xPath.compile(
                         "/MetaDataObject/ExternalDataProcessor/@uuid | /MetaDataObject/ExternalReport/@uuid")
                 .evaluate(xmlDocument, XPathConstants.STRING);
-        uriListByKey.put(getUriKey(externalObjectUuid, ModuleType.ObjectModule, null),
+        uriListByKey.put(getUriKey(requireExternalObjectUuid(rootPath, externalObjectUuid), ModuleType.ObjectModule, null),
                 parentPath.resolve(Paths.get(externalDataProcessorName, "Ext", "ObjectModule.bsl")).toUri());
 
         Path formsPath = parentPath.resolve(Paths.get(externalDataProcessorName, "Forms"));
@@ -719,7 +756,7 @@ public class Utils {
         Path parentPath = rootPath.toAbsolutePath().getParent();
         String externalObjectUuid = (String) xPath.compile("/*/@uuid")
                 .evaluate(xmlDocument, XPathConstants.STRING);
-        uriListByKey.put(getUriKey(externalObjectUuid, ModuleType.ObjectModule, null),
+        uriListByKey.put(getUriKey(requireExternalObjectUuid(rootPath, externalObjectUuid), ModuleType.ObjectModule, null),
                 parentPath.resolve("ObjectModule.bsl").toUri());
 
         Path formsPath = parentPath.resolve("Forms");
@@ -849,12 +886,7 @@ public class Utils {
         mainRootElement.appendChild(sourcesElement);
 
         Element sourceElement = doc.createElement("source");
-        String[] projectDirArray = projectUri.getPath().split("/");
-        if (projectDirArray.length > 2) {
-            sourceElement.setTextContent("/builds/" + projectDirArray[projectDirArray.length - 2] + "/" + projectDirArray[projectDirArray.length - 1] + "/");
-        } else {
-            sourceElement.setTextContent(projectUri.getPath());
-        }
+        sourceElement.setTextContent(projectUri.getPath());
         sourcesElement.appendChild(sourceElement);
 
         Element packagesElement = doc.createElement("packages");

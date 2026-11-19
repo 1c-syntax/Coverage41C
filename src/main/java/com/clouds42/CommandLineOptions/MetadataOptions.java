@@ -174,9 +174,15 @@ public class MetadataOptions {
             return;
         }
         if (projectDirName.isEmpty() && !srcDirName.isEmpty()) {
-            // for backward compatibility
-            projectDirName = srcDirName;
-            srcDirName = "";
+            Path source = Path.of(srcDirName);
+            if (Files.isRegularFile(source)) {
+                projectDirName = source.toAbsolutePath().getParent().toString();
+                srcDirName = source.getFileName().toString();
+            } else {
+                // With only -s, a directory defines both project and source roots.
+                projectDirName = srcDirName;
+                srcDirName = "";
+            }
         }
     }
 

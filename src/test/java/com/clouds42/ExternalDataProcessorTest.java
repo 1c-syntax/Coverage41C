@@ -103,15 +103,44 @@ class ExternalDataProcessorTest {
             try {
                 writeConfiguratorExternalSource(descriptor, "ExternalDataProcessor");
                 Map<String, Map<Integer, Boolean>> coverage = convertExternalSource(descriptor.getFileName().toString());
-                assertTrue(coverage.entrySet().stream().anyMatch(entry ->
-                        entry.getKey().endsWith(name + "/Ext/ObjectModule.bsl")
-                                && entry.getValue().equals(Map.of(2, true, 3, false))), coverage.toString());
+                assertEquals(Map.of(2, true, 3, false), coverage.get(name + "/Ext/ObjectModule.bsl"),
+                        coverage.toString());
+                assertEquals(Map.of(2, true, 3, false), coverage.get(name + "/Forms/Форма/Ext/Form/Module.bsl"),
+                        coverage.toString());
             } finally {
                 Files.delete(descriptor);
             }
         } finally {
             deleteDirectory(sources);
         }
+    }
+
+    @Test
+    void rejectsDoctypeInExternalReportDescriptor() throws Exception {
+        Path descriptor = tempDir.resolve("ExternalReport.xml");
+        writeConfiguratorExternalSource(descriptor, "ExternalReport");
+        Files.writeString(descriptor, "<!DOCTYPE MetaDataObject>" + Files.readString(descriptor));
+        Path raw = Files.writeString(tempDir.resolve("raw.xml"), "<coverage version=\"1\"/>");
+        Path output = tempDir.resolve("coverage.xml");
+        StringWriter stderr = new StringWriter();
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, execute(stderr, PipeMessages.CONVERT_COMMAND,
+                "-c", raw.toString(), "-s", descriptor.toString(), "-o", output.toString()), stderr.toString());
+        assertTrue(stderr.toString().contains("DOCTYPE"), stderr.toString());
+        assertFalse(Files.exists(output));
+    }
+
+    @Test
+    void rejectsDoctypeInExternalReportFormDescriptor() throws Exception {
+        Path descriptor = tempDir.resolve("ExternalReport.xml");
+        writeConfiguratorExternalSource(descriptor, "ExternalReport");
+        Path form = tempDir.resolve("ExternalReport/Forms/Форма.xml");
+        Files.writeString(form, "<!DOCTYPE MetaDataObject>" + Files.readString(form));
+
+        Map<String, Map<Integer, Boolean>> coverage = convertExternalSource(
+                descriptor.getFileName().toString(), "-P", tempDir.toString());
+        assertEquals(Map.of(2, true, 3, false), coverage.get("ExternalReport/Ext/ObjectModule.bsl"));
+        assertFalse(coverage.containsKey("ExternalReport/Forms/Форма/Ext/Form/Module.bsl"));
     }
 
     private static void writeConfiguratorExternalSource(Path descriptor, String kind) throws IOException {

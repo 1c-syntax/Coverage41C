@@ -100,8 +100,30 @@ class CoverageFileTest {
     }
 
     @Test
+    void rejectsConfigurationDescriptorPassedAsSingleSource() {
+        Path descriptor = Path.of("src/test/resources/configuration/Configuration.xml").toAbsolutePath();
+        Path output = tempDir.resolve("coverage.xml");
+        StringWriter stderr = new StringWriter();
+        CommandLine command = Coverage41C.getCommandLine();
+        command.setErr(new PrintWriter(stderr, true));
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, command.execute(PipeMessages.CONVERT_COMMAND,
+                "-c", INTERNAL_XML, "-s", descriptor.toString(), "-o", output.toString()), stderr.toString());
+        assertTrue(stderr.toString().contains("pass the configuration directory to -s"), stderr.toString());
+        assertFalse(Files.exists(output));
+    }
+
+    @Test
     void coberturaPlacesRootProjectPathInSourceElement() throws Exception {
-        Path project = tempDir.toAbsolutePath().getRoot();
+        assertCoberturaSource(tempDir.toAbsolutePath().getRoot());
+    }
+
+    @Test
+    void coberturaKeepsNestedProjectPath() throws Exception {
+        assertCoberturaSource(Files.createDirectories(tempDir.resolve("project/nested")));
+    }
+
+    private void assertCoberturaSource(Path project) throws Exception {
         Path output = tempDir.resolve("cobertura.xml");
         MetadataOptions metadata = CommandLine.populateCommand(new MetadataOptions(), "-P", project.toString());
         OutputOptions options = CommandLine.populateCommand(new OutputOptions(), "-f", "COBERTURA", "-o", output.toString());

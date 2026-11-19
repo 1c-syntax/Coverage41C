@@ -381,6 +381,40 @@ class ConvertWithExclusionsTest {
     }
 
     @Test
+    void rejectsCoverageOutputLinkedToRawBeforeWritingExclusionReport() throws Exception {
+        Path raw = Files.copy(Path.of(INTERNAL_XML), tempDir.resolve("raw.xml"));
+        assertCoverageOutputDoesNotOverwriteInput(raw, raw);
+    }
+
+    @Test
+    void rejectsCoverageOutputLinkedToRulesBeforeWritingExclusionReport() throws Exception {
+        Path configDir = Files.createDirectory(tempDir.resolve("rules"));
+        Path config = Files.writeString(configDir.resolve("team.json"), "{\"includeUsers\":[\"unit\"]}");
+        assertCoverageOutputDoesNotOverwriteInput(Path.of(INTERNAL_XML), config, "--config", configDir.toString());
+    }
+
+    private void assertCoverageOutputDoesNotOverwriteInput(Path raw, Path input, String... options) throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path output = tempDir.resolve("coverage.xml");
+        try {
+            Files.createLink(output, input);
+        } catch (IOException | UnsupportedOperationException error) {
+            assumeTrue(false, () -> "Cannot create a hard link: " + error.getMessage());
+        }
+        byte[] original = Files.readAllBytes(input);
+        Path report = tempDir.resolve("report.json");
+        List<String> arguments = new ArrayList<>(List.of(options));
+        arguments.addAll(List.of("--exclusion-report", report.toString()));
+        StringWriter stderr = new StringWriter();
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, convert(project, raw, output, stderr,
+                arguments.toArray(new String[0])), stderr.toString());
+        assertTrue(stderr.toString().contains("Coverage output would overwrite input file"), stderr.toString());
+        assertArrayEquals(original, Files.readAllBytes(input));
+        assertFalse(Files.exists(report));
+    }
+
+    @Test
     void rejectsCoverageOutputThatMatchesConfiguredExclusionReport() throws Exception {
         Path project = TestUtils.copyConfiguration(tempDir);
         Path config = Files.writeString(tempDir.resolve("team.json"), "{\"exclusionReport\":\"result.xml\"}");
