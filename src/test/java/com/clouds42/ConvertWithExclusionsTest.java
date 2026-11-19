@@ -415,17 +415,25 @@ class ConvertWithExclusionsTest {
 
     @Test
     void checksUnicodeEquivalentReportPathsOnTheDestinationFileSystem() throws Exception {
-        Path project = TestUtils.copyConfiguration(tempDir);
         String composed = "Отчёт.xml";
-        String decomposed = Normalizer.normalize(composed, Normalizer.Form.NFD);
-        Path report = tempDir.resolve(composed);
-        Path output = tempDir.resolve(decomposed);
+        assertOutputNameAliasing(composed, Normalizer.normalize(composed, Normalizer.Form.NFD));
+    }
+
+    @Test
+    void comparesUnicodeCaseExpansionUsingTheDestinationFileSystem() throws Exception {
+        assertOutputNameAliasing("Straße.xml", "STRASSE.xml");
+    }
+
+    private void assertOutputNameAliasing(String reportName, String outputName) throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path report = tempDir.resolve(reportName);
+        Path output = tempDir.resolve(outputName);
         Files.createFile(report);
-        boolean normalizesUnicode = Files.exists(output);
+        boolean aliases = Files.exists(output);
         Files.delete(report);
         String[] options = {"--exclusion-report", report.toString()};
 
-        if (normalizesUnicode) {
+        if (aliases) {
             assertCoverageOutputCollision(project, output, options);
             assertFalse(Files.exists(report));
             assertFalse(Files.exists(output));

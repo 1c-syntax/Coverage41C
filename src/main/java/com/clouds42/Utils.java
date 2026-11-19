@@ -69,7 +69,6 @@ import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.text.Normalizer;
 import java.time.Instant;
 import java.util.*;
 import java.util.regex.Matcher;
@@ -555,11 +554,6 @@ public class Utils {
         if (reportDestination.equals(coverageDestination)) {
             return true;
         }
-        String reportName = Normalizer.normalize(reportDestination.toString(), Normalizer.Form.NFC);
-        String coverageName = Normalizer.normalize(coverageDestination.toString(), Normalizer.Form.NFC);
-        if (!reportName.equalsIgnoreCase(coverageName)) {
-            return false;
-        }
         Path reportDirectory = existingOutputDirectory(reportDestination.getParent());
         Path coverageDirectory = existingOutputDirectory(coverageDestination.getParent());
         return reportDirectory != null && coverageDirectory != null && Files.isSameFile(reportDirectory, coverageDirectory)
@@ -574,8 +568,11 @@ public class Utils {
         return directory;
     }
 
-    // Compare the actual component names on the destination volume, which may fold case or normalize Unicode.
+    // Compare names relative to the same physical directory, even when mounted at different paths.
     private static boolean aliasesOnVolume(Path directory, Path report, Path coverage) throws IOException {
+        if (report.toString().equals(coverage.toString())) {
+            return true;
+        }
         if (report.getNameCount() != coverage.getNameCount()) {
             return false;
         }
