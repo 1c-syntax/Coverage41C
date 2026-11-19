@@ -69,6 +69,7 @@ import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.text.Normalizer;
 import java.time.Instant;
 import java.util.*;
 import java.util.regex.Matcher;
@@ -543,8 +544,10 @@ public class Utils {
     }
 
     private static boolean sameOutputFile(Path report, Path coverage) throws IOException {
-        if (report.equals(coverage)
-                || (Files.exists(report) && Files.exists(coverage) && Files.isSameFile(report, coverage))) {
+        if (Files.exists(report) && Files.exists(coverage)) {
+            return Files.isSameFile(report, coverage);
+        }
+        if (report.equals(coverage)) {
             return true;
         }
         Path reportDestination = resolveOutputPath(report, new HashSet<>());
@@ -552,13 +555,16 @@ public class Utils {
         if (reportDestination.equals(coverageDestination)) {
             return true;
         }
-        if (!reportDestination.toString().equalsIgnoreCase(coverageDestination.toString())) {
+        String reportName = Normalizer.normalize(reportDestination.toString(), Normalizer.Form.NFC);
+        String coverageName = Normalizer.normalize(coverageDestination.toString(), Normalizer.Form.NFC);
+        if (!reportName.equalsIgnoreCase(coverageName)) {
             return false;
         }
         Path reportDirectory = existingOutputDirectory(reportDestination.getParent());
         Path coverageDirectory = existingOutputDirectory(coverageDestination.getParent());
-        return reportDirectory != null && coverageDirectory != null
-                && Files.isSameFile(reportDirectory, coverageDirectory) && ignoresFileNameCase(reportDirectory);
+        return reportDirectory != null && coverageDirectory != null && Files.isSameFile(reportDirectory, coverageDirectory)
+                && aliasesOnVolume(reportDirectory, reportDirectory.relativize(reportDestination),
+                        coverageDirectory.relativize(coverageDestination));
     }
 
     private static Path existingOutputDirectory(Path directory) {
@@ -568,14 +574,32 @@ public class Utils {
         return directory;
     }
 
-    // Case sensitivity depends on the destination volume, even for a Linux process.
-    private static boolean ignoresFileNameCase(Path directory) throws IOException {
-        Path probe = Files.createTempFile(directory, ".coverage41c-Case-", ".probe");
+    // Compare the actual component names on the destination volume, which may fold case or normalize Unicode.
+    private static boolean aliasesOnVolume(Path directory, Path report, Path coverage) throws IOException {
+        if (report.getNameCount() != coverage.getNameCount()) {
+            return false;
+        }
+        Path probeDirectory = Files.createTempDirectory(directory, ".coverage41c-path-");
         try {
-            Path alternative = probe.resolveSibling(probe.getFileName().toString().toLowerCase(Locale.ROOT));
-            return Files.exists(alternative) && Files.isSameFile(probe, alternative);
+            for (int index = 0; index < report.getNameCount(); index++) {
+                Path reportName = report.getName(index);
+                Path coverageName = coverage.getName(index);
+                if (reportName.toString().equals(coverageName.toString())) {
+                    continue;
+                }
+                Path probe = Files.createFile(probeDirectory.resolve(reportName));
+                try {
+                    Path alternative = probeDirectory.resolve(coverageName);
+                    if (!Files.exists(alternative) || !Files.isSameFile(probe, alternative)) {
+                        return false;
+                    }
+                } finally {
+                    Files.deleteIfExists(probe);
+                }
+            }
+            return true;
         } finally {
-            Files.deleteIfExists(probe);
+            Files.deleteIfExists(probeDirectory);
         }
     }
 

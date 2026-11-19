@@ -1174,11 +1174,35 @@ class StartCommandTest {
     }
 
     @Test
+    void malformedTargetIdDoesNotInterruptListingOrCountAsAllowedUser() throws Exception {
+        String runner = "suite";
+        DebugTargetId allowed = FakeDebugServer.target(
+                UUID.fromString("ab12cd34-01ef-2345-6789-abcdef012345"), DebugTargetType.MANAGED_CLIENT, runner);
+        allowed.setId(allowed.getId().toUpperCase(Locale.ROOT));
+        DebugTargetId rejected = user("other");
+        dbgs.setTargets(abbreviatedTarget(runner), allowed, rejected);
+
+        String log = captureLog(() -> {
+            Future<Integer> collector = start("--include-user", runner);
+            dbgs.deliver(FakeDebugServer.measure(allowed, OBJECT_ID, PROPERTY_ID, 2, 1));
+            assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
+            assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        });
+
+        List<FakeDebugServer.Request> attached = dbgs.requests("attachDetachDbgTargets");
+        assertEquals(1, attached.size());
+        assertTrue(attached.get(0).body.contains(allowed.getId().toLowerCase(Locale.ROOT)));
+        assertTrue(log.contains("1 target(s) accepted, 1 rejected, 0 unknown"), log);
+        assertEquals(Map.of(2, true, 10, false, 11, false), coverage());
+    }
+
+    @Test
     void includeUserAcceptsTargetsStartedLaterAndRejectsOthers() throws Exception {
         DebugTargetId unit = user("coverage_unit");
         DebugTargetId smoke = user("smoke");
         Future<Integer> start = start("--include-user", "coverage_unit");
-        dbgs.deliver(FakeDebugServer.targetStarted(unit), FakeDebugServer.targetStarted(smoke));
+        dbgs.deliver(FakeDebugServer.targetStarted(abbreviatedTarget("coverage_unit")),
+                FakeDebugServer.targetStarted(unit), FakeDebugServer.targetStarted(smoke));
         dbgs.deliver(FakeDebugServer.measure(unit, OBJECT_ID, PROPERTY_ID, 2, 1),
                 FakeDebugServer.measure(smoke, OBJECT_ID, PROPERTY_ID, 10, 1));
 
@@ -1210,7 +1234,7 @@ class StartCommandTest {
         Future<Integer> start = start("--include-user", "coverage_unit");
         int listed = dbgs.requests("getDbgTargets").size();
         DebugTargetId late = user("coverage_unit");
-        dbgs.setTargets(late);
+        dbgs.setTargets(abbreviatedTarget("coverage_unit"), late);
         DebugTargetId lateIdOnly = FakeDebugServer.target(UUID.fromString(late.getId()), DebugTargetType.MANAGED_CLIENT, null);
         DebugTargetId stranger = FakeDebugServer.target(UUID.randomUUID(), DebugTargetType.MANAGED_CLIENT, null);
         DebugTargetId another = FakeDebugServer.target(UUID.randomUUID(), DebugTargetType.CLIENT, null);
@@ -1226,7 +1250,9 @@ class StartCommandTest {
 
         assertEquals(Map.of(2, true, 10, false, 11, false), coverage());
         assertEquals(listed + 1, dbgs.requests("getDbgTargets").size());
-        assertTrue(dbgs.requests("attachDetachDbgTargets").get(0).body.contains(late.getId()));
+        List<FakeDebugServer.Request> attached = dbgs.requests("attachDetachDbgTargets");
+        assertEquals(1, attached.size());
+        assertTrue(attached.get(0).body.contains(late.getId()));
         // каждый пакет посчитан один раз; стартовый предмет без имени и два неизвестных UUID
         assertTrue(log.contains("Include users: 1 target(s) accepted, 0 rejected, 3 unknown; "
                 + "1 measure packet(s) accepted, 0 rejected, 4 unknown"), log);
@@ -1307,6 +1333,24 @@ class StartCommandTest {
         assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
         assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
         assertEquals(Map.of(2, false, 10, true, 11, false), coverage());
+    }
+
+    @Test
+    void malformedFinalTargetIdCannotContributeFilteredCoverage() throws Exception {
+        DebugTargetId allowed = user("suite");
+        dbgs.setTargets(allowed);
+        Future<Integer> collector = start("--include-user", "suite");
+        dbgs.deliver(FakeDebugServer.measure(allowed, OBJECT_ID, PROPERTY_ID, 2, 1));
+
+        var malformed = FakeDebugServer.measure(abbreviatedTarget("suite"), OBJECT_ID, PROPERTY_ID, 11, 1);
+        malformed.setTargetID(allowed);
+        dbgs.deliverOnMeasureOff(malformed, FakeDebugServer.measure(allowed, OBJECT_ID, PROPERTY_ID, 10, 1));
+
+        int stopResult = send(PipeMessages.EXIT_COMMAND);
+        int collectorResult = collector.get(TIMEOUT, TimeUnit.SECONDS);
+        assertEquals(Map.of(2, true, 10, true, 11, false), coverage());
+        assertEquals(CommandLine.ExitCode.SOFTWARE, stopResult);
+        assertEquals(CommandLine.ExitCode.SOFTWARE, collectorResult);
     }
 
     @Test
@@ -1513,6 +1557,12 @@ class StartCommandTest {
     private void deliverUnitAndSmoke(DebugTargetId unit, DebugTargetId smoke) throws Exception {
         dbgs.deliver(FakeDebugServer.measure(unit, OBJECT_ID, PROPERTY_ID, 2, 1, 10, 1),
                 FakeDebugServer.measure(smoke, OBJECT_ID, PROPERTY_ID, 7, 1));
+    }
+
+    private static DebugTargetId abbreviatedTarget(String name) {
+        DebugTargetId target = user(name);
+        target.setId("A-B-C-D-E");
+        return target;
     }
 
     private static DebugTargetId user(String name) {

@@ -103,6 +103,44 @@ class ExternalDataProcessorTest {
     }
 
     @Test
+    void singleProcessorIgnoresForeignLegacyExtensionWithTheSameModuleKey() throws Exception {
+        assertSingleProcessorConversion("""
+                <file path="/%1$s"><lineToCover covered="true" lineNumber="2"/></file>
+                <file path="/%1$s" extension="A"><lineToCover covered="true" lineNumber="3"/></file>
+                """.formatted(PROCESSOR_KEY));
+    }
+
+    @Test
+    void singleProcessorUsesSelectedLegacyExtension() throws Exception {
+        assertSingleProcessorConversion("""
+                <file path="/%1$s" extension="B"><lineToCover covered="true" lineNumber="2"/></file>
+                <file path="/%1$s" extension="A"><lineToCover covered="true" lineNumber="3"/></file>
+                """.formatted(PROCESSOR_KEY), "-e", "B");
+    }
+
+    @Test
+    void singleProcessorAcceptsBareLegacyKeyWithSelectedExtension() throws Exception {
+        assertSingleProcessorConversion("""
+                <file path="/%s"><lineToCover covered="true" lineNumber="2"/></file>
+                """.formatted(PROCESSOR_KEY), "-e", "B");
+    }
+
+    @Test
+    void singleProcessorKeepsExplicitSourceIdentity() throws Exception {
+        assertSingleProcessorConversion("""
+                <file path="/%1$s" extension="B" sourceUrl="%2$s">
+                    <lineToCover covered="true" lineNumber="2"/>
+                </file>
+                <file path="/%1$s" extension="B" sourceUrl="file:///different.epf">
+                    <lineToCover covered="true" lineNumber="3"/>
+                </file>
+                <file path="/source-v1/Qg/-/%1$s">
+                    <lineToCover covered="true" lineNumber="3"/>
+                </file>
+                """.formatted(PROCESSOR_KEY, PROCESSOR_URL), "-e", "B");
+    }
+
+    @Test
     void rejectsProcessorDescriptorAsNamedOrExtensionSource() {
         for (String option : List.of("--source", "--extension")) {
             StringWriter stderr = new StringWriter();
@@ -233,6 +271,22 @@ class ExternalDataProcessorTest {
         TestUtils.copyDirectory(EXTERNAL_PROCESSOR.resolve("configurator"), project);
         TestUtils.copyDirectory(Path.of("src/test/resources/extensions/src/cfe/Доработки"), project.resolve("A"));
         return project;
+    }
+
+    private void assertSingleProcessorConversion(String rawFiles, String... selection) throws Exception {
+        Path project = EXTERNAL_PROCESSOR.resolve("configurator").toAbsolutePath();
+        Path raw = tempDir.resolve("single-raw.xml");
+        Files.writeString(raw, "<coverage version=\"1\">\n" + rawFiles + "</coverage>\n");
+        Path output = tempDir.resolve("single-coverage.xml");
+        StringWriter stderr = new StringWriter();
+        List<String> arguments = new ArrayList<>(List.of(PipeMessages.CONVERT_COMMAND,
+                "-P", project.toString(), "-s", "ВнешняяОбработка.xml", "-x", PROCESSOR_URL,
+                "-c", raw.toString(), "-o", output.toString()));
+        arguments.addAll(Arrays.asList(selection));
+
+        assertEquals(CommandLine.ExitCode.OK, execute(stderr, arguments.toArray(String[]::new)), stderr.toString());
+        assertEquals(Map.of(2, true, 3, false),
+                MultipleSourcesTest.coverage(output).get("ВнешняяОбработка/Ext/ObjectModule.bsl"));
     }
 
     private void assertProcessorConversion(Path project, String coverageAttributes, String processorKey,

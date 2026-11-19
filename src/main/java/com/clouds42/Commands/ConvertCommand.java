@@ -101,7 +101,7 @@ public class ConvertCommand implements Callable<Integer> {
     }
 
     private String rawFileKey(Node fileNode, boolean sourceIdentity, boolean includesExtensionAttributes,
-                              Map<String, URI> sources) {
+                              boolean singleProcessorSelected, Map<String, URI> sources) {
         String key = rawPath(fileNode);
         if (SourceKey.isQualified(key)) {
             return key;
@@ -116,15 +116,16 @@ public class ConvertCommand implements Callable<Integer> {
         if (!includesExtensionAttributes && multipleSources && !metadataOptions.usesNamedSources()) {
             // Historical RAW files without extension attributes belong to the tree passed via -s.
             extension = selectedExtension;
-        } else if (!includesExtensionAttributes || (!multipleSources && selectedExtension.isEmpty())) {
+        } else if (!includesExtensionAttributes
+                || (!multipleSources && !singleProcessorSelected && selectedExtension.isEmpty())) {
             return key;
         }
 
         String selectedUrl = filterOptions.getExternalDataProcessorUrl();
-        if (multipleSources && !selectedUrl.isEmpty() && extension.equals(selectedExtension)) {
+        if (!selectedUrl.isEmpty() && extension.equals(selectedExtension)) {
             // Legacy RAW omitted processor URLs. Recover only an exact key of the selected descriptor.
             String selectedKey = SourceKey.qualify(key, extension, selectedUrl);
-            if (sources.containsKey(selectedKey)) {
+            if (sources.containsKey(singleProcessorSelected ? key : selectedKey)) {
                 return selectedKey;
             }
         }
@@ -152,14 +153,16 @@ public class ConvertCommand implements Callable<Integer> {
 
     // A mixed RAW file can contain other sources. Check every record before rejecting the selection.
     private void verifySelectedSource(NodeList files, Map<String, URI> sources,
-                                      boolean sourceIdentity, boolean includesExtensionAttributes) {
+                                      boolean sourceIdentity, boolean includesExtensionAttributes,
+                                      boolean singleProcessorSelected) {
         if (metadataOptions.hasMultipleSources()) {
             return;
         }
         boolean selectedSourceFound = false;
         Set<String> otherSources = new TreeSet<>();
         for (int index = 0; index < files.getLength(); index++) {
-            String key = rawFileKey(files.item(index), sourceIdentity, includesExtensionAttributes, sources);
+            String key = rawFileKey(files.item(index), sourceIdentity, includesExtensionAttributes,
+                    singleProcessorSelected, sources);
             if (SourceKey.isQualified(key)) {
                 if (matchesSelectedSource(key)) {
                     selectedSourceFound = true;
@@ -260,10 +263,15 @@ public class ConvertCommand implements Callable<Integer> {
             NodeList fileNodeList = coverage.getElementsByTagName("file");
             boolean includesExtensions = includesExtensionAttributes(fileNodeList);
             boolean sourceIdentity = "true".equals(coverage.getAttribute("sourceIdentity"));
-            verifySelectedSource(fileNodeList, uriListByKey, sourceIdentity, includesExtensions);
+            boolean singleProcessorSelected = !metadataOptions.hasMultipleSources()
+                    && !filterOptions.getExternalDataProcessorUrl().isEmpty()
+                    && Files.isRegularFile(Paths.get(metadataOptions.getProjectDirName())
+                    .resolve(metadataOptions.getSrcDirName()));
+            verifySelectedSource(fileNodeList, uriListByKey, sourceIdentity, includesExtensions, singleProcessorSelected);
             for(int fileNodeNumber = 0; fileNodeNumber < fileNodeList.getLength(); fileNodeNumber++) {
                 Node fileNode = fileNodeList.item(fileNodeNumber);
-                String fileKey = rawFileKey(fileNode, sourceIdentity, includesExtensions, uriListByKey);
+                String fileKey = rawFileKey(fileNode, sourceIdentity, includesExtensions,
+                        singleProcessorSelected, uriListByKey);
                 if (!metadataOptions.hasMultipleSources() && SourceKey.isQualified(fileKey)
                         && !matchesSelectedSource(fileKey)) {
                     continue;

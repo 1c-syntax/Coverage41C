@@ -145,17 +145,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
 
     private void connectAllTargets(List<DebugTargetId> debugTargets) {
         logger.info("Current debug targets size: {}", debugTargets.size());
-        debugTargets.forEach(debugTarget -> {
-            if (!targets.register(debugTarget)) {
-                return;
-            }
-            try {
-                client.attachRuntimeDebugTargets(Collections.singletonList(UUID.fromString(debugTarget.getId())));
-                targets.attached(debugTarget.getId());
-            } catch (RuntimeDebugClientException e) {
-                logger.error(e.getLocalizedMessage());
-            }
-        });
+        debugTargets.forEach(this::connectTarget);
     }
 
     private boolean tryRefreshTargetList(String triggerId) {
@@ -282,16 +272,23 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         }));
     }
 
-    private void targetStarted(DBGUIExtCmdInfoStartedImpl command) {
-        DebugTargetId targetId = command.getTargetID();
-        if (!targets.register(targetId)) {
+    private void connectTarget(DebugTargetId target) {
+        String id = target == null ? null : target.getId();
+        if (id == null || id.isBlank()) {
+            logger.warn("Debug target without id skipped");
+            return;
+        }
+        if (!UserTargets.isValidTargetUuid(id)) {
+            logger.warn("Debug target with invalid UUID skipped");
+            return;
+        }
+        if (!targets.register(target)) {
             return;
         }
         try {
-            client.attachRuntimeDebugTargets(Collections.singletonList(UUID.fromString(targetId.getId())));
-            targets.attached(targetId.getId());
+            client.attachRuntimeDebugTargets(Collections.singletonList(UUID.fromString(id)));
+            targets.attached(id);
         } catch (RuntimeDebugClientException e) {
-            logger.info("Command: {} error!", command.getCmdID().getName());
             logger.error(e.getLocalizedMessage());
         }
     }
@@ -350,14 +347,17 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                                 || !(command instanceof DBGUIExtCmdInfoMeasure measurement)) {
                             throw new IllegalArgumentException("Debugger measurement command and payload type differ");
                         }
+                        String targetId = targets.isActive() ? UserTargets.targetIdOf(measurement) : null;
+                        if (targetId != null && !UserTargets.isValidTargetUuid(targetId)) {
+                            throw new IllegalArgumentException("Debugger measurement has an invalid target UUID");
+                        }
                         if (targets.needsLookup(measurement)) {
-                            String id = UserTargets.targetIdOf(measurement);
                             if (!refreshAttempted) {
                                 refreshAttempted = true;
-                                listAvailable = tryRefreshTargetList(id);
+                                listAvailable = tryRefreshTargetList(targetId);
                             }
                             if (listAvailable) {
-                                targets.markUnknown(id);
+                                targets.markUnknown(targetId);
                             }
                         }
                         UserTargets.Verdict verdict = targets.verdict(measurement, loggingOptions.isVerbose());
@@ -367,7 +367,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                             markFinalCollectionIncomplete();
                         }
                     } else if (commandType == DBGUIExtCmds.TARGET_STARTED) {
-                        targetStarted((DBGUIExtCmdInfoStartedImpl) command);
+                        connectTarget(((DBGUIExtCmdInfoStartedImpl) command).getTargetID());
                     } else if (commandType == DBGUIExtCmds.TARGET_QUIT) {
                         // The target stays known: its last measures may arrive after this event.
                         DebugTargetId quit = command.getTargetID();

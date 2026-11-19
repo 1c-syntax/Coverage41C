@@ -40,6 +40,8 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -408,6 +410,54 @@ class ConvertWithExclusionsTest {
                     stderr.toString());
             assertTrue(new ObjectMapper().readTree(report.toFile()).has("totalLines"));
             assertFalse(genericCoverage(output).isEmpty());
+        }
+    }
+
+    @Test
+    void checksUnicodeEquivalentReportPathsOnTheDestinationFileSystem() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        String composed = "Отчёт.xml";
+        String decomposed = Normalizer.normalize(composed, Normalizer.Form.NFD);
+        Path report = tempDir.resolve(composed);
+        Path output = tempDir.resolve(decomposed);
+        Files.createFile(report);
+        boolean normalizesUnicode = Files.exists(output);
+        Files.delete(report);
+        String[] options = {"--exclusion-report", report.toString()};
+
+        if (normalizesUnicode) {
+            assertCoverageOutputCollision(project, output, options);
+            assertFalse(Files.exists(report));
+            assertFalse(Files.exists(output));
+        } else {
+            StringWriter stderr = new StringWriter();
+            assertEquals(CommandLine.ExitCode.OK, convert(project, Path.of(INTERNAL_XML), output, stderr, options),
+                    stderr.toString());
+            assertTrue(new ObjectMapper().readTree(report.toFile()).has("totalLines"));
+            assertTrue(Files.readString(output).contains("<coverage "));
+        }
+    }
+
+    @Test
+    void overwritesDistinctExistingCaseOnlyFilesWithoutCreatingFilesInTheirDirectory() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path directory = Files.createDirectory(tempDir.resolve("reports"));
+        Path report = Files.writeString(directory.resolve("Result.xml"), "existing JSON");
+        Path output = directory.resolve("result.xml");
+        assumeTrue(!Files.exists(output), "Requires a case-sensitive directory");
+        Files.writeString(output, "existing XML");
+        assumeTrue(Files.getFileStore(directory).supportsFileAttributeView("posix"), "Requires POSIX permissions");
+
+        var permissions = Files.getPosixFilePermissions(directory);
+        Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("r-x------"));
+        try {
+            StringWriter stderr = new StringWriter();
+            assertEquals(CommandLine.ExitCode.OK, convert(project, Path.of(INTERNAL_XML), output, stderr,
+                    "--exclusion-report", report.toString()), stderr.toString());
+            assertTrue(new ObjectMapper().readTree(report.toFile()).has("totalLines"));
+            assertFalse(genericCoverage(output).isEmpty());
+        } finally {
+            Files.setPosixFilePermissions(directory, permissions);
         }
     }
 

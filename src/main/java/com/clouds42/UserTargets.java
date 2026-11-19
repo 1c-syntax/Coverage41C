@@ -273,12 +273,16 @@ public final class UserTargets {
         return target == null || target.getId() == null ? null : target;
     }
 
+    public static boolean isValidTargetUuid(String id) {
+        return id != null && UUID_TEXT.matcher(id).matches();
+    }
+
     private static String targetKey(String id) {
         if (id == null) {
             return null;
         }
         String lower = id.toLowerCase(Locale.ROOT);
-        return !lower.equals(id) && UUID_TEXT.matcher(id).matches() ? lower : id;
+        return !lower.equals(id) && isValidTargetUuid(id) ? lower : id;
     }
 
     private static String packetUserOf(DBGUIExtCmdInfoMeasure command, DebugTargetId target, String id) {
