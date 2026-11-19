@@ -1,0 +1,106 @@
+/*
+ * This file is a part of Coverage41C.
+ *
+ * Copyright (c) 2020-2026
+ * Kosolapov Stanislav aka proDOOMman <prodoomman@gmail.com> and contributors
+ *
+ * SPDX-License-Identifier: LGPL-3.0-or-later
+ *
+ * Coverage41C is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Lesser General Public
+ * License as published by the Free Software Foundation; either
+ * version 3.0 of the License, or (at your option) any later version.
+ *
+ * Coverage41C is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with Coverage41C.
+ */
+package com.clouds42;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+@EnabledOnOs(OS.LINUX)
+class ConversionFileLimitTest {
+    @TempDir Path directory;
+
+    @Test
+    void partialJsonWritePreservesBothPreviousReports() throws Exception {
+        Path coverage = directory.resolve("coverage.xml");
+        Path report = directory.resolve("exclusions.json");
+        List<String> args = convertTo(coverage, "--exclusion-report", report.toString());
+        assertEquals(0, Coverage41C.getCommandLine().execute(args.toArray(new String[0])));
+        byte[] previousCoverage = Files.readAllBytes(coverage);
+        byte[] previousReport = Files.readAllBytes(report);
+
+        // Select no modules so the coverage fits, while the JSON lists all unmatched prefixes.
+        String prefixes = IntStream.range(0, 100).mapToObj(i -> "\"Missing" + i + "\"")
+                .collect(Collectors.joining(","));
+        Path rules = Files.writeString(directory.resolve("rules.json"), "{\"includePrefix\":[" + prefixes + "]}");
+        Path smallCoverage = directory.resolve("small.xml");
+        Path largeReport = directory.resolve("large.json");
+        List<String> control = convertTo(smallCoverage, "--exclusion-report", largeReport.toString(), "--config", rules.toString());
+        assertEquals(0, Coverage41C.getCommandLine().execute(control.toArray(new String[0])));
+        assertTrue(Files.size(smallCoverage) < 2048);
+        assertTrue(Files.size(largeReport) > 4096);
+
+        Collections.addAll(args, "--config", rules.toString());
+        runUnderFileSizeLimit(args);
+        assertArrayEquals(previousCoverage, Files.readAllBytes(coverage));
+        assertArrayEquals(previousReport, Files.readAllBytes(report));
+    }
+
+    @Test
+    void partialCoverageWritePreservesPreviousStandaloneReport() throws Exception {
+        Path coverage = directory.resolve("coverage.xml");
+        List<String> args = convertTo(coverage);
+        assertEquals(0, Coverage41C.getCommandLine().execute(args.toArray(new String[0])));
+        byte[] previous = Files.readAllBytes(coverage);
+        assertTrue(previous.length > 4096);
+
+        runUnderFileSizeLimit(args);
+        assertArrayEquals(previous, Files.readAllBytes(coverage));
+    }
+
+    private static List<String> convertTo(Path coverage, String... options) {
+        List<String> args = new ArrayList<>(List.of("convert", "-s", "src/test/resources/configuration",
+                "-c", "src/test/resources/coverage/internal.xml", "-o", coverage.toString()));
+        Collections.addAll(args, options);
+        return args;
+    }
+
+    private static void runUnderFileSizeLimit(List<String> args) throws Exception {
+        // Ignore SIGXFSZ so a partial write is reported to the application as an I/O error.
+        List<String> command = new ArrayList<>(List.of("/bin/sh", "-c", "trap '' XFSZ; ulimit -f 4 && exec \"$@\"",
+                "limited-convert", Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-cp", System.getProperty("coverage41c.testClasspath", System.getProperty("java.class.path")),
+                Coverage41C.class.getName()));
+        command.addAll(args);
+        ProcessBuilder builder = new ProcessBuilder(command).redirectErrorStream(true);
+        builder.environment().remove("LC_ALL");
+        builder.environment().put("LC_MESSAGES", "C");
+        Process process = builder.start();
+        String log = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertEquals(1, process.waitFor(), log);
+        assertTrue(log.contains("File too large"), log);
+    }
+}

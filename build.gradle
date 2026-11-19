@@ -99,6 +99,7 @@ run {
 }
 
 test {
+    doFirst { systemProperty 'coverage41c.testClasspath', classpath.asPath }
     finalizedBy jacocoTestReport
     classpath += configurations.providedCompile
     useJUnitPlatform {

@@ -66,7 +66,6 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.FileStore;
 import java.nio.file.FileSystemLoopException;
 import java.nio.file.FileVisitOption;
 import java.nio.file.FileVisitResult;
@@ -351,20 +350,23 @@ public class Utils {
 
         public void writeConversion(Map<URI, Map<BigDecimal, Integer>> coverage, MetadataOptions metadataOptions,
                                     OutputOptions outputOptions) throws IOException {
+            Path reportPath = null;
             if (reportFile != null) {
-                // Keep support for two outputs sharing a new directory. Check an existing report before touching coverage.
-                Path destination = reportFile.toPath().toAbsolutePath();
-                if (destination.getParent() != null) {
-                    Files.createDirectories(destination.getParent());
+                Path requested = reportFile.toPath().toAbsolutePath();
+                if (requested.getParent() != null) {
+                    Files.createDirectories(requested.getParent());
                 }
-                Path target = resolveOutputPath(destination, new HashSet<>());
-                Path writablePath = Files.exists(target) ? target : target.getParent();
-                if (Files.isDirectory(target) || !Files.isWritable(writablePath)) {
-                    throw new IOException("Cannot write exclusion report: " + destination);
-                }
+                reportPath = resolveOutputPath(requested, new HashSet<>());
             }
-            dumpCoverageFile(coverage, metadataOptions, outputOptions);
-            writeExclusionReport();
+            File output = outputOptions.getOutputFile();
+            Path coveragePath = output == null ? null : resolveOutputPath(output.toPath().toAbsolutePath(), new HashSet<>());
+            ConversionOutput.write(coveragePath, reportPath,
+                    file -> writeCoverageFile(coverage, metadataOptions, outputOptions, file.toFile()),
+                    file -> report.writeJson(file.toFile()), standardOutput());
+            logCoverageStats(coverage);
+            if (reportFile != null) {
+                logger.info("Exclusion report written to {}", reportFile.getAbsolutePath());
+            }
         }
     }
 
@@ -472,8 +474,8 @@ public class Utils {
                         for (String directory : List.of("src", "unknown", "DT-INF", ".settings")) {
                             exportTrees.add(rootPath.resolve(directory));
                         }
-                        addExistingInput(rootPath.resolve(".project"), inputFiles);
-                        addExistingInput(rootPath.resolve(".classpath"), inputFiles);
+                        inputFiles.add(rootPath.resolve(".project"));
+                        inputFiles.add(rootPath.resolve(".classpath"));
                     } else {
                         addMetadataDirectories(rootPath, exportTrees);
                     }
@@ -733,7 +735,7 @@ public class Utils {
         for (String relativePath : List.of("Configuration.xml", "ConfigDumpInfo.xml",
                 "Configuration/Configuration.mdo", "src/Configuration/Configuration.mdo", "Ext/ParentConfigurations.bin",
                 "src/Configuration/ParentConfigurations.bin", "src/Configuration/Configuration.distr")) {
-            addExistingInput(root.resolve(relativePath), inputs);
+            inputs.add(root.resolve(relativePath));
         }
     }
 
@@ -770,7 +772,9 @@ public class Utils {
         boolean outputExists = Files.exists(output);
         for (Path input : inputs) {
             Path inputPath = input.toAbsolutePath();
-            if (output.equals(inputPath) || (outputExists && Files.isSameFile(output, inputPath))) {
+            boolean sameInput = outputExists ? Files.exists(inputPath) && Files.isSameFile(output, inputPath)
+                    : Files.notExists(inputPath) && sameOutputFile(output, inputPath);
+            if (sameInput) {
                 throw new IllegalArgumentException(outputLabel + " would overwrite input file: " + inputPath);
             }
         }
@@ -782,19 +786,16 @@ public class Utils {
     private static void rejectOutputInExportTrees(Path output, Set<Path> trees, String label) throws IOException {
         Set<Path> locations = outputLocations(output);
         Set<Object> parents = new HashSet<>();
-        Set<Object> mountAliases = new HashSet<>();
-        BasicFileAttributes target = Files.isRegularFile(output) ? Files.readAttributes(output, BasicFileAttributes.class) : null;
-        Map<FileStore, Boolean> stores = new HashMap<>();
         for (Path path : locations) {
             for (Path parent = existingOutputDirectory(path.getParent()); parent != null; parent = parent.getParent()) {
-                Object key = directoryKey(parent);
-                if (parents.add(key) && target == null) {
-                    FileStore store = Files.getFileStore(parent);
-                    if (stores.computeIfAbsent(store, fs -> hasOtherMounts(output, fs))) {
-                        mountAliases.add(key);
-                    }
-                }
+                parents.add(directoryKey(parent));
             }
+        }
+        BasicFileAttributes target = Files.isRegularFile(output) ? Files.readAttributes(output, BasicFileAttributes.class) : null;
+        Set<Path> missing = new LinkedHashSet<>();
+        for (Path path = resolveOutputPath(output, new HashSet<>()); path != null && Files.notExists(path);
+             path = path.getParent()) {
+            missing.add(path);
         }
 
         Set<Object> visited = new HashSet<>();
@@ -805,8 +806,10 @@ public class Utils {
                     || (present && parents.contains(directoryKey(directory)))) {
                 throw new IllegalArgumentException(label + " would overwrite input file in source directory: " + output);
             }
-            if (present && (target != null || !mountAliases.isEmpty())) {
-                checkExportTree(directory, output, target, mountAliases, visited, label);
+            if (present) {
+                checkExportTree(directory, output, target, parents, missing, visited, label);
+            } else if (matchesFutureOutput(directory, missing)) {
+                throw new IllegalArgumentException(label + " is inside a source directory: " + output);
             }
         }
     }
@@ -843,11 +846,9 @@ public class Utils {
         return resolved;
     }
 
-    // Bind mounts have distinct FileStores backed by the same device. Check only ambiguous volumes
-    // for alternate paths to a future output's parent, including mounts nested inside the export.
-    private static boolean hasOtherMounts(Path path, FileStore current) {
-        for (FileStore store : path.getFileSystem().getFileStores()) {
-            if (!current.equals(store) && current.name().equals(store.name()) && current.type().equals(store.type())) {
+    private static boolean matchesFutureOutput(Path input, Set<Path> missing) throws IOException {
+        for (Path path : missing) {
+            if (sameOutputFile(input, path)) {
                 return true;
             }
         }
@@ -862,13 +863,13 @@ public class Utils {
         return attributes.fileKey() == null ? path.toRealPath() : attributes.fileKey();
     }
 
-    private static void checkExportTree(Path root, Path output, BasicFileAttributes target, Set<Object> mountAliases,
-                                        Set<Object> visited, String label) throws IOException {
+    private static void checkExportTree(Path root, Path output, BasicFileAttributes target, Set<Object> parents,
+                                        Set<Path> missing, Set<Object> visited, String label) throws IOException {
         Files.walkFileTree(root, EnumSet.of(FileVisitOption.FOLLOW_LINKS), Integer.MAX_VALUE, new SimpleFileVisitor<Path>() {
             @Override
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
                 Object key = physicalKey(dir, attrs);
-                if (mountAliases.contains(key)) {
+                if (parents.contains(key)) {
                     throw new IllegalArgumentException(label + " is inside a source directory: " + output);
                 }
                 return visited.add(key) ? FileVisitResult.CONTINUE : FileVisitResult.SKIP_SUBTREE;
@@ -876,6 +877,11 @@ public class Utils {
 
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                // FOLLOW_LINKS reports a dangling link itself. A new file or any of its new
+                // parent directories could make that entry part of the export.
+                if (attrs.isSymbolicLink() && Files.notExists(file) && matchesFutureOutput(file, missing)) {
+                    throw new IllegalArgumentException(label + " would activate a link in a source directory: " + file);
+                }
                 if (target != null && attrs.isRegularFile() && (target.fileKey() == null || attrs.fileKey() == null
                         ? Files.isSameFile(file, output) : target.fileKey().equals(attrs.fileKey()))) {
                     throw new IllegalArgumentException(label + " would overwrite input file: " + file);
@@ -1025,8 +1031,14 @@ public class Utils {
     public static void dumpCoverageFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
                                         MetadataOptions metadataOptions,
                                         OutputOptions outputOptions) throws IOException {
+        writeCoverageFile(coverageData, metadataOptions, outputOptions, outputOptions.getOutputFile());
+        logCoverageStats(coverageData);
+    }
+
+    private static void writeCoverageFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
+                                          MetadataOptions metadataOptions,
+                                          OutputOptions outputOptions, File outputFile) throws IOException {
         URI projectUri = Path.of(metadataOptions.getProjectDirName()).toUri();
-        File outputFile = outputOptions.getOutputFile();
         try (OutputStream output = outputFile == null ? standardOutput() : new FileOutputStream(outputFile)) {
             switch (outputOptions.getOutputFormat()) {
                 case LCOV:
@@ -1041,7 +1053,6 @@ public class Utils {
         } catch (ParserConfigurationException | TransformerException e) {
             throw new IOException("Cannot write coverage file: " + e.getLocalizedMessage(), e);
         }
-        logCoverageStats(coverageData);
     }
 
     // start can dump coverage several times, so standard output stays open.

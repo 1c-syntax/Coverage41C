@@ -218,6 +218,73 @@ class ValidateCommandTest {
         assertFalse(Files.exists(outside.resolve("new")));
     }
 
+    @Test
+    void refusesNewReportVisibleThroughReverseDirectoryLink() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path outside = Files.createDirectory(tempDir.resolve("outside"));
+        Path link = project.resolve("configuration/Ext/LinkedAux");
+        linkForExportTest(link, outside);
+
+        Path report = outside.resolve("nested/report.json");
+        assertNewReportRejectedTwice(project, report);
+        assertFalse(Files.exists(report.getParent()));
+        assertFalse(Files.exists(link.resolve("nested")));
+    }
+
+    @Test
+    void refusesNewReportThatActivatesDanglingExportLinkOrItsDirectory() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path outside = Files.createDirectory(tempDir.resolve("outside"));
+        Path pending = outside.resolve("pending");
+        Path redirect = outside.resolve("redirect");
+        linkForExportTest(redirect, pending.getFileName());
+        linkForExportTest(project.resolve("configuration/Ext/Pending"), redirect);
+
+        assertNewReportRejectedTwice(project, pending);
+        assertNewReportRejectedTwice(project, pending.resolve("nested/report.json"));
+        assertFalse(Files.exists(pending));
+
+        Path other = outside.resolve("unrelated.json");
+        for (int run = 0; run < 2; run++) {
+            StringWriter stderr = new StringWriter();
+            assertEquals(CommandLine.ExitCode.OK, validateProject(project, stderr,
+                    "--exclusion-report", other.toString()), stderr.toString());
+            assertTrue(new ObjectMapper().readTree(other.toFile()).has("totalLines"));
+        }
+    }
+
+    @Test
+    void optionalExportInputsAreProtectedBeforeTheyExist() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path index = project.resolve("configuration/ConfigDumpInfo.xml");
+        Files.deleteIfExists(index);
+        for (int run = 0; run < 2; run++) {
+            StringWriter stderr = new StringWriter();
+            assertEquals(CommandLine.ExitCode.SOFTWARE, validateProject(project, stderr,
+                    "--exclusion-report", index.toString()), stderr.toString());
+            assertTrue(stderr.toString().contains("overwrite input file"), stderr.toString());
+            assertFalse(Files.exists(index));
+        }
+    }
+
+    private void assertNewReportRejectedTwice(Path project, Path report) throws Exception {
+        for (int run = 0; run < 2; run++) {
+            StringWriter stderr = new StringWriter();
+            assertEquals(CommandLine.ExitCode.SOFTWARE, validateProject(project, stderr,
+                    "--exclusion-report", report.toString()), stderr.toString());
+            assertTrue(stderr.toString().contains("source directory"), stderr.toString());
+            assertFalse(Files.exists(report));
+        }
+    }
+
+    private static void linkForExportTest(Path link, Path target) throws IOException {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (UnsupportedOperationException | IOException error) {
+            assumeTrue(false, () -> "Cannot create a symbolic link: " + error.getMessage());
+        }
+    }
+
     private void assertConfigurationInputProtected(String relativeInput) throws Exception {
         assertConfigurationInputProtected(TestUtils.copyConfiguration(tempDir), relativeInput);
     }
