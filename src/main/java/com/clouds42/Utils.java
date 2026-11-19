@@ -472,6 +472,15 @@ public class Utils {
                     if (metadataOptions.getConfigFile() != null) {
                         throw new IllegalArgumentException("Coverage configuration is not supported for external data processors");
                     }
+                    File descriptor = rootPath.toFile();
+                    File descriptorReport = metadataOptions.getExclusionReportFile();
+                    if (descriptorReport != null) {
+                        rejectOutputOverwritingInput(descriptorReport.toPath().toAbsolutePath(), descriptor,
+                                "Exclusion report");
+                    }
+                    if (coverageOutput != null) {
+                        rejectOutputOverwritingInput(coverageOutput.toPath().toAbsolutePath(), descriptor, "Coverage output");
+                    }
 
                     readExternalDataProcessorSources(rootPath, source.getKey(), mainSourceUrl,
                             metadataOptions.hasMultipleSources(), projectUri, uriListByKey, coverageData, report);
@@ -522,11 +531,11 @@ public class Utils {
             if (exclusionReportFile != null) {
                 Path destination = exclusionReportFile.toPath().toAbsolutePath();
                 if (rawInput != null) {
-                    rejectReportOverwritingInput(destination, rawInput);
+                    rejectOutputOverwritingInput(destination, rawInput, "Exclusion report");
                 }
                 if (metadataOptions.getConfigFile() != null) {
                     for (File input : ExclusionRules.configFiles(metadataOptions.getConfigFile())) {
-                        rejectReportOverwritingInput(destination, input);
+                        rejectOutputOverwritingInput(destination, input, "Exclusion report");
                     }
                 }
                 if (coverageOutput != null && sameOutputFile(destination, coverageOutput.toPath().toAbsolutePath())) {
@@ -623,11 +632,11 @@ public class Utils {
         }
     }
 
-    private static void rejectReportOverwritingInput(Path report, File input) throws IOException {
+    private static void rejectOutputOverwritingInput(Path output, File input, String outputLabel) throws IOException {
         Path inputPath = input.toPath().toAbsolutePath();
-        if (report.equals(inputPath)
-                || (Files.exists(report) && Files.exists(inputPath) && Files.isSameFile(report, inputPath))) {
-            throw new IllegalArgumentException("Exclusion report would overwrite input file: " + inputPath);
+        if (output.equals(inputPath)
+                || (Files.exists(output) && Files.exists(inputPath) && Files.isSameFile(output, inputPath))) {
+            throw new IllegalArgumentException(outputLabel + " would overwrite input file: " + inputPath);
         }
     }
 

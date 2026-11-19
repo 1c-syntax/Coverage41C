@@ -44,9 +44,11 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Stream;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class ExternalDataProcessorTest {
 
@@ -63,6 +65,78 @@ class ExternalDataProcessorTest {
 
     @TempDir
     Path tempDir;
+
+    @Test
+    void rejectsExclusionReportAtSourceDescriptor() throws Exception {
+        Path descriptor = copyProcessorDescriptor();
+        Path output = tempDir.resolve("coverage.xml");
+
+        assertDescriptorOutputRejected(descriptor, descriptor, output, "Exclusion report");
+        assertFalse(Files.exists(output));
+    }
+
+    @Test
+    void rejectsExclusionReportThroughSymlinkToSourceDescriptor() throws Exception {
+        Path descriptor = copyProcessorDescriptor();
+        Path report = tempDir.resolve("report.json");
+        try {
+            Files.createSymbolicLink(report, descriptor);
+        } catch (IOException | UnsupportedOperationException error) {
+            assumeTrue(false, () -> "Cannot create a symbolic link: " + error.getMessage());
+        }
+        Path output = tempDir.resolve("coverage.xml");
+
+        assertDescriptorOutputRejected(descriptor, report, output, "Exclusion report");
+        assertTrue(Files.isSymbolicLink(report));
+        assertFalse(Files.exists(output));
+    }
+
+    @Test
+    void rejectsExclusionReportThroughHardLinkToSourceDescriptor() throws Exception {
+        Path descriptor = copyProcessorDescriptor();
+        Path report = tempDir.resolve("report.json");
+        try {
+            Files.createLink(report, descriptor);
+        } catch (IOException | UnsupportedOperationException error) {
+            assumeTrue(false, () -> "Cannot create a hard link: " + error.getMessage());
+        }
+        Path output = tempDir.resolve("coverage.xml");
+
+        assertDescriptorOutputRejected(descriptor, report, output, "Exclusion report");
+        assertTrue(Files.isSameFile(descriptor, report));
+        assertFalse(Files.exists(output));
+    }
+
+    @Test
+    void rejectsCoverageOutputAtSourceDescriptorBeforeWritingExclusionReport() throws Exception {
+        Path descriptor = copyProcessorDescriptor();
+        Path report = tempDir.resolve("report.json");
+
+        assertDescriptorOutputRejected(descriptor, report, descriptor, "Coverage output");
+        assertFalse(Files.exists(report));
+    }
+
+    private Path copyProcessorDescriptor() throws IOException {
+        Path project = tempDir.resolve("project");
+        TestUtils.copyDirectory(EXTERNAL_PROCESSOR.resolve("configurator"), project);
+        return project.resolve("ВнешняяОбработка.xml");
+    }
+
+    private void assertDescriptorOutputRejected(Path descriptor, Path report, Path output, String outputLabel)
+            throws IOException {
+        byte[] original = Files.readAllBytes(descriptor);
+        Path raw = tempDir.resolve("raw.xml");
+        Files.writeString(raw, "<coverage><file path=\"/" + PROCESSOR_KEY
+                + "\"><lineToCover covered=\"true\" lineNumber=\"2\"/></file></coverage>");
+        StringWriter stderr = new StringWriter();
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, execute(stderr, PipeMessages.CONVERT_COMMAND,
+                "-P", descriptor.getParent().toString(), "-s", descriptor.getFileName().toString(),
+                "-c", raw.toString(), "--exclusion-report", report.toString(), "-o", output.toString()),
+                stderr.toString());
+        assertTrue(stderr.toString().contains(outputLabel + " would overwrite input file"), stderr.toString());
+        assertArrayEquals(original, Files.readAllBytes(descriptor));
+    }
 
     @Test
     void markersWorkInConfiguratorFormat() throws Exception {

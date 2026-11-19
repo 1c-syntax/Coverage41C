@@ -115,7 +115,7 @@ public class MetadataOptions {
                 directories.put(extension.getName(), project.resolve(extension.getPath()));
             }
             if (!extensionSources.isEmpty()) {
-                Set<Path> physicalSources = new HashSet<>();
+                List<Path> physicalSources = new ArrayList<>();
                 for (Map.Entry<String, Path> source : directories.entrySet()) {
                     Path path = source.getValue();
                     // -s may point to an external data processor descriptor.
@@ -123,9 +123,8 @@ public class MetadataOptions {
                     if (!Files.isDirectory(path) && (!isMainSource || !Files.isRegularFile(path))) {
                         throw new IllegalArgumentException("Multiple sources require a directory: " + path);
                     }
-                    if (!physicalSources.add(path.toRealPath())) {
-                        throw new IllegalArgumentException("Duplicate source directory: " + path);
-                    }
+                    rejectDuplicateSourceDirectory(physicalSources, path);
+                    physicalSources.add(path);
                 }
             }
             return directories;
@@ -155,12 +154,19 @@ public class MetadataOptions {
             if (result.containsKey(name)) {
                 throw new IllegalArgumentException("Duplicate source name: " + name);
             }
-            if (result.containsValue(directory)) {
-                throw new IllegalArgumentException("Duplicate source directory: " + directory);
-            }
+            rejectDuplicateSourceDirectory(result.values(), directory);
             result.put(name, directory);
         }
         return result;
+    }
+
+    private static void rejectDuplicateSourceDirectory(Iterable<Path> existingDirectories, Path directory)
+            throws IOException {
+        for (Path existingDirectory : existingDirectories) {
+            if (Files.isSameFile(existingDirectory, directory)) {
+                throw new IllegalArgumentException("Duplicate source directory: " + directory);
+            }
+        }
     }
 
     private void updatePaths() {
