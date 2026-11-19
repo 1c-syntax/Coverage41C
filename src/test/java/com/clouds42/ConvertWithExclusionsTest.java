@@ -425,6 +425,78 @@ class ConvertWithExclusionsTest {
     }
 
     @Test
+    void foreignRawKeepsPreviousCoverageAndConfiguredExclusionReport() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path config = Files.writeString(tempDir.resolve("rules.json"), "{\"exclusionReport\":\"previous.json\"}");
+        Path report = Files.writeString(project.resolve("previous.json"), "{\"previous\":true}");
+        Path coverage = Files.writeString(tempDir.resolve("coverage.xml"), "<previous/>");
+        Path raw = Files.writeString(tempDir.resolve("raw.xml"),
+                "<coverage sourceIdentity=\"true\"><file extension=\"Other\" path=\"" + MODULE_KEY
+                        + "\"/></coverage>");
+        StringWriter stderr = new StringWriter();
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, convert(project, raw, coverage, stderr,
+                "--config", config.toString()), stderr.toString());
+        assertTrue(stderr.toString().contains("No RAW measurements"), stderr.toString());
+        assertEquals("{\"previous\":true}", Files.readString(report));
+        assertEquals("<previous/>", Files.readString(coverage));
+    }
+
+    @Test
+    void invalidLineAfterValidHitKeepsPreviousReports() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path report = Files.writeString(tempDir.resolve("report.json"), "{\"previous\":true}");
+        Path coverage = Files.writeString(tempDir.resolve("coverage.xml"), "<previous/>");
+        Path raw = Files.writeString(tempDir.resolve("raw.xml"), "<coverage><file path=\"" + MODULE_KEY
+                + "\"><lineToCover covered=\"true\" lineNumber=\"2\"/>"
+                + "<lineToCover covered=\"invalid\" lineNumber=\"4\"/></file></coverage>");
+        StringWriter stderr = new StringWriter();
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, convert(project, raw, coverage, stderr,
+                "--exclusion-report", report.toString()), stderr.toString());
+        assertEquals("{\"previous\":true}", Files.readString(report));
+        assertEquals("<previous/>", Files.readString(coverage));
+    }
+
+    @Test
+    void failedCoverageWriteKeepsPreviousExclusionReport() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path report = Files.writeString(tempDir.resolve("report.json"), "{\"previous\":true}");
+        Path directory = Files.createDirectory(tempDir.resolve("coverage.xml"));
+        StringWriter stderr = new StringWriter();
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, convert(project, Path.of(INTERNAL_XML), directory, stderr,
+                "--exclusion-report", report.toString()), stderr.toString());
+        assertEquals("{\"previous\":true}", Files.readString(report));
+    }
+
+    @Test
+    void invalidExclusionDestinationKeepsPreviousCoverage() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path report = Files.createDirectory(tempDir.resolve("report.json"));
+        Path coverage = Files.writeString(tempDir.resolve("coverage.xml"), "<previous/>");
+        StringWriter stderr = new StringWriter();
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, convert(project, Path.of(INTERNAL_XML), coverage, stderr,
+                "--exclusion-report", report.toString()), stderr.toString());
+        assertEquals("<previous/>", Files.readString(coverage));
+    }
+
+    @Test
+    void writesBothReportsInNewDirectory() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path directory = tempDir.resolve("reports");
+        Path report = directory.resolve("exclusions.json");
+        Path coverage = directory.resolve("coverage.xml");
+        StringWriter stderr = new StringWriter();
+
+        assertEquals(CommandLine.ExitCode.OK, convert(project, Path.of(INTERNAL_XML), coverage, stderr,
+                "--exclusion-report", report.toString()), stderr.toString());
+        assertTrue(new ObjectMapper().readTree(report.toFile()).has("totalLines"));
+        assertFalse(genericCoverage(coverage).isEmpty());
+    }
+
+    @Test
     void rejectsCoverageOutputLinkedToRawBeforeWritingExclusionReport() throws Exception {
         Path raw = Files.copy(Path.of(INTERNAL_XML), tempDir.resolve("raw.xml"));
         assertCoverageOutputDoesNotOverwriteInput(raw, raw);

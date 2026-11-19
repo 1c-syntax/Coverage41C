@@ -139,6 +139,85 @@ class ValidateCommandTest {
         assertConfigurationInputProtected(project, "configuration/src/DataProcessors/Обработка1/Forms/Форма/Form.form");
     }
 
+    @Test
+    void protectsAuxiliaryFilesAcrossTheDesignerExport() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        for (String input : List.of("ScheduledJobs/РегламентноеЗадание1/Ext/Schedule.xml",
+                "WSReferences/WSСсылка1/Ext/WSDefinition.xml", "Ext/HomePageWorkArea.xml")) {
+            assertConfigurationInputProtected(project, "configuration/" + input);
+            Files.delete(tempDir.resolve("report.json"));
+        }
+    }
+
+    @Test
+    void protectsEdtProjectFilesOutsideSrc() throws Exception {
+        Path project = tempDir.resolve("project");
+        TestUtils.copyDirectory(Path.of("src/test/resources/edt/pc"), project.resolve("configuration"));
+        for (String input : List.of("unknown/Interfaces/Интерфейс1.xml", "DT-INF/PROJECT.PMF", ".project")) {
+            assertConfigurationInputProtected(project, "configuration/" + input);
+            Files.delete(tempDir.resolve("report.json"));
+        }
+    }
+
+    @Test
+    void keepsNewReportsOutsideExportMetadataDirectories() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path root = project.resolve("configuration");
+        Path reserved = root.resolve("Ext/output/new.json");
+        StringWriter stderr = new StringWriter();
+        assertEquals(CommandLine.ExitCode.SOFTWARE, validateProject(project, stderr,
+                "--exclusion-report", reserved.toString()), stderr.toString());
+        assertFalse(Files.exists(reserved.getParent()));
+
+        for (Path report : List.of(root.resolve("result.json"), root.resolve("artifacts/result.json"))) {
+            for (int run = 0; run < 2; run++) {
+                assertEquals(CommandLine.ExitCode.OK, validateProject(project, stderr,
+                        "--exclusion-report", report.toString()), stderr.toString());
+                assertTrue(Files.size(report) > 0);
+            }
+        }
+    }
+
+    @Test
+    void refusesToWriteThroughDanglingLinkInMetadataDirectory() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path target = tempDir.resolve("outside.json");
+        Path metadataLink = project.resolve("configuration/Ext/report.json");
+        Path output = tempDir.resolve("result.json");
+        try {
+            Files.createSymbolicLink(metadataLink, target);
+            Files.createSymbolicLink(output, metadataLink);
+        } catch (IOException | UnsupportedOperationException error) {
+            assumeTrue(false, () -> "Cannot create a symbolic link: " + error.getMessage());
+        }
+        StringWriter stderr = new StringWriter();
+        assertEquals(CommandLine.ExitCode.SOFTWARE, validateProject(project, stderr,
+                "--exclusion-report", output.toString()), stderr.toString());
+        assertTrue(stderr.toString().contains("source directory"), stderr.toString());
+        assertFalse(Files.exists(target));
+    }
+
+    @Test
+    void refusesNewReportThroughDirectoryLinksCrossingTheExport() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path source = project.resolve("configuration");
+        Path physicalSource = Files.move(source, project.resolve("actual"));
+        Path outside = Files.createDirectory(tempDir.resolve("outside"));
+        Path entry = tempDir.resolve("entry");
+        try {
+            Files.createSymbolicLink(source, physicalSource);
+            Files.createSymbolicLink(physicalSource.resolve("Ext/outputs"), outside);
+            Files.createSymbolicLink(entry, source.resolve("Ext/outputs"));
+        } catch (IOException | UnsupportedOperationException error) {
+            assumeTrue(false, () -> "Cannot create directory links: " + error.getMessage());
+        }
+        StringWriter stderr = new StringWriter();
+        assertEquals(CommandLine.ExitCode.SOFTWARE, validateProject(project, stderr,
+                "--exclusion-report", entry.resolve("new/output.json").toString()), stderr.toString());
+        assertTrue(stderr.toString().contains("source directory"), stderr.toString());
+        assertFalse(Files.exists(outside.resolve("new")));
+    }
+
     private void assertConfigurationInputProtected(String relativeInput) throws Exception {
         assertConfigurationInputProtected(TestUtils.copyConfiguration(tempDir), relativeInput);
     }

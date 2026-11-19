@@ -66,7 +66,12 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileStore;
 import java.nio.file.FileSystemLoopException;
+import java.nio.file.FileVisitOption;
+import java.nio.file.FileVisitResult;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
@@ -293,6 +298,14 @@ public class Utils {
                 false, false, rawInput, coverageOutput);
     }
 
+    public static Metadata prepareConversion(MetadataOptions metadataOptions,
+                                             String mainExtension, String mainSourceUrl,
+                                             Map<URI, Map<BigDecimal, Integer>> coverageData,
+                                             File rawInput, File coverageOutput) throws Exception {
+        return loadMetadata(metadataOptions, mainExtension, mainSourceUrl, coverageData, new ExclusionReport(),
+                false, false, rawInput, coverageOutput);
+    }
+
     public static List<String> validateMetadata(MetadataOptions metadataOptions) throws Exception {
         if (metadataOptions.isRawMode()) {
             throw new IllegalArgumentException("Validation requires source files");
@@ -304,6 +317,58 @@ public class Utils {
     }
 
     private static Map<String, URI> readMetadata(MetadataOptions metadataOptions,
+                                                 String mainExtension, String mainSourceUrl,
+                                                 Map<URI, Map<BigDecimal, Integer>> coverageData,
+                                                 ExclusionReport report, boolean measuring,
+                                                 boolean hasUserFilter, File rawInput, File coverageOutput) throws Exception {
+        Metadata metadata = loadMetadata(metadataOptions, mainExtension, mainSourceUrl, coverageData, report,
+                measuring, hasUserFilter, rawInput, coverageOutput);
+        metadata.writeExclusionReport();
+        return metadata.getModuleUris();
+    }
+
+    public static final class Metadata {
+        private final Map<String, URI> moduleUris;
+        private final ExclusionReport report;
+        private final File reportFile;
+
+        private Metadata(Map<String, URI> moduleUris, ExclusionReport report, File reportFile) {
+            this.moduleUris = moduleUris;
+            this.report = report;
+            this.reportFile = reportFile;
+        }
+
+        public Map<String, URI> getModuleUris() {
+            return moduleUris;
+        }
+
+        private void writeExclusionReport() throws IOException {
+            if (reportFile != null) {
+                report.writeJson(reportFile);
+                logger.info("Exclusion report written to {}", reportFile.getAbsolutePath());
+            }
+        }
+
+        public void writeConversion(Map<URI, Map<BigDecimal, Integer>> coverage, MetadataOptions metadataOptions,
+                                    OutputOptions outputOptions) throws IOException {
+            if (reportFile != null) {
+                // Keep support for two outputs sharing a new directory. Check an existing report before touching coverage.
+                Path destination = reportFile.toPath().toAbsolutePath();
+                if (destination.getParent() != null) {
+                    Files.createDirectories(destination.getParent());
+                }
+                Path target = resolveOutputPath(destination, new HashSet<>());
+                Path writablePath = Files.exists(target) ? target : target.getParent();
+                if (Files.isDirectory(target) || !Files.isWritable(writablePath)) {
+                    throw new IOException("Cannot write exclusion report: " + destination);
+                }
+            }
+            dumpCoverageFile(coverage, metadataOptions, outputOptions);
+            writeExclusionReport();
+        }
+    }
+
+    private static Metadata loadMetadata(MetadataOptions metadataOptions,
                                                  String mainExtension, String mainSourceUrl,
                                                  Map<URI, Map<BigDecimal, Integer>> coverageData,
                                                  ExclusionReport report, boolean measuring,
@@ -333,6 +398,7 @@ public class Utils {
 
         Map<String, URI> uriListByKey = new HashMap<>();
         Set<Path> inputFiles = new LinkedHashSet<>();
+        Set<Path> exportTrees = new LinkedHashSet<>();
         if (rawInput != null) {
             inputFiles.add(rawInput.toPath());
         }
@@ -402,10 +468,14 @@ public class Utils {
                         }
                     }
 
-                    File reportFile = metadataOptions.getExclusionReportFile() == null
-                            ? configExclusionReportFile : metadataOptions.getExclusionReportFile();
-                    if (existingFile(coverageOutput) || existingFile(reportFile)) {
-                        addMetadataInputs(rootPath, conf, inputFiles);
+                    if (conf.getConfigurationSource() == ConfigurationSource.EDT) {
+                        for (String directory : List.of("src", "unknown", "DT-INF", ".settings")) {
+                            exportTrees.add(rootPath.resolve(directory));
+                        }
+                        addExistingInput(rootPath.resolve(".project"), inputFiles);
+                        addExistingInput(rootPath.resolve(".classpath"), inputFiles);
+                    } else {
+                        addMetadataDirectories(rootPath, exportTrees);
                     }
 
                     // Module rules that hit only modules outside the scope are a precaution, not a typo.
@@ -505,7 +575,7 @@ public class Utils {
                     inputFiles.add(rootPath);
 
                     readExternalDataProcessorSources(rootPath, source.getKey(), mainSourceUrl,
-                            metadataOptions.hasMultipleSources(), projectUri, uriListByKey, coverageData, report, inputFiles);
+                            metadataOptions.hasMultipleSources(), projectUri, uriListByKey, coverageData, report, inputFiles, exportTrees);
                 }
 
             }
@@ -555,15 +625,11 @@ public class Utils {
         if (existingFile(coverageOutput) || existingFile(exclusionReportFile)) {
             uriListByKey.values().stream().map(Path::of).filter(Files::isRegularFile).forEach(inputFiles::add);
         }
-        validateOutputFiles(coverageOutput, exclusionReportFile, metadataOptions.getConfigFile(), inputFiles);
-        if (exclusionReportFile != null) {
-            report.writeJson(exclusionReportFile);
-            logger.info("Exclusion report written to {}", exclusionReportFile.getAbsolutePath());
-        }
+        validateOutputFiles(coverageOutput, exclusionReportFile, metadataOptions.getConfigFile(), inputFiles, exportTrees);
         if (!rawMode) {
             logger.info("Configuration sources reading DONE");
         }
-        return uriListByKey;
+        return new Metadata(uriListByKey, report, exclusionReportFile);
     }
 
     static boolean sameOutputFile(Path report, Path coverage) throws IOException {
@@ -651,42 +717,14 @@ public class Utils {
         return file != null && file.isFile();
     }
 
-    private static void addMetadataInputs(Path root, CF configuration, Set<Path> inputs) {
-        boolean edt = configuration.getConfigurationSource() == ConfigurationSource.EDT;
-        Path source = edt ? root.resolve("src") : root;
-        for (MD metadata : configuration.getPlainChildren()) {
-            Path object = source;
-            String[] parts = metadata.getMdoReference().getMdoRef().split("\\.");
-            for (int index = 0; index + 1 < parts.length; index += 2) {
-                MDOType type = MDOType.fromValue(parts[index]).orElse(MDOType.UNKNOWN);
-                object = object.resolve(type.groupName()).resolve(parts[index + 1]);
-            }
-            if (object.equals(source)) {
-                continue;
-            }
-            Path descriptor = edt ? object.resolve(object.getFileName() + ".mdo")
-                    : object.resolveSibling(object.getFileName() + ".xml");
-            addExistingInput(descriptor, inputs);
-            MDOType type = metadata.getMdoType();
-            if (edt && (type == MDOType.INTERFACE || type == MDOType.STYLE)) {
-                addExistingInput(root.resolve("unknown").resolve(type.groupName()).resolve(metadata.getName() + ".xml"),
-                        inputs);
-            }
-            Path data = edt ? object : object.resolve("Ext");
-            if (!edt) {
-                addExistingInput(data.resolve("Predefined.xml"), inputs);
-            }
-            switch (type) {
-                case FORM, COMMON_FORM -> addExistingInput(data.resolve(edt ? "Form.form" : "Form.xml"), inputs);
-                case TEMPLATE, COMMON_TEMPLATE -> addExistingInput(data.resolve(edt ? "Template.dcs" : "Template.xml"), inputs);
-                case ROLE -> addExistingInput(data.resolve(edt ? "Rights.rights" : "Rights.xml"), inputs);
-                case XDTO_PACKAGE -> addExistingInput(data.resolve(edt ? "Package.xdto" : "Package.bin"), inputs);
-                case EXCHANGE_PLAN -> {
-                    if (!edt) {
-                        addExistingInput(data.resolve("Content.xml"), inputs);
-                    }
-                }
-                default -> { }
+    // The exporter owns the complete contents of these directories, including auxiliary files
+    // that the metadata reader does not expose as model objects.
+    private static void addMetadataDirectories(Path root, Set<Path> trees) {
+        trees.add(root.resolve("Ext"));
+        for (MDOType type : MDOType.values()) {
+            String group = type.groupName();
+            if (group != null && !group.isEmpty()) {
+                trees.add(root.resolve(group));
             }
         }
     }
@@ -706,7 +744,7 @@ public class Utils {
     }
 
     private static void validateOutputFiles(File coverageOutput, File exclusionReport, File config,
-                                            Set<Path> inputs) throws IOException {
+                                            Set<Path> inputs, Set<Path> exportTrees) throws IOException {
         if (coverageOutput == null && exclusionReport == null) {
             return;
         }
@@ -714,12 +752,12 @@ public class Utils {
             ExclusionRules.configFiles(config).forEach(file -> inputs.add(file.toPath()));
         }
         if (coverageOutput != null) {
-            rejectOutputOverwritingInputs(coverageOutput.toPath().toAbsolutePath(), inputs, "Coverage output");
+            rejectOutputOverwritingInputs(coverageOutput.toPath().toAbsolutePath(), inputs, exportTrees, "Coverage output");
             ExclusionRules.rejectReportInsideConfigDirectory(config, coverageOutput, "-o");
         }
         if (exclusionReport != null) {
             Path destination = exclusionReport.toPath().toAbsolutePath();
-            rejectOutputOverwritingInputs(destination, inputs, "Exclusion report");
+            rejectOutputOverwritingInputs(destination, inputs, exportTrees, "Exclusion report");
             if (coverageOutput != null && sameOutputFile(destination, coverageOutput.toPath().toAbsolutePath())) {
                 throw new IllegalArgumentException("Exclusion report and coverage output must use different files: "
                         + destination + " and " + coverageOutput.toPath().toAbsolutePath());
@@ -727,7 +765,7 @@ public class Utils {
         }
     }
 
-    private static void rejectOutputOverwritingInputs(Path output, Set<Path> inputs, String outputLabel)
+    private static void rejectOutputOverwritingInputs(Path output, Set<Path> inputs, Set<Path> trees, String outputLabel)
             throws IOException {
         boolean outputExists = Files.exists(output);
         for (Path input : inputs) {
@@ -736,6 +774,123 @@ public class Utils {
                 throw new IllegalArgumentException(outputLabel + " would overwrite input file: " + inputPath);
             }
         }
+        if (!trees.isEmpty()) {
+            rejectOutputInExportTrees(output, trees, outputLabel);
+        }
+    }
+
+    private static void rejectOutputInExportTrees(Path output, Set<Path> trees, String label) throws IOException {
+        Set<Path> locations = outputLocations(output);
+        Set<Object> parents = new HashSet<>();
+        Set<Object> mountAliases = new HashSet<>();
+        BasicFileAttributes target = Files.isRegularFile(output) ? Files.readAttributes(output, BasicFileAttributes.class) : null;
+        Map<FileStore, Boolean> stores = new HashMap<>();
+        for (Path path : locations) {
+            for (Path parent = existingOutputDirectory(path.getParent()); parent != null; parent = parent.getParent()) {
+                Object key = directoryKey(parent);
+                if (parents.add(key) && target == null) {
+                    FileStore store = Files.getFileStore(parent);
+                    if (stores.computeIfAbsent(store, fs -> hasOtherMounts(output, fs))) {
+                        mountAliases.add(key);
+                    }
+                }
+            }
+        }
+
+        Set<Object> visited = new HashSet<>();
+        for (Path tree : trees) {
+            Path directory = resolveOutputPath(tree.toAbsolutePath(), new HashSet<>());
+            boolean present = Files.isDirectory(directory);
+            if (locations.stream().anyMatch(path -> path.startsWith(directory))
+                    || (present && parents.contains(directoryKey(directory)))) {
+                throw new IllegalArgumentException(label + " would overwrite input file in source directory: " + output);
+            }
+            if (present && (target != null || !mountAliases.isEmpty())) {
+                checkExportTree(directory, output, target, mountAliases, visited, label);
+            }
+        }
+    }
+
+    // Keep each full spelling before following a link in a directory or in the filename. A link
+    // can lead into the export and another link can lead back out to a yet nonexistent report.
+    private static Set<Path> outputLocations(Path path) throws IOException {
+        Set<Path> locations = new LinkedHashSet<>();
+        locations.add(path.normalize());
+        Path suffix = path.getFileSystem().getPath("");
+        locations.add(traceOutputLinks(path, suffix, locations, new HashSet<>()));
+        return locations;
+    }
+
+    private static Path traceOutputLinks(Path path, Path suffix, Set<Path> locations, Set<Path> links)
+            throws IOException {
+        if (path.getParent() == null) {
+            return path;
+        }
+        Path name = path.getFileName();
+        Path parent = traceOutputLinks(path.getParent(), name.resolve(suffix), locations, links);
+        Path candidate = parent.resolve(name).normalize();
+        if (!Files.isSymbolicLink(candidate)) {
+            return candidate;
+        }
+        if (!links.add(candidate)) {
+            throw new FileSystemLoopException(candidate.toString());
+        }
+        Path target = candidate.resolveSibling(Files.readSymbolicLink(candidate));
+        locations.add(candidate.resolve(suffix).normalize());
+        locations.add(target.resolve(suffix).normalize());
+        Path resolved = traceOutputLinks(target, suffix, locations, links);
+        links.remove(candidate);
+        return resolved;
+    }
+
+    // Bind mounts have distinct FileStores backed by the same device. Check only ambiguous volumes
+    // for alternate paths to a future output's parent, including mounts nested inside the export.
+    private static boolean hasOtherMounts(Path path, FileStore current) {
+        for (FileStore store : path.getFileSystem().getFileStores()) {
+            if (!current.equals(store) && current.name().equals(store.name()) && current.type().equals(store.type())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static Object directoryKey(Path path) throws IOException {
+        return physicalKey(path, Files.readAttributes(path, BasicFileAttributes.class));
+    }
+
+    private static Object physicalKey(Path path, BasicFileAttributes attributes) throws IOException {
+        return attributes.fileKey() == null ? path.toRealPath() : attributes.fileKey();
+    }
+
+    private static void checkExportTree(Path root, Path output, BasicFileAttributes target, Set<Object> mountAliases,
+                                        Set<Object> visited, String label) throws IOException {
+        Files.walkFileTree(root, EnumSet.of(FileVisitOption.FOLLOW_LINKS), Integer.MAX_VALUE, new SimpleFileVisitor<Path>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                Object key = physicalKey(dir, attrs);
+                if (mountAliases.contains(key)) {
+                    throw new IllegalArgumentException(label + " is inside a source directory: " + output);
+                }
+                return visited.add(key) ? FileVisitResult.CONTINUE : FileVisitResult.SKIP_SUBTREE;
+            }
+
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                if (target != null && attrs.isRegularFile() && (target.fileKey() == null || attrs.fileKey() == null
+                        ? Files.isSameFile(file, output) : target.fileKey().equals(attrs.fileKey()))) {
+                    throw new IllegalArgumentException(label + " would overwrite input file: " + file);
+                }
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFileFailed(Path file, IOException error) throws IOException {
+                if (error instanceof FileSystemLoopException) {
+                    return FileVisitResult.CONTINUE;
+                }
+                throw error;
+            }
+        });
     }
 
     public static DocumentBuilder newInputXmlBuilder() throws ParserConfigurationException {
@@ -757,7 +912,7 @@ public class Utils {
                                                          URI projectUri,
                                                          Map<String, URI> uriListByKey,
                                                          Map<URI, Map<BigDecimal, Integer>> coverageData,
-                                                         ExclusionReport report, Set<Path> inputFiles)
+                                                         ExclusionReport report, Set<Path> inputFiles, Set<Path> exportTrees)
             throws IOException, ParserConfigurationException, SAXException, XPathExpressionException {
 
         DocumentBuilder builder = newInputXmlBuilder();
@@ -766,9 +921,12 @@ public class Utils {
 
         Map<String, URI> externalDataProcessorUriListByKey;
         if (documentRootTagName.equals("MetaDataObject")) {
+            String objectName = com.google.common.io.Files.getNameWithoutExtension(rootPath.toString());
+            exportTrees.add(rootPath.toAbsolutePath().resolveSibling(objectName));
             externalDataProcessorUriListByKey = readConfiguratorExternalSource(rootPath, xmlDocument, builder, inputFiles);
         } else if (documentRootTagName.equals("mdclass:ExternalDataProcessor")
                 || documentRootTagName.equals("mdclass:ExternalReport")) {
+            addMetadataDirectories(rootPath.toAbsolutePath().getParent(), exportTrees);
             externalDataProcessorUriListByKey = readEdtExternalSource(rootPath, xmlDocument, inputFiles);
         } else if (documentRootTagName.equals("mdclass:Configuration")) {
             throw new IllegalArgumentException("Pass the configuration directory to -s: " + rootPath);
