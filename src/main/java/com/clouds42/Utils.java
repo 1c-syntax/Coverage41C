@@ -343,22 +343,23 @@ public class Utils {
 
         private void writeExclusionReport() throws IOException {
             if (reportFile != null) {
-                report.writeJson(reportFile);
+                if (ConversionOutput.isSpecialFile(reportFile.toPath())) {
+                    report.writeJson(reportFile);
+                } else {
+                    ConversionOutput.writeFile(prepareReportPath(), file -> report.writeJson(file.toFile()));
+                }
                 logger.info("Exclusion report written to {}", reportFile.getAbsolutePath());
             }
         }
 
         public void writeConversion(Map<URI, Map<BigDecimal, Integer>> coverage, MetadataOptions metadataOptions,
                                     OutputOptions outputOptions) throws IOException {
-            Path reportPath = null;
-            if (reportFile != null) {
-                Path requested = reportFile.toPath().toAbsolutePath();
-                if (requested.getParent() != null) {
-                    Files.createDirectories(requested.getParent());
-                }
-                reportPath = resolveOutputPath(requested, new HashSet<>());
-            }
             File output = outputOptions.getOutputFile();
+            if (output == null && reportFile == null) {
+                dumpCoverageFile(coverage, metadataOptions, outputOptions);
+                return;
+            }
+            Path reportPath = reportFile == null ? null : prepareReportPath();
             Path coveragePath = output == null ? null : resolveOutputPath(output.toPath().toAbsolutePath(), new HashSet<>());
             ConversionOutput.write(coveragePath, reportPath,
                     file -> writeCoverageFile(coverage, metadataOptions, outputOptions, file.toFile()),
@@ -367,6 +368,14 @@ public class Utils {
             if (reportFile != null) {
                 logger.info("Exclusion report written to {}", reportFile.getAbsolutePath());
             }
+        }
+
+        private Path prepareReportPath() throws IOException {
+            Path requested = reportFile.toPath().toAbsolutePath();
+            if (requested.getParent() != null) {
+                Files.createDirectories(requested.getParent());
+            }
+            return resolveOutputPath(requested, new HashSet<>());
         }
     }
 
@@ -624,6 +633,12 @@ public class Utils {
 
         File exclusionReportFile = metadataOptions.getExclusionReportFile() != null
                 ? metadataOptions.getExclusionReportFile() : configExclusionReportFile;
+        // validate writes only JSON. start and convert can write coverage to a shell-opened file.
+        if (coverageOutput == null && exclusionReportFile != null && (measuring || rawInput != null)
+                && StandardOutputFile.matches(exclusionReportFile.toPath())) {
+            throw new IllegalArgumentException("Exclusion report and coverage output must use different files: "
+                    + exclusionReportFile + " and standard output");
+        }
         if (existingFile(coverageOutput) || existingFile(exclusionReportFile)) {
             uriListByKey.values().stream().map(Path::of).filter(Files::isRegularFile).forEach(inputFiles::add);
         }

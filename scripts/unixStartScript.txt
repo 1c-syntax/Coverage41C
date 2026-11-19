@@ -89,8 +89,8 @@ if [ -z "\$EDT_LOCATION" ] && command -v ring >/dev/null 2>&1; then
         for jar in "\$plugins"/com._1c.g5.v8.dt.debug.*.jar; do
             [ -f "\$jar" ] || continue
             case "\$jar" in
-                */com._1c.g5.v8.dt.debug.core_*.jar) has_core=true ;;
-                */com._1c.g5.v8.dt.debug.model_*.jar) has_model=true ;;
+                (*/com._1c.g5.v8.dt.debug.core_*.jar) has_core=true ;;
+                (*/com._1c.g5.v8.dt.debug.model_*.jar) has_model=true ;;
             esac
         done
         if "\$has_core" && "\$has_model"; then

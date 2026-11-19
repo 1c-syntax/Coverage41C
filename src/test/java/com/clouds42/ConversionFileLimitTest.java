@@ -53,9 +53,7 @@ class ConversionFileLimitTest {
         byte[] previousReport = Files.readAllBytes(report);
 
         // Select no modules so the coverage fits, while the JSON lists all unmatched prefixes.
-        String prefixes = IntStream.range(0, 100).mapToObj(i -> "\"Missing" + i + "\"")
-                .collect(Collectors.joining(","));
-        Path rules = Files.writeString(directory.resolve("rules.json"), "{\"includePrefix\":[" + prefixes + "]}");
+        Path rules = unmatchedPrefixes();
         Path smallCoverage = directory.resolve("small.xml");
         Path largeReport = directory.resolve("large.json");
         List<String> control = convertTo(smallCoverage, "--exclusion-report", largeReport.toString(), "--config", rules.toString());
@@ -79,6 +77,28 @@ class ConversionFileLimitTest {
 
         runUnderFileSizeLimit(args);
         assertArrayEquals(previous, Files.readAllBytes(coverage));
+    }
+
+    @Test
+    void partialValidationReportPreservesPreviousJsonAndLeavesMissingFileAbsent() throws Exception {
+        Path report = directory.resolve("exclusions.json");
+        List<String> args = List.of("validate", "-s", "src/test/resources/configuration",
+                "--config", unmatchedPrefixes().toString(), "--exclusion-report", report.toString());
+        assertEquals(0, Coverage41C.getCommandLine().execute(args.toArray(new String[0])));
+        byte[] previous = Files.readAllBytes(report);
+        assertTrue(previous.length > 4096);
+
+        runUnderFileSizeLimit(args);
+        assertArrayEquals(previous, Files.readAllBytes(report));
+        Files.delete(report);
+        runUnderFileSizeLimit(args);
+        assertTrue(Files.notExists(report));
+    }
+
+    private Path unmatchedPrefixes() throws Exception {
+        String prefixes = IntStream.range(0, 100).mapToObj(i -> "\"Missing" + i + "\"")
+                .collect(Collectors.joining(","));
+        return Files.writeString(directory.resolve("rules.json"), "{\"includePrefix\":[" + prefixes + "]}");
     }
 
     private static List<String> convertTo(Path coverage, String... options) {

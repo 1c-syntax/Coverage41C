@@ -56,6 +56,10 @@ final class ConversionOutput {
         void write(Path file) throws IOException;
     }
 
+    static void writeFile(Path destination, Writer writer) throws IOException {
+        write(destination, null, writer, null, null);
+    }
+
     static void write(Path coverage, Path report, Writer writeCoverage, Writer writeReport, OutputStream stdout)
             throws IOException {
         try (Temporary coverageStage = Temporary.create(coverage);
@@ -105,7 +109,7 @@ final class ConversionOutput {
         }
     }
 
-    private static boolean isSpecialFile(Path path) throws IOException {
+    static boolean isSpecialFile(Path path) throws IOException {
         try {
             return Files.readAttributes(path, BasicFileAttributes.class).isOther();
         } catch (NoSuchFileException missing) {
