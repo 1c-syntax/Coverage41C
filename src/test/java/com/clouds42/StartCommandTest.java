@@ -55,6 +55,7 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -67,6 +68,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.function.LongSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -100,6 +102,8 @@ class StartCommandTest {
     private FakeDebugServer dbgs;
     private final String infobase = "test_" + UUID.randomUUID().toString().replace("-", "");
     private static final long TIMEOUT = 20;
+    private static final Duration TEST_FINAL_MEASURE_WINDOW = Duration.ofSeconds(1);
+    private static final Duration TEST_FINAL_CONFIRMATION_TIMEOUT = Duration.ofSeconds(1);
 
     private final ExecutorService executor = Executors.newCachedThreadPool();
     private Path output;
@@ -204,6 +208,48 @@ class StartCommandTest {
     }
 
     @Test
+    void stopKeepsFinalMeasuresAfterTwoEmptyPolls() throws Exception {
+        Future<Integer> collector = startRaw();
+        List<List<DBGUIExtCmdInfoBase>> polls = new ArrayList<>();
+        for (int line = 1; line <= 6; line++) {
+            polls.add(List.of(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, line, 1)));
+        }
+        polls.add(1, List.of());
+        polls.add(2, List.of());
+        dbgs.deliverAcrossFinalPolls(polls);
+
+        assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(Map.of(1, true, 2, true, 3, true, 4, true, 5, true, 6, true),
+                coverage("/" + OBJECT_ID + "/" + PROPERTY_ID));
+    }
+
+    @Test
+    void stopFailsAndKeepsLateMeasurementsThroughConfirmationTimeout() throws Exception {
+        Future<Integer> collector = startRaw();
+        dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 1, 1));
+        dbgs.pause("pingDebugUIParams");
+        Future<Integer> stop;
+        try {
+            dbgs.awaitPaused("pingDebugUIParams");
+            // The in-flight poll returns empty. The next poll will start after the observation window.
+            dbgs.deliverAcrossFinalPolls(List.of(List.of(),
+                    List.of(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1)), List.of(),
+                    List.of(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 3, 1)), List.of(),
+                    List.of(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 4, 1))));
+            stop = executor.submit(() -> send(PipeMessages.EXIT_COMMAND));
+            waitForFinalMeasureThread();
+            Thread.sleep(TEST_FINAL_MEASURE_WINDOW.toMillis());
+        } finally {
+            dbgs.resume("pingDebugUIParams");
+        }
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, stop.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(Map.of(1, true, 2, true, 3, true, 4, true), coverage("/" + OBJECT_ID + "/" + PROPERTY_ID));
+    }
+
+    @Test
     void inFlightEmptyPollDoesNotConfirmFinalQuietWindow() throws Exception {
         Future<Integer> collector = start("-f", "LCOV");
         dbgs.pause("pingDebugUIParams");
@@ -229,8 +275,8 @@ class StartCommandTest {
     void sustainedFinalMeasuresFailAtDeadlineAndWriteAvailableCoverage() throws Exception {
         Future<Integer> collector = start();
         dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
-        // At 40 ms per scripted poll the debugger never goes quiet before the stop deadline.
-        dbgs.deliverAcrossFinalPolls(separateFinalMeasures(300));
+        // At 40 ms per scripted poll these packets outlast the observation and confirmation windows.
+        dbgs.deliverAcrossFinalPolls(separateFinalMeasures(75));
 
         assertEquals(CommandLine.ExitCode.SOFTWARE, send(PipeMessages.EXIT_COMMAND));
         assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
@@ -497,7 +543,7 @@ class StartCommandTest {
                 boolean waiting = Arrays.stream(entry.getValue())
                         .anyMatch(frame -> frame.getClassName().equals("com.clouds42.Commands.CoverageCommand")
                                 && frame.getMethodName().equals("awaitFinalMeasures"));
-                if (waiting) {
+                if (waiting && entry.getKey().getState() == Thread.State.TIMED_WAITING) {
                     return entry.getKey();
                 }
             }
@@ -509,7 +555,7 @@ class StartCommandTest {
     @Test
     void stateChangingCommandsFailUntilProfilingIsReady() throws Exception {
         dbgs.pause("setMeasureMode", body -> body.contains("measureModeSeanceID"));
-        Future<Integer> start = executor.submit(() -> Coverage41C.getCommandLine().execute(PipeMessages.START_COMMAND,
+        Future<Integer> start = executor.submit(() -> startCommandLine().execute(PipeMessages.START_COMMAND,
                 "-i", infobase, "-u", dbgs.url(), "-o", output.toString(), "-t", "10"));
         try {
             dbgs.awaitPaused("setMeasureMode");
@@ -1327,17 +1373,7 @@ class StartCommandTest {
         DebugTargetId allowed = user("suite");
         DebugTargetId nameless = FakeDebugServer.target(UUID.randomUUID(), DebugTargetType.MANAGED_CLIENT, null);
         dbgs.setTargets(allowed, nameless);
-        CommandLine.IFactory defaultFactory = CommandLine.defaultFactory();
-        CommandLine collectorCommand = new CommandLine(new Coverage41C(), new CommandLine.IFactory() {
-            @Override
-            public <T> T create(Class<T> type) throws Exception {
-                if (type == CoverageCommand.class) {
-                    return type.cast(new CoverageCommand(() -> 0L));
-                }
-                return defaultFactory.create(type);
-            }
-        });
-        Future<Integer> collector = start(collectorCommand, "--include-user", "suite");
+        Future<Integer> collector = start(startCommandLine(() -> 0L), "--include-user", "suite");
         dbgs.deliver(FakeDebugServer.measure(allowed, OBJECT_ID, PROPERTY_ID, 2, 1));
         int requestsBeforeLookup = dbgs.requests("getDbgTargets").size();
 
@@ -1662,6 +1698,24 @@ class StartCommandTest {
         assertFalse(Files.exists(Path.of(Utils.getPipeName(connectionOptions()))));
     }
 
+    private static CommandLine startCommandLine() {
+        return startCommandLine(System::nanoTime);
+    }
+
+    private static CommandLine startCommandLine(LongSupplier targetLookupClock) {
+        CommandLine.IFactory defaultFactory = CommandLine.defaultFactory();
+        return new CommandLine(new Coverage41C(), new CommandLine.IFactory() {
+            @Override
+            public <T> T create(Class<T> type) throws Exception {
+                if (type == CoverageCommand.class) {
+                    return type.cast(new CoverageCommand(targetLookupClock, TEST_FINAL_MEASURE_WINDOW,
+                            TEST_FINAL_CONFIRMATION_TIMEOUT));
+                }
+                return defaultFactory.create(type);
+            }
+        });
+    }
+
     private Future<Integer> startRaw() throws Exception {
         return submit(List.of(
                 PipeMessages.START_COMMAND,
@@ -1672,7 +1726,7 @@ class StartCommandTest {
     }
 
     private Future<Integer> start(String... options) throws Exception {
-        return start(Coverage41C.getCommandLine(), options);
+        return start(startCommandLine(), options);
     }
 
     private Future<Integer> start(CommandLine command, String... options) throws Exception {
@@ -1694,7 +1748,7 @@ class StartCommandTest {
     }
 
     private Future<Integer> submit(List<String> arguments) throws Exception {
-        return submit(Coverage41C.getCommandLine(), arguments);
+        return submit(startCommandLine(), arguments);
     }
 
     private Future<Integer> submit(CommandLine command, List<String> arguments) throws Exception {

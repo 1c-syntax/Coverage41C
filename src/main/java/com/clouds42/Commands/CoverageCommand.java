@@ -57,6 +57,7 @@ import java.math.BigDecimal;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
@@ -127,12 +128,15 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     private boolean rawMode = false;
     private volatile boolean systemStarted = false;
     private volatile boolean mainLoopRunning = false;
-    private volatile Long finalPollDeadlineNanos;
-    private int quietFinalPolls; // Guarded by coverageData.
+    private final long finalMeasureWindowNanos;
+    private final long finalConfirmationTimeoutNanos;
+    private volatile Long finalMeasureWindowEndNanos;
+    // Guarded by coverageData.
+    private boolean finalDrainConfirmed;
+    private boolean finalConfirmationFailed;
 
-    // How long stop waits for the measures the platform sends after profiling is off.
-    private static final long FINAL_MEASURES_TIMEOUT_SECONDS = 10;
-    private static final int REQUIRED_QUIET_FINAL_POLLS = 2;
+    private static final Duration FINAL_MEASURE_WINDOW = Duration.ofSeconds(10);
+    private static final Duration FINAL_CONFIRMATION_TIMEOUT = Duration.ofSeconds(5);
     private static final long FAILED_LOOKUP_INTERVAL_NANOS = TimeUnit.SECONDS.toNanos(1);
     private long targetLookupAllowedAt = System.nanoTime();
 
@@ -141,7 +145,14 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     }
 
     public CoverageCommand(LongSupplier targetLookupClock) {
+        this(targetLookupClock, FINAL_MEASURE_WINDOW, FINAL_CONFIRMATION_TIMEOUT);
+    }
+
+    public CoverageCommand(LongSupplier targetLookupClock, Duration finalMeasureWindow,
+                           Duration finalConfirmationTimeout) {
         this.targetLookupClock = targetLookupClock;
+        this.finalMeasureWindowNanos = finalMeasureWindow.toNanos();
+        this.finalConfirmationTimeoutNanos = finalConfirmationTimeout.toNanos();
     }
 
     private void connectAllTargets(List<DebugTargetId> debugTargets) {
@@ -311,8 +322,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     private void pingLoop(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet)
             throws RuntimeDebugClientException, InterruptedException {
         while (!stopExecution.get()) {
-            // Capture eligibility before the request. An in-flight poll may predate profiling disable.
-            Long drainDeadline = finalPollDeadlineNanos;
+            long pollStarted = System.nanoTime();
             Optional<List<? extends DBGUIExtCmdInfoBase>> poll;
             try {
                 poll = client.pollDebugServer();
@@ -331,7 +341,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                 poll = Optional.empty();
             }
             if (poll.isEmpty()) {
-                if (shouldStopAfterFinalPoll(drainDeadline, false)) {
+                if (shouldStopAfterFinalPoll(pollStarted, false)) {
                     return;
                 }
                 Thread.sleep(Math.max(10, debuggerOptions.getPingTimeout()));
@@ -392,22 +402,31 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                     }
                 }
             }
-            if (shouldStopAfterFinalPoll(drainDeadline, !hasMeasures)) {
+            if (shouldStopAfterFinalPoll(pollStarted, !hasMeasures)) {
                 return;
             }
         }
     }
 
-    private boolean shouldStopAfterFinalPoll(Long deadline, boolean quiet) {
-        if (deadline == null) {
+    private boolean shouldStopAfterFinalPoll(long pollStarted, boolean quiet) {
+        Long windowEnd = finalMeasureWindowEndNanos;
+        if (windowEnd == null || System.nanoTime() - windowEnd < 0) {
             return false;
         }
         synchronized (coverageData) {
-            if (stopExecution.get() || System.nanoTime() - deadline >= 0) {
+            if (stopExecution.get() || System.nanoTime() - windowEnd >= finalConfirmationTimeoutNanos) {
                 return true;
             }
-            quietFinalPolls = quiet ? quietFinalPolls + 1 : 0;
-            return quietFinalPolls >= REQUIRED_QUIET_FINAL_POLLS;
+            // A late batch means more may still be in flight. Save what arrives before the deadline.
+            if (!quiet) {
+                finalConfirmationFailed = true;
+            }
+            // An empty reply to a request already in flight may predate the end of the window.
+            if (finalConfirmationFailed || pollStarted - windowEnd < 0) {
+                return false;
+            }
+            finalDrainConfirmed = true;
+            return true;
         }
     }
 
@@ -621,23 +640,24 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         }
     }
 
-    // The platform can spread the last measures over multiple polls after profiling is off.
+    // A debugger poll acknowledges only that poll. Observe the full window, then confirm with a new poll.
     private boolean awaitFinalMeasures() throws InterruptedException {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(FINAL_MEASURES_TIMEOUT_SECONDS);
+        long windowEnd = System.nanoTime() + finalMeasureWindowNanos;
+        long deadline = windowEnd + finalConfirmationTimeoutNanos;
         synchronized (coverageData) {
-            finalPollDeadlineNanos = deadline;
-            while (mainLoopRunning && quietFinalPolls < REQUIRED_QUIET_FINAL_POLLS) {
+            finalMeasureWindowEndNanos = windowEnd;
+            while (mainLoopRunning) {
                 long remaining = deadline - System.nanoTime();
                 if (remaining <= 0) {
                     break;
                 }
                 TimeUnit.NANOSECONDS.timedWait(coverageData, remaining);
             }
-            if (quietFinalPolls >= REQUIRED_QUIET_FINAL_POLLS) {
+            if (finalDrainConfirmed) {
                 return true;
             }
         }
-        logger.error("Can't finish collecting final measures before the deadline or debugger shutdown");
+        logger.error("Debugger did not confirm a quiet poll after the final measurement window");
         return false;
     }
 
