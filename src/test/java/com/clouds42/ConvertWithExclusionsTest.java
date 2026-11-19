@@ -86,6 +86,24 @@ class ConvertWithExclusionsTest {
     Path tempDir;
 
     @Test
+    void convertRejectsDocumentTypeDeclarations() throws Exception {
+        assertEquals(CommandLine.ExitCode.SOFTWARE, convertSyntheticReport("<!DOCTYPE coverage><coverage/>"));
+        assertFalse(Files.exists(tempDir.resolve("converted.xml")));
+    }
+
+    @Test
+    void convertIgnoresProcessingInstructionNamedLineToCover() throws Exception {
+        String raw = """
+                <coverage><file path="%s">
+                  <?lineToCover ignored?>
+                  <lineToCover covered="true" lineNumber="3"/>
+                </file></coverage>
+                """.formatted(MODULE_KEY);
+        assertEquals(CommandLine.ExitCode.OK, convertSyntheticReport(raw));
+        assertEquals(true, genericCoverage(tempDir.resolve("converted.xml")).get("src/test/resources/" + MODULE).get(3));
+    }
+
+    @Test
     void convertRejectsUnrelatedXmlDocument() throws Exception {
         assertEquals(CommandLine.ExitCode.SOFTWARE, convertSyntheticReport("<other/>"));
         assertFalse(Files.exists(tempDir.resolve("converted.xml")));

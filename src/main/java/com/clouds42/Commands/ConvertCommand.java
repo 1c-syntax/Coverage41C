@@ -219,6 +219,7 @@ public class ConvertCommand implements Callable<Integer> {
             }
 
             DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
+            builderFactory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
             DocumentBuilder builder = builderFactory.newDocumentBuilder();
             Element coverage = validateRawReport(builder.parse(fileIS));
             NodeList fileNodeList = coverage.getElementsByTagName("file");
@@ -241,14 +242,12 @@ public class ConvertCommand implements Callable<Integer> {
                 if (!coverMap.isEmpty()) {
                     NodeList lineNoNodeList = fileNode.getChildNodes();
                     for (int lineNoNodeNumber = 0; lineNoNodeNumber < lineNoNodeList.getLength(); lineNoNodeNumber++) {
-                        Node lineNoNode = lineNoNodeList.item(lineNoNodeNumber);
-                        if (!lineNoNode.getNodeName().equals("lineToCover")) {
+                        if (!(lineNoNodeList.item(lineNoNodeNumber) instanceof Element entry)
+                                || !"lineToCover".equals(entry.getTagName())
+                                || !"true".equals(entry.getAttribute("covered"))) {
                             continue;
                         }
-                        if (!lineNoNode.getAttributes().getNamedItem("covered").getTextContent().equals("true")) {
-                            continue;
-                        }
-                        BigDecimal lineNo = parseRawLineNumber(attribute(lineNoNode, "lineNumber"));
+                        BigDecimal lineNo = parseRawLineNumber(entry.getAttribute("lineNumber"));
                         if (!coverMap.containsKey(lineNo)) {
                             if (loggingOptions.isVerbose()) {
                                 logger.info("Can't find line to cover {} in module {}", lineNo, fileUri);

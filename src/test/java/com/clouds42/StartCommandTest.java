@@ -1174,6 +1174,37 @@ class StartCommandTest {
     }
 
     @Test
+    void successfulLookupWithoutUserStillLeavesFinalCollectionIncomplete() throws Exception {
+        assertNamelessFinalMeasureMakesRunIncomplete(false);
+    }
+
+    @Test
+    void namelessFinalMeasureDuringLookupCooldownLeavesCollectionIncomplete() throws Exception {
+        assertNamelessFinalMeasureMakesRunIncomplete(true);
+    }
+
+    private void assertNamelessFinalMeasureMakesRunIncomplete(boolean lookUpBeforeStop) throws Exception {
+        DebugTargetId allowed = user("suite");
+        DebugTargetId nameless = FakeDebugServer.target(UUID.randomUUID(), DebugTargetType.MANAGED_CLIENT, null);
+        dbgs.setTargets(allowed, nameless);
+        Future<Integer> collector = start("--include-user", "suite");
+        dbgs.deliver(FakeDebugServer.measure(allowed, OBJECT_ID, PROPERTY_ID, 2, 1));
+        int requestsBeforeLookup = dbgs.requests("getDbgTargets").size();
+
+        if (lookUpBeforeStop) {
+            dbgs.deliver(FakeDebugServer.measure(nameless, OBJECT_ID, PROPERTY_ID, 11, 1));
+            assertEquals(requestsBeforeLookup + 1, dbgs.requests("getDbgTargets").size());
+        }
+        dbgs.deliverOnMeasureOff(FakeDebugServer.measure(nameless, OBJECT_ID, PROPERTY_ID, 11, 1),
+                FakeDebugServer.measure(allowed, OBJECT_ID, PROPERTY_ID, 10, 1));
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(requestsBeforeLookup + 1, dbgs.requests("getDbgTargets").size());
+        assertEquals(Map.of(2, true, 10, true, 11, false), coverage());
+    }
+
+    @Test
     void failedLookupOfNamelessFinalMeasureFailsCollectionButKnownUserStillCounts() throws Exception {
         DebugTargetId known = user("suite");
         DebugTargetId late = user("suite");

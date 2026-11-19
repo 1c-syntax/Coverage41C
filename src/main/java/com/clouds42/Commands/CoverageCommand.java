@@ -339,8 +339,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                                 || !(command instanceof DBGUIExtCmdInfoMeasure measurement)) {
                             throw new IllegalArgumentException("Debugger measurement command and payload type differ");
                         }
-                        boolean lookupNeeded = targets.needsLookup(measurement);
-                        if (lookupNeeded) {
+                        if (targets.needsLookup(measurement)) {
                             String id = UserTargets.targetIdOf(measurement);
                             if (!refreshAttempted) {
                                 refreshAttempted = true;
@@ -353,7 +352,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                         UserTargets.Verdict verdict = targets.verdict(measurement, loggingOptions.isVerbose());
                         if (verdict == UserTargets.Verdict.ACCEPTED) {
                             measureResultProcessing(uriListByKey, externalDataProcessorsUriSet, measurement);
-                        } else if (verdict == UserTargets.Verdict.UNKNOWN && lookupNeeded && !listAvailable) {
+                        } else if (verdict == UserTargets.Verdict.UNKNOWN) {
                             markFinalCollectionIncomplete();
                         }
                     } else if (commandType == DBGUIExtCmds.TARGET_STARTED) {

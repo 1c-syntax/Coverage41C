@@ -44,6 +44,18 @@ class CoverageHitsTest {
     }
 
     @Test
+    void zeroHitsKeepAutoLineOptionalUntilItExecutes() {
+        Map<BigDecimal, Integer> coverMap = coverMap(5, -1);
+
+        assertTrue(CoverageHits.add(coverMap, line(5), 0, false));
+        assertEquals(Map.of(line(5), -1), coverMap);
+
+        assertTrue(CoverageHits.add(coverMap, line(5), Integer.MAX_VALUE, false));
+        assertTrue(CoverageHits.add(coverMap, line(5), 1, false));
+        assertEquals(Map.of(line(5), Integer.MAX_VALUE), coverMap);
+    }
+
+    @Test
     void executedAutoLineCountsAsCovered() {
         Map<BigDecimal, Integer> coverMap = coverMap(5, -1);
 

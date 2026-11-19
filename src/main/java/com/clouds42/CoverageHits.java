@@ -62,7 +62,11 @@ public final class CoverageHits {
         if (!rawMode && !coverMap.containsKey(lineNo)) {
             return false;
         }
-        long total = (long) Math.max(coverMap.getOrDefault(lineNo, 0), 0) + hits;
+        int previousHits = coverMap.getOrDefault(lineNo, 0);
+        if (previousHits == -1 && hits == 0) {
+            return true;
+        }
+        long total = (long) Math.max(previousHits, 0) + hits;
         coverMap.put(lineNo, (int) Math.min(total, Integer.MAX_VALUE));
         return true;
     }
