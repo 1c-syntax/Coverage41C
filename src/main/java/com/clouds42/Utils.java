@@ -306,6 +306,9 @@ public class Utils {
             if (metadataOptions.getExclusionReportFile() != null) {
                 throw new IllegalArgumentException("Exclusion report requires source files");
             }
+            if (rawInput != null) {
+                throw new IllegalArgumentException("Conversion requires source files");
+            }
             logger.info("Sources directory not set. Enabling RAW mode");
             rawMode = true;
         } else {
@@ -654,9 +657,10 @@ public class Utils {
 
         Map<String, URI> externalDataProcessorUriListByKey;
         if (documentRootTagName.equals("MetaDataObject")) {
-            externalDataProcessorUriListByKey = readConfiguratorExternalDataProcessor(rootPath, xmlDocument, builder);
-        } else if (documentRootTagName.equals("mdclass:ExternalDataProcessor")) {
-            externalDataProcessorUriListByKey = readEdtExternalDataProcessor(rootPath, xmlDocument);
+            externalDataProcessorUriListByKey = readConfiguratorExternalSource(rootPath, xmlDocument, builder);
+        } else if (documentRootTagName.equals("mdclass:ExternalDataProcessor")
+                || documentRootTagName.equals("mdclass:ExternalReport")) {
+            externalDataProcessorUriListByKey = readEdtExternalSource(rootPath, xmlDocument);
         } else {
             throw new IllegalArgumentException("Unknown source format: " + rootPath);
         }
@@ -668,18 +672,18 @@ public class Utils {
         });
     }
 
-    private static Map<String, URI> readConfiguratorExternalDataProcessor(Path rootPath,
-                                                                          Document xmlDocument,
-                                                                          DocumentBuilder builder)
+    private static Map<String, URI> readConfiguratorExternalSource(Path rootPath, Document xmlDocument,
+                                                                   DocumentBuilder builder)
             throws XPathExpressionException {
 
         Map<String, URI> uriListByKey = new HashMap<>();
         XPath xPath = XPathFactory.newInstance().newXPath();
         Path parentPath = rootPath.toAbsolutePath().getParent();
         String externalDataProcessorName = com.google.common.io.Files.getNameWithoutExtension(rootPath.toString());
-        String externalDataProcessorUuid = (String) xPath.compile("/MetaDataObject/ExternalDataProcessor/@uuid")
+        String externalObjectUuid = (String) xPath.compile(
+                        "/MetaDataObject/ExternalDataProcessor/@uuid | /MetaDataObject/ExternalReport/@uuid")
                 .evaluate(xmlDocument, XPathConstants.STRING);
-        uriListByKey.put(getUriKey(externalDataProcessorUuid, ModuleType.ObjectModule, null),
+        uriListByKey.put(getUriKey(externalObjectUuid, ModuleType.ObjectModule, null),
                 parentPath.resolve(Paths.get(externalDataProcessorName, "Ext", "ObjectModule.bsl")).toUri());
 
         Path formsPath = parentPath.resolve(Paths.get(externalDataProcessorName, "Forms"));
@@ -707,19 +711,19 @@ public class Utils {
         return uriListByKey;
     }
 
-    private static Map<String, URI> readEdtExternalDataProcessor(Path rootPath, Document xmlDocument)
+    private static Map<String, URI> readEdtExternalSource(Path rootPath, Document xmlDocument)
             throws XPathExpressionException {
 
         Map<String, URI> uriListByKey = new HashMap<>();
         XPath xPath = XPathFactory.newInstance().newXPath();
         Path parentPath = rootPath.toAbsolutePath().getParent();
-        String externalDataProcessorUuid = (String) xPath.compile("/ExternalDataProcessor/@uuid")
+        String externalObjectUuid = (String) xPath.compile("/*/@uuid")
                 .evaluate(xmlDocument, XPathConstants.STRING);
-        uriListByKey.put(getUriKey(externalDataProcessorUuid, ModuleType.ObjectModule, null),
+        uriListByKey.put(getUriKey(externalObjectUuid, ModuleType.ObjectModule, null),
                 parentPath.resolve("ObjectModule.bsl").toUri());
 
         Path formsPath = parentPath.resolve("Forms");
-        NodeList formsNodeList = (NodeList) xPath.compile("/ExternalDataProcessor/forms")
+        NodeList formsNodeList = (NodeList) xPath.compile("/*/forms")
                 .evaluate(xmlDocument, XPathConstants.NODESET);
         for (int nodeNumber = 0; nodeNumber < formsNodeList.getLength(); nodeNumber++) {
             Node formsNode = formsNodeList.item(nodeNumber);
@@ -849,7 +853,7 @@ public class Utils {
         if (projectDirArray.length > 2) {
             sourceElement.setTextContent("/builds/" + projectDirArray[projectDirArray.length - 2] + "/" + projectDirArray[projectDirArray.length - 1] + "/");
         } else {
-            sourcesElement.setTextContent(projectUri.getPath());
+            sourceElement.setTextContent(projectUri.getPath());
         }
         sourcesElement.appendChild(sourceElement);
 
@@ -942,11 +946,11 @@ public class Utils {
             writer.printf("SF:%s\n", projectUri.relativize(uri).getPath());
             coverMap.forEach((lineNumber, hits) -> {
                 if (hits >= 0) {
-                    writer.printf("DA:%s,%d\n", lineNumber.toString(), hits);
+                    writer.printf(Locale.ROOT, "DA:%s,%d\n", lineNumber.toString(), hits);
                 }
             });
-            writer.printf("LH:%d\n", coveredLines(coverMap));
-            writer.printf("LF:%d\n", linesToCover(coverMap));
+            writer.printf(Locale.ROOT, "LH:%d\n", coveredLines(coverMap));
+            writer.printf(Locale.ROOT, "LF:%d\n", linesToCover(coverMap));
             writer.println("end_of_record");
         });
         writer.flush();

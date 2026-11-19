@@ -24,6 +24,7 @@ package com.clouds42;
 import com._1c.g5.v8.dt.debug.model.base.data.AttachDebugUIResult;
 import com._1c.g5.v8.dt.debug.model.base.data.DebugTargetId;
 import com._1c.g5.v8.dt.debug.model.base.data.DebugTargetType;
+import com._1c.g5.v8.dt.debug.model.dbgui.commands.DBGUIExtCmdInfoBase;
 import com._1c.g5.v8.dt.debug.model.dbgui.commands.DBGUIExtCmdInfoMeasure;
 import com._1c.g5.v8.dt.debug.model.dbgui.commands.DBGUIExtCmds;
 import com.clouds42.CommandLineOptions.ConnectionOptions;
@@ -189,6 +190,59 @@ class StartCommandTest {
         assertTrue(Files.exists(report));
         assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
         assertEquals(CommandLine.ExitCode.OK, start.get(TIMEOUT, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void stopDrainsSixFinalMeasuresReturnedInSeparatePolls() throws Exception {
+        Future<Integer> collector = start("-f", "LCOV");
+        dbgs.deliverAcrossFinalPolls(separateFinalMeasures(6));
+
+        assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        List<String> lcov = Files.readAllLines(output);
+        assertTrue(lcov.contains("DA:10,6"), lcov.toString());
+    }
+
+    @Test
+    void inFlightEmptyPollDoesNotConfirmFinalQuietWindow() throws Exception {
+        Future<Integer> collector = start("-f", "LCOV");
+        dbgs.pause("pingDebugUIParams");
+        Future<Integer> stop;
+        try {
+            dbgs.awaitPaused("pingDebugUIParams");
+            dbgs.deliverAcrossFinalPolls(List.of(List.of(), List.of(),
+                    List.of(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 10, 1)), List.of(),
+                    List.of(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 10, 1))));
+            stop = executor.submit(() -> send(PipeMessages.EXIT_COMMAND));
+            waitForFinalMeasureThread();
+        } finally {
+            dbgs.resume("pingDebugUIParams");
+        }
+
+        assertEquals(CommandLine.ExitCode.OK, stop.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        List<String> lcov = Files.readAllLines(output);
+        assertTrue(lcov.contains("DA:10,2"), lcov.toString());
+    }
+
+    @Test
+    void sustainedFinalMeasuresFailAtDeadlineAndWriteAvailableCoverage() throws Exception {
+        Future<Integer> collector = start();
+        dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
+        // At 40 ms per scripted poll the debugger never goes quiet before the stop deadline.
+        dbgs.deliverAcrossFinalPolls(separateFinalMeasures(300));
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(Map.of(2, true, 10, true, 11, false), coverage());
+    }
+
+    private List<List<DBGUIExtCmdInfoBase>> separateFinalMeasures(int count) {
+        List<List<DBGUIExtCmdInfoBase>> finals = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            finals.add(List.of(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 10, 1)));
+        }
+        return finals;
     }
 
     @Test

@@ -67,6 +67,90 @@ class ExternalDataProcessorTest {
     Path tempDir;
 
     @Test
+    void convertsConfiguratorExternalReport() throws Exception {
+        Path descriptor = tempDir.resolve("ExternalReport.xml");
+        writeConfiguratorExternalSource(descriptor, "ExternalReport");
+
+        Map<String, Map<Integer, Boolean>> coverage = convertExternalSource(
+                descriptor.getFileName().toString(), "-P", tempDir.toString());
+        assertEquals(Map.of(2, true, 3, false), coverage.get("ExternalReport/Ext/ObjectModule.bsl"));
+        assertEquals(Map.of(2, true, 3, false), coverage.get("ExternalReport/Forms/Форма/Ext/Form/Module.bsl"));
+    }
+
+    @Test
+    void convertsEdtExternalReport() throws Exception {
+        Path descriptor = tempDir.resolve("ExternalReport.mdo");
+        Files.writeString(descriptor, "<mdclass:ExternalReport xmlns:mdclass=\"http://g5.1c.ru/v8/dt/metadata/mdclass\""
+                + " uuid=\"5b8f36b6-34dc-45b7-8b1b-c999e4300d22\"><name>ExternalReport</name>"
+                + "<forms uuid=\"7b4e9be1-f638-4a2a-9cc1-41bdb5e73c88\"><name>Форма</name></forms>"
+                + "</mdclass:ExternalReport>");
+        writeExternalModule(tempDir.resolve("ObjectModule.bsl"));
+        writeExternalModule(tempDir.resolve("Forms/Форма/Module.bsl"));
+
+        Map<String, Map<Integer, Boolean>> coverage = convertExternalSource(
+                descriptor.getFileName().toString(), "-P", tempDir.toString());
+        assertEquals(Map.of(2, true, 3, false), coverage.get("ObjectModule.bsl"));
+        assertEquals(Map.of(2, true, 3, false), coverage.get("Forms/Форма/Module.bsl"));
+    }
+
+    @Test
+    void convertsExternalProcessorFromCurrentDirectoryWithoutProjectOption() throws Exception {
+        Path sources = Files.createTempDirectory(Path.of("").toAbsolutePath(), "Coverage41CExternal");
+        String name = sources.getFileName().toString();
+        Path descriptor = sources.resolveSibling(name + ".xml");
+        try {
+            Files.createFile(descriptor);
+            try {
+                writeConfiguratorExternalSource(descriptor, "ExternalDataProcessor");
+                Map<String, Map<Integer, Boolean>> coverage = convertExternalSource(descriptor.getFileName().toString());
+                assertTrue(coverage.entrySet().stream().anyMatch(entry ->
+                        entry.getKey().endsWith(name + "/Ext/ObjectModule.bsl")
+                                && entry.getValue().equals(Map.of(2, true, 3, false))), coverage.toString());
+            } finally {
+                Files.delete(descriptor);
+            }
+        } finally {
+            deleteDirectory(sources);
+        }
+    }
+
+    private static void writeConfiguratorExternalSource(Path descriptor, String kind) throws IOException {
+        String name = descriptor.getFileName().toString().replaceFirst("\\.xml$", "");
+        String metadata = "<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\">";
+        Files.writeString(descriptor, metadata + "<" + kind + " uuid=\"5b8f36b6-34dc-45b7-8b1b-c999e4300d22\">"
+                + "<Properties><Name>" + name + "</Name></Properties><ChildObjects><Form>Форма</Form></ChildObjects>"
+                + "</" + kind + "></MetaDataObject>");
+        Path sources = descriptor.resolveSibling(name);
+        writeExternalModule(sources.resolve("Ext/ObjectModule.bsl"));
+        writeExternalModule(sources.resolve("Forms/Форма/Ext/Form/Module.bsl"));
+        Files.writeString(sources.resolve("Forms/Форма.xml"), metadata
+                + "<Form uuid=\"7b4e9be1-f638-4a2a-9cc1-41bdb5e73c88\"><Properties>"
+                + "<Name>Форма</Name></Properties></Form></MetaDataObject>");
+    }
+
+    private static void writeExternalModule(Path module) throws IOException {
+        Files.createDirectories(module.getParent());
+        Files.writeString(module, OBJECT_MODULE.replace(" // Cover:off", ""));
+    }
+
+    private Map<String, Map<Integer, Boolean>> convertExternalSource(String descriptor, String... projectOptions)
+            throws Exception {
+        Path raw = tempDir.resolve("report-raw.xml");
+        Files.writeString(raw, "<coverage version=\"1\">"
+                + "<file path=\"/5b8f36b6-34dc-45b7-8b1b-c999e4300d22/a637f77f-3840-441d-a1c3-699c8c5cb7e0\">"
+                + "<lineToCover covered=\"true\" lineNumber=\"2\"/></file>"
+                + "<file path=\"/7b4e9be1-f638-4a2a-9cc1-41bdb5e73c88/32e087ab-1491-49b6-aba7-43571b41ac2b\">"
+                + "<lineToCover covered=\"true\" lineNumber=\"2\"/></file></coverage>");
+        Path output = tempDir.resolve("report-coverage.xml");
+        List<String> args = new ArrayList<>(List.of(PipeMessages.CONVERT_COMMAND, "-s", descriptor,
+                "-c", raw.toString(), "-o", output.toString()));
+        args.addAll(Arrays.asList(projectOptions));
+        StringWriter stderr = new StringWriter();
+        assertEquals(CommandLine.ExitCode.OK, execute(stderr, args.toArray(new String[0])), stderr.toString());
+        return MultipleSourcesTest.coverage(output);
+    }
+
+    @Test
     void rejectsExclusionReportAtSourceDescriptor() throws Exception {
         Path descriptor = copyProcessorDescriptor();
         Path output = tempDir.resolve("coverage.xml");

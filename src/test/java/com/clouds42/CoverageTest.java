@@ -132,8 +132,8 @@ class CoverageTest {
 
     @Test
     void testInternal() throws InterruptedException, ExecutionException, IOException {
-        String expectedIntXmlFileName = "src/test/resources/coverage/internal.xml";
-        testCoverage(null, expectedIntXmlFileName);
+        String expectedRawXmlFileName = "src/test/resources/coverage/start-raw.xml";
+        testCoverage(null, expectedRawXmlFileName);
     }
 
     void testCoverage(

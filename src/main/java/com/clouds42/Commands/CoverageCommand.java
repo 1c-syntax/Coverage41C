@@ -61,7 +61,6 @@ import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 import java.util.stream.Stream;
 
@@ -128,10 +127,12 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     private boolean rawMode = false;
     private volatile boolean systemStarted = false;
     private volatile boolean mainLoopRunning = false;
-    private final AtomicLong pingsProcessed = new AtomicLong();
+    private volatile Long finalPollDeadlineNanos;
+    private int quietFinalPolls; // Guarded by coverageData.
 
     // How long stop waits for the measures the platform sends after profiling is off.
     private static final long FINAL_MEASURES_TIMEOUT_SECONDS = 10;
+    private static final int REQUIRED_QUIET_FINAL_POLLS = 2;
     private static final long FAILED_LOOKUP_INTERVAL_NANOS = TimeUnit.SECONDS.toNanos(1);
     private long targetLookupAllowedAt = System.nanoTime();
 
@@ -300,13 +301,18 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         try {
             pingLoop(uriListByKey, externalDataProcessorsUriSet);
         } finally {
-            mainLoopRunning = false;
+            synchronized (coverageData) {
+                mainLoopRunning = false;
+                coverageData.notifyAll();
+            }
         }
     }
 
     private void pingLoop(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet)
             throws RuntimeDebugClientException, InterruptedException {
         while (!stopExecution.get()) {
+            // Capture eligibility before the request. An in-flight poll may predate profiling disable.
+            Long drainDeadline = finalPollDeadlineNanos;
             Optional<List<? extends DBGUIExtCmdInfoBase>> poll;
             try {
                 poll = client.pollDebugServer();
@@ -325,6 +331,9 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                 poll = Optional.empty();
             }
             if (poll.isEmpty()) {
+                if (shouldStopAfterFinalPoll(drainDeadline, false)) {
+                    return;
+                }
                 Thread.sleep(Math.max(10, debuggerOptions.getPingTimeout()));
                 continue;
             }
@@ -332,6 +341,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
             logger.info("Ping result commands size: {}", commandsList.size());
             boolean refreshAttempted = false;
             boolean listAvailable = false;
+            boolean hasMeasures = false;
             for (DBGUIExtCmdInfoBase command : commandsList) {
                 if (stopExecution.get()) {
                     return;
@@ -339,6 +349,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                 DBGUIExtCmds commandType = command.getCmdID();
                 boolean measure = commandType == DBGUIExtCmds.MEASURE_RESULT_PROCESSING
                         || command instanceof DBGUIExtCmdInfoMeasure;
+                hasMeasures |= measure;
                 logger.info("Command: {}", commandType.getName());
                 // One malformed command must not discard later measurements.
                 try {
@@ -381,7 +392,22 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                     }
                 }
             }
-            pingsProcessed.incrementAndGet();
+            if (shouldStopAfterFinalPoll(drainDeadline, !hasMeasures)) {
+                return;
+            }
+        }
+    }
+
+    private boolean shouldStopAfterFinalPoll(Long deadline, boolean quiet) {
+        if (deadline == null) {
+            return false;
+        }
+        synchronized (coverageData) {
+            if (stopExecution.get() || System.nanoTime() - deadline >= 0) {
+                return true;
+            }
+            quietFinalPolls = quiet ? quietFinalPolls + 1 : 0;
+            return quietFinalPolls >= REQUIRED_QUIET_FINAL_POLLS;
         }
     }
 
@@ -595,19 +621,21 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         }
     }
 
-    // The platform sends the last measures in a ping after profiling is off. A ping already in progress
-    // may miss them, so wait until two more pings are processed.
+    // The platform can spread the last measures over multiple polls after profiling is off.
     private boolean awaitFinalMeasures() throws InterruptedException {
-        long target = pingsProcessed.get() + 2;
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(FINAL_MEASURES_TIMEOUT_SECONDS);
-        while (System.nanoTime() - deadline < 0) {
-            if (pingsProcessed.get() >= target) {
+        synchronized (coverageData) {
+            finalPollDeadlineNanos = deadline;
+            while (mainLoopRunning && quietFinalPolls < REQUIRED_QUIET_FINAL_POLLS) {
+                long remaining = deadline - System.nanoTime();
+                if (remaining <= 0) {
+                    break;
+                }
+                TimeUnit.NANOSECONDS.timedWait(coverageData, remaining);
+            }
+            if (quietFinalPolls >= REQUIRED_QUIET_FINAL_POLLS) {
                 return true;
             }
-            if (!mainLoopRunning) {
-                break;
-            }
-            Thread.sleep(20);
         }
         logger.error("Can't finish collecting final measures before the deadline or debugger shutdown");
         return false;

@@ -21,6 +21,7 @@
  */
 package com.clouds42;
 
+import com.clouds42.CommandLineOptions.MetadataOptions;
 import com.clouds42.CommandLineOptions.OutputOptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -37,11 +38,15 @@ import java.io.OutputStream;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -79,6 +84,57 @@ class CoverageFileTest {
         Document document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(output.toFile());
         assertTrue(count(document, "/coverage/packages/package/classes/class/lines/line") > 0);
         assertEquals(0, count(document, "/coverage/packages/package/classes/class/line"));
+    }
+
+    @Test
+    void rejectsConversionWithoutSourcesBeforeCreatingOutput() {
+        Path output = tempDir.resolve("coverage.xml");
+        StringWriter stderr = new StringWriter();
+        CommandLine command = Coverage41C.getCommandLine();
+        command.setErr(new PrintWriter(stderr, true));
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, command.execute(
+                PipeMessages.CONVERT_COMMAND, "-c", INTERNAL_XML, "-o", output.toString()), stderr.toString());
+        assertTrue(stderr.toString().contains("Conversion requires source files"), stderr.toString());
+        assertFalse(Files.exists(output));
+    }
+
+    @Test
+    void coberturaPlacesRootProjectPathInSourceElement() throws Exception {
+        Path project = tempDir.toAbsolutePath().getRoot();
+        Path output = tempDir.resolve("cobertura.xml");
+        MetadataOptions metadata = CommandLine.populateCommand(new MetadataOptions(), "-P", project.toString());
+        OutputOptions options = CommandLine.populateCommand(new OutputOptions(), "-f", "COBERTURA", "-o", output.toString());
+        Utils.dumpCoverageFile(Map.of(project.resolve("Module.bsl").toUri(), Map.of(BigDecimal.ONE, 1)), metadata, options);
+
+        Document document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(output.toFile());
+        String source = XPathFactory.newInstance().newXPath().evaluate("/coverage/sources/source", document);
+        assertEquals(project.toUri().getPath(), source);
+    }
+
+    @Test
+    void lcovUsesAsciiDigitsWithArabicLocale() throws Exception {
+        Path output = tempDir.resolve("coverage.lcov");
+        StringWriter stderr = new StringWriter();
+        Locale original = Locale.getDefault();
+        Locale originalFormat = Locale.getDefault(Locale.Category.FORMAT);
+        Locale originalDisplay = Locale.getDefault(Locale.Category.DISPLAY);
+        try {
+            Locale.setDefault(Locale.forLanguageTag("ar-EG-u-nu-arab"));
+            assertEquals(CommandLine.ExitCode.OK, convert(stderr, "-f", "LCOV", "-o", output.toString()),
+                    stderr.toString());
+        } finally {
+            Locale.setDefault(original);
+            Locale.setDefault(Locale.Category.FORMAT, originalFormat);
+            Locale.setDefault(Locale.Category.DISPLAY, originalDisplay);
+        }
+
+        List<String> records = Files.readAllLines(output);
+        assertTrue(records.stream().anyMatch(line -> line.matches("DA:[0-9]+,1")), records.toString());
+        assertTrue(records.stream().anyMatch(line -> line.startsWith("LH:")));
+        assertTrue(records.stream().anyMatch(line -> line.startsWith("LF:")));
+        assertTrue(records.stream().filter(line -> line.startsWith("DA:") || line.startsWith("LH:") || line.startsWith("LF:"))
+                .allMatch(line -> line.matches("DA:[0-9]+,[0-9]+|L[HF]:[0-9]+")), records.toString());
     }
 
     @Test

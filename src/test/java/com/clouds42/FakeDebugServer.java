@@ -82,6 +82,8 @@ class FakeDebugServer implements AutoCloseable {
     private final List<Request> requests = new CopyOnWriteArrayList<>();
     private final BlockingQueue<DBGUIExtCmdInfoBase> events = new LinkedBlockingQueue<>();
     private final List<DBGUIExtCmdInfoBase> eventsOnMeasureOff = new CopyOnWriteArrayList<>();
+    private final BlockingQueue<List<DBGUIExtCmdInfoBase>> finalPolls = new LinkedBlockingQueue<>();
+    private volatile boolean profilingDisabled;
     private final AtomicInteger pings = new AtomicInteger();
     private volatile boolean proxyPings;
     private final AtomicBoolean proxyNextPing = new AtomicBoolean();
@@ -209,6 +211,10 @@ class FakeDebugServer implements AutoCloseable {
         eventsOnMeasureOff.addAll(List.of(newEvents));
     }
 
+    void deliverAcrossFinalPolls(List<List<DBGUIExtCmdInfoBase>> polls) {
+        finalPolls.addAll(polls);
+    }
+
     // Отдаёт события в очередной ping и ждёт, пока Coverage41C их обработает и придёт за следующими.
     void deliver(DBGUIExtCmdInfoBase... newEvents) throws InterruptedException {
         queueEvents(newEvents);
@@ -322,6 +328,9 @@ class FakeDebugServer implements AutoCloseable {
                 pause.release.await();
             }
             boolean turningProfilingOff = command.equals("setMeasureMode") && !body.contains("measureModeSeanceID");
+            if (command.equals("setMeasureMode")) {
+                profilingDisabled = turningProfilingOff;
+            }
             if (turningProfilingOff) {
                 events.addAll(eventsOnMeasureOff);
                 eventsOnMeasureOff.clear();
@@ -406,6 +415,12 @@ class FakeDebugServer implements AutoCloseable {
     private EObject ping() throws InterruptedException {
         pings.incrementAndGet();
         RDBGPingDebugUIResponse ping = ResponseFactory.eINSTANCE.createRDBGPingDebugUIResponse();
+        List<DBGUIExtCmdInfoBase> finalPoll = profilingDisabled ? finalPolls.poll() : null;
+        if (finalPoll != null) {
+            Thread.sleep(40);
+            ping.getResult().addAll(finalPoll);
+            return ping;
+        }
         DBGUIExtCmdInfoBase event = events.poll(20, TimeUnit.MILLISECONDS);
         if (event != null) {
             ping.getResult().add(event);
