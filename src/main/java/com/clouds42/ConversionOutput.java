@@ -29,14 +29,22 @@ import java.nio.channels.FileChannel;
 import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.AclEntry;
+import java.nio.file.attribute.AclEntryPermission;
+import java.nio.file.attribute.AclEntryType;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.FileAttribute;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.EnumSet;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /** Serialize both reports before publishing either. Keep the original inodes, links and access rights. */
@@ -108,14 +116,51 @@ final class ConversionOutput {
     private static final class Temporary implements Closeable {
         private final Path path;
 
+        private final boolean inPrivateDirectory;
+
         private Temporary(Path path) {
+            this(path, false);
+        }
+
+        private Temporary(Path path, boolean inPrivateDirectory) {
             this.path = path;
+            this.inPrivateDirectory = inPrivateDirectory;
+        }
+
+        // Apply the restriction at creation, including when staging has to use the system temp folder.
+        private static FileAttribute<?> ownerAccess(FileSystem fs) throws IOException {
+            if (fs.supportedFileAttributeViews().contains("posix")) {
+                return PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------"));
+            }
+            if (!fs.supportedFileAttributeViews().contains("acl")) {
+                throw new IOException("Temporary reports require a filesystem with private file permissions");
+            }
+            AclEntry owner = AclEntry.newBuilder().setType(AclEntryType.ALLOW)
+                    .setPrincipal(fs.getUserPrincipalLookupService().lookupPrincipalByName(System.getProperty("user.name")))
+                    .setPermissions(EnumSet.allOf(AclEntryPermission.class)).build();
+            return new FileAttribute<List<AclEntry>>() {
+                @Override public String name() { return "acl:acl"; }
+                @Override public List<AclEntry> value() { return List.of(owner); }
+            };
+        }
+
+        static Temporary forNewOutput(Path parent) throws IOException {
+            Path directory = Files.createTempDirectory(parent, ".coverage41c-",
+                    PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
+            try {
+                // Use ordinary output permissions under the umask, behind an owner-only directory.
+                return new Temporary(Files.createFile(directory.resolve("output")), true);
+            } catch (IOException | RuntimeException failure) {
+                Files.delete(directory);
+                throw failure;
+            }
         }
 
         static Temporary create(Path near) throws IOException {
             if (near != null && near.getParent() != null && !isSpecialFile(near)) {
                 try {
-                    return new Temporary(Files.createTempFile(near.toAbsolutePath().getParent(), ".coverage41c-", ".tmp"));
+                    return new Temporary(Files.createTempFile(near.toAbsolutePath().getParent(), ".coverage41c-", ".tmp",
+                            ownerAccess(near.getFileSystem())));
                 } catch (AccessDeniedException denied) {
                     // An existing output can be writable even if its directory only permits traversal.
                     if (!Files.isWritable(near)) {
@@ -125,12 +170,15 @@ final class ConversionOutput {
                     throw new IOException("Cannot prepare report output: " + near, failure);
                 }
             }
-            return new Temporary(Files.createTempFile("coverage41c-", ".tmp"));
+            return new Temporary(Files.createTempFile("coverage41c-", ".tmp", ownerAccess(FileSystems.getDefault())));
         }
 
         @Override
         public void close() throws IOException {
             Files.deleteIfExists(path);
+            if (inPrivateDirectory) {
+                Files.delete(path.getParent());
+            }
         }
     }
 
@@ -223,21 +271,22 @@ final class ConversionOutput {
         // empty placeholder before its creator. Use the ordinary create-file mode under the umask.
         private static Destination create(Path path) throws IOException {
             Path parent = path.toAbsolutePath().getParent();
-            Path scratch = path.getFileSystem().supportedFileAttributeViews().contains("posix")
-                    ? Files.createTempFile(parent, ".coverage41c-", ".tmp", PosixFilePermissions.asFileAttribute(
-                            PosixFilePermissions.fromString("rw-rw-rw-")))
-                    : Files.createTempFile(parent, ".coverage41c-", ".tmp");
+            if (!path.getFileSystem().supportedFileAttributeViews().contains("posix")) {
+                // Let the new output inherit the destination directory's ACL.
+                return createWithMarker(path);
+            }
+            Temporary scratch = Temporary.forNewOutput(parent);
             boolean linked = false;
             boolean alreadyExists = false;
             try {
-                FileChannel channel = FileChannel.open(scratch, StandardOpenOption.WRITE);
+                FileChannel channel = FileChannel.open(scratch.path, StandardOpenOption.WRITE);
                 try {
-                    Object fileKey = Files.readAttributes(scratch, BasicFileAttributes.class).fileKey();
-                    lock(channel, scratch);
+                    Object fileKey = Files.readAttributes(scratch.path, BasicFileAttributes.class).fileKey();
+                    lock(channel, scratch.path);
                     try {
-                        Files.createLink(path, scratch);
+                        Files.createLink(path, scratch.path);
                         linked = true;
-                        return new Destination(path, channel, true, new Temporary(scratch), fileKey);
+                        return new Destination(path, channel, true, scratch, fileKey);
                     } catch (FileAlreadyExistsException collision) {
                         alreadyExists = true;
                     } catch (UnsupportedOperationException | IOException unsupported) {
@@ -250,7 +299,7 @@ final class ConversionOutput {
                 }
             } finally {
                 if (!linked) {
-                    Files.deleteIfExists(scratch);
+                    scratch.close();
                 }
             }
             return alreadyExists ? openExisting(path) : createWithMarker(path);

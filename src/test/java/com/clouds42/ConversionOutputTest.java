@@ -31,6 +31,7 @@ import java.nio.channels.FileLock;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -168,6 +169,31 @@ class ConversionOutputTest {
         assertEquals(Files.getPosixFilePermissions(reference), Files.getPosixFilePermissions(xml));
         assertEquals(Files.getPosixFilePermissions(reference), Files.getPosixFilePermissions(json));
         assertDirectorySize(3);
+    }
+
+    @Test
+    void temporaryNamesArePrivateDuringPublication() throws IOException {
+        org.junit.jupiter.api.Assumptions.assumeTrue(directory.getFileSystem().supportedFileAttributeViews().contains("posix"));
+        Path xml = directory.resolve("coverage.xml");
+        ConversionOutput.write(xml, null, stage -> {
+            assertEquals(PosixFilePermissions.fromString("rw-------"),
+                    Files.getPosixFilePermissions(stage));
+            Files.writeString(stage, "<new/>");
+        }, null, OutputStream.nullOutputStream());
+        Path json = directory.resolve("report.json");
+        ConversionOutput.publish(json, null, out -> {
+            try (Stream<Path> files = Files.list(directory)) {
+                for (Path entry : (Iterable<Path>) files::iterator) {
+                    if (entry.getFileName().toString().startsWith(".coverage41c-")) {
+                        assertTrue(Files.isDirectory(entry));
+                        assertEquals(PosixFilePermissions.fromString("rwx------"),
+                                Files.getPosixFilePermissions(entry));
+                    }
+                }
+            }
+            out.write(1);
+        }, null, OutputStream.nullOutputStream());
+        assertDirectorySize(2);
     }
 
     @Test
