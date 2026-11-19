@@ -86,6 +86,80 @@ class ConvertWithExclusionsTest {
     Path tempDir;
 
     @Test
+    void convertRejectsUnrelatedXmlDocument() throws Exception {
+        assertEquals(CommandLine.ExitCode.SOFTWARE, convertSyntheticReport("<other/>"));
+        assertFalse(Files.exists(tempDir.resolve("converted.xml")));
+    }
+
+    @Test
+    void convertRejectsCoberturaXmlDocument() throws Exception {
+        String cobertura = """
+                <coverage line-rate="0" branch-rate="0" version="0">
+                  <sources/>
+                  <packages/>
+                </coverage>
+                """;
+        assertEquals(CommandLine.ExitCode.SOFTWARE, convertSyntheticReport(cobertura));
+        assertFalse(Files.exists(tempDir.resolve("converted.xml")));
+    }
+
+    @Test
+    void convertRejectsNestedRawLineData() throws Exception {
+        String raw = "<coverage><file path=\"" + MODULE_KEY
+                + "\"><details><lineToCover covered=\"true\" lineNumber=\"2\"/></details></file></coverage>";
+        assertEquals(CommandLine.ExitCode.SOFTWARE, convertSyntheticReport(raw));
+        assertFalse(Files.exists(tempDir.resolve("converted.xml")));
+    }
+
+    @Test
+    void convertRejectsUnrecognizedCoveredValue() throws Exception {
+        String raw = "<coverage><file path=\"" + MODULE_KEY
+                + "\"><lineToCover covered=\"maybe\" lineNumber=\"2\"/></file></coverage>";
+        assertEquals(CommandLine.ExitCode.SOFTWARE, convertSyntheticReport(raw));
+        assertFalse(Files.exists(tempDir.resolve("converted.xml")));
+    }
+
+    @Test
+    void convertRejectsNonnumericCoveredLineNumber() throws Exception {
+        assertInvalidRawLineNumber("not-a-number", true);
+    }
+
+    @Test
+    void convertRejectsFractionalCoveredLineNumber() throws Exception {
+        assertInvalidRawLineNumber("2.5", true);
+    }
+
+    @Test
+    void convertRejectsMalformedUncoveredLineNumber() throws Exception {
+        assertInvalidRawLineNumber("invalid", false);
+    }
+
+    private void assertInvalidRawLineNumber(String number, boolean covered) throws IOException {
+        String raw = """
+                <coverage><file path="%s">
+                  <lineToCover covered="true" lineNumber="2"/>
+                  <lineToCover covered="%s" lineNumber="%s"/>
+                </file></coverage>
+                """.formatted(MODULE_KEY, covered, number);
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, convertSyntheticReport(raw));
+        assertFalse(Files.exists(tempDir.resolve("converted.xml")));
+    }
+
+    @Test
+    void convertAcceptsEmptyRawReportWithoutVersion() throws Exception {
+        assertEquals(CommandLine.ExitCode.OK, convertSyntheticReport("<coverage><!-- no hits --></coverage>"));
+        assertTrue(Files.size(tempDir.resolve("converted.xml")) > 0);
+    }
+
+    private int convertSyntheticReport(String report) throws IOException {
+        Path input = Files.writeString(tempDir.resolve("input.xml"), report);
+        return Coverage41C.getCommandLine().execute("convert", "-P", Path.of("").toAbsolutePath().toString(),
+                "-s", "src/test/resources/configuration", "-c", input.toString(),
+                "-o", tempDir.resolve("converted.xml").toString());
+    }
+
+    @Test
     void markersShapeGenericCoverage() throws Exception {
         Path output = convert(MARKED_MODULE, null, new int[]{2, 4, 7}, "GENERIC_COVERAGE");
 

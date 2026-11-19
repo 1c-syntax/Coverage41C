@@ -27,7 +27,7 @@ import com._1c.g5.v8.dt.debug.model.base.data.BSLModuleIdInternal;
 import com._1c.g5.v8.dt.debug.model.base.data.DebugTargetId;
 import com._1c.g5.v8.dt.debug.model.dbgui.commands.DBGUIExtCmdInfoBase;
 import com._1c.g5.v8.dt.debug.model.dbgui.commands.DBGUIExtCmds;
-import com._1c.g5.v8.dt.debug.model.dbgui.commands.impl.DBGUIExtCmdInfoMeasureImpl;
+import com._1c.g5.v8.dt.debug.model.dbgui.commands.DBGUIExtCmdInfoMeasure;
 import com._1c.g5.v8.dt.debug.model.dbgui.commands.impl.DBGUIExtCmdInfoStartedImpl;
 import com._1c.g5.v8.dt.debug.model.measure.PerformanceInfoLine;
 import com._1c.g5.v8.dt.debug.model.measure.PerformanceInfoMain;
@@ -42,7 +42,6 @@ import com.clouds42.MyRuntimeDebugModelXmlSerializer;
 import com.clouds42.PipeMessages;
 import com.clouds42.Utils;
 import com.clouds42.SourceKey;
-import org.eclipse.emf.common.util.EList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import picocli.CommandLine;
@@ -123,7 +122,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     private volatile boolean coverageWritten = true;
     private volatile boolean profilingFinished = true;
     private boolean collectingFinalMeasures;
-    private volatile boolean finalMeasureFailed;
+    private volatile boolean finalCollectionIncomplete;
     private boolean rawMode = false;
     private volatile boolean systemStarted = false;
     private volatile boolean mainLoopRunning = false;
@@ -300,9 +299,24 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     private void pingLoop(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet)
             throws RuntimeDebugClientException, InterruptedException {
         while (!stopExecution.get()) {
-            Optional<List<? extends DBGUIExtCmdInfoBase>> poll = client.pollDebugServer();
+            Optional<List<? extends DBGUIExtCmdInfoBase>> poll;
+            try {
+                poll = client.pollDebugServer();
+                if (poll.isEmpty()) {
+                    markFinalCollectionIncomplete();
+                    logger.debug("Ignoring an unrecognized debugger poll response");
+                }
+            } catch (RuntimeDebugClientException e) {
+                if (!markFinalCollectionIncomplete()) {
+                    if (stopExecution.get()) {
+                        return;
+                    }
+                    throw e;
+                }
+                logger.debug("Final debugger poll failed: {}", e.getLocalizedMessage());
+                poll = Optional.empty();
+            }
             if (poll.isEmpty()) {
-                logger.debug("Ignoring an unrecognized debugger poll response");
                 Thread.sleep(Math.max(10, debuggerOptions.getPingTimeout()));
                 continue;
             }
@@ -315,13 +329,19 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                     return;
                 }
                 DBGUIExtCmds commandType = command.getCmdID();
+                boolean measure = commandType == DBGUIExtCmds.MEASURE_RESULT_PROCESSING
+                        || command instanceof DBGUIExtCmdInfoMeasure;
                 logger.info("Command: {}", commandType.getName());
                 // One malformed command must not discard later measurements.
                 try {
-                    if (commandType == DBGUIExtCmds.MEASURE_RESULT_PROCESSING) {
-                        DBGUIExtCmdInfoMeasureImpl measure = (DBGUIExtCmdInfoMeasureImpl) command;
-                        if (targets.needsLookup(measure)) {
-                            String id = UserTargets.targetIdOf(measure);
+                    if (measure) {
+                        if (commandType != DBGUIExtCmds.MEASURE_RESULT_PROCESSING
+                                || !(command instanceof DBGUIExtCmdInfoMeasure measurement)) {
+                            throw new IllegalArgumentException("Debugger measurement command and payload type differ");
+                        }
+                        boolean lookupNeeded = targets.needsLookup(measurement);
+                        if (lookupNeeded) {
+                            String id = UserTargets.targetIdOf(measurement);
                             if (!refreshAttempted) {
                                 refreshAttempted = true;
                                 listAvailable = tryRefreshTargetList(id);
@@ -330,8 +350,11 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                                 targets.markUnknown(id);
                             }
                         }
-                        if (targets.verdict(measure, loggingOptions.isVerbose()) == UserTargets.Verdict.ACCEPTED) {
-                            measureResultProcessing(uriListByKey, externalDataProcessorsUriSet, measure);
+                        UserTargets.Verdict verdict = targets.verdict(measurement, loggingOptions.isVerbose());
+                        if (verdict == UserTargets.Verdict.ACCEPTED) {
+                            measureResultProcessing(uriListByKey, externalDataProcessorsUriSet, measurement);
+                        } else if (verdict == UserTargets.Verdict.UNKNOWN && lookupNeeded && !listAvailable) {
+                            markFinalCollectionIncomplete();
                         }
                     } else if (commandType == DBGUIExtCmds.TARGET_STARTED) {
                         targetStarted((DBGUIExtCmdInfoStartedImpl) command);
@@ -341,7 +364,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                         logger.info("Target {} quit", quit == null ? null : quit.getId());
                     }
                 } catch (RuntimeException e) {
-                    if (commandType == DBGUIExtCmds.MEASURE_RESULT_PROCESSING) {
+                    if (measure) {
                         reportMeasureFailure(e);
                     } else {
                         logger.error("Can't process command {}: {}", commandType.getName(), e, e);
@@ -353,7 +376,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     }
 
     private void measureResultProcessing(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet,
-                                         DBGUIExtCmdInfoMeasureImpl command) {
+                                         DBGUIExtCmdInfoMeasure command) {
         synchronized (coverageData) {
             if (stopExecution.get()) {
                 return;
@@ -375,12 +398,18 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     }
 
     private void reportMeasureFailure(RuntimeException failure) {
-        synchronized (coverageData) {
-            if (collectingFinalMeasures && !stopExecution.get()) {
-                finalMeasureFailed = true;
-            }
-        }
+        markFinalCollectionIncomplete();
         logger.error("Can't process measure: {}", failure.getMessage(), failure);
+    }
+
+    private boolean markFinalCollectionIncomplete() {
+        synchronized (coverageData) {
+            if (!collectingFinalMeasures || stopExecution.get()) {
+                return false;
+            }
+            finalCollectionIncomplete = true;
+            return true;
+        }
     }
 
     private void mergeMeasuredModule(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet,
@@ -398,43 +427,47 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                 && filterOptions.getExternalDataProcessorUrl().equals(moduleUrl))) {
             String objectId = moduleId.getObjectID();
             String propertyId = moduleId.getPropertyID();
+            String moduleKey = SourceKey.moduleKey(objectId, propertyId);
             String key = metadataOptions.hasMultipleSources()
-                    ? SourceKey.of(objectId, propertyId, moduleExtensionName, moduleUrl)
-                    : Utils.getUriKey(objectId, propertyId);
+                    ? SourceKey.qualify(moduleKey, moduleExtensionName, moduleUrl)
+                    : moduleKey;
 
             URI uri;
             if (!rawMode) {
                 uri = uriListByKey.get(key);
             } else {
                 uri = Utils.getRawUri(moduleExtensionName, moduleUrl, key);
+                if (SourceKey.isQualified(moduleKey) || !("/" + key).equals(uri.getPath())) {
+                    throw new IllegalArgumentException("Invalid module identifier for RAW coverage");
+                }
             }
             if (uri == null) {
                 logger.info("Couldn't find object id {}, property id {} in sources!", objectId, propertyId);
-            } else {
-                EList<PerformanceInfoLine> lineInfoList = moduleInfo.getLineInfo();
-                lineInfoList.forEach(lineInfo -> {
-                    BigDecimal lineNo = lineInfo.getLineNo();
-                    if (lineNo == null) {
-                        reportMeasureFailure(new IllegalArgumentException("Missing line number"));
-                        return;
-                    }
-                    Map<BigDecimal, Integer> coverMap = coverageData.get(uri);
-                    if (!CoverageHits.add(coverMap, lineNo, lineInfo.getFrequency().intValue(), rawMode)) {
-                        if (loggingOptions.isVerbose()) {
-                            logger.info("Can't find line to cover {} in module {}", lineNo, uri);
-                            try (Stream<String> lines = Files.lines(Paths.get(uri))) {
-                                Optional<String> first = lines.skip(lineNo.longValue() - 1).findFirst();
-                                if (first.isPresent()) {
-                                    String specific_line_n = first.get();
-                                    logger.info(">>> {}", specific_line_n);
-                                }
-                            } catch (Exception e) {
-                                logger.error(e.getLocalizedMessage());
-                            }
-                        }
-                    }
-                });
+                return;
             }
+            for (PerformanceInfoLine lineInfo : moduleInfo.getLineInfo()) {
+                try {
+                    mergeMeasuredLine(uri, lineInfo);
+                } catch (RuntimeException e) {
+                    reportMeasureFailure(e);
+                }
+            }
+        }
+    }
+
+    private void mergeMeasuredLine(URI uri, PerformanceInfoLine lineInfo) {
+        BigDecimal lineNo = CoverageHits.lineNumber(lineInfo.getLineNo());
+        int hits = CoverageHits.hitCount(lineInfo.getFrequency());
+        Map<BigDecimal, Integer> coverMap = coverageData.get(uri);
+        if (CoverageHits.add(coverMap, lineNo, hits, rawMode) || !loggingOptions.isVerbose()) {
+            return;
+        }
+        logger.info("Can't find line to cover {} in module {}", lineNo, uri);
+        try (Stream<String> lines = Files.lines(Paths.get(uri))) {
+            lines.skip(lineNo.longValue() - 1).findFirst()
+                    .ifPresent(line -> logger.info(">>> {}", line));
+        } catch (Exception e) {
+            logger.error(e.getLocalizedMessage());
         }
     }
 
@@ -530,12 +563,15 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     private void finishCollection() {
         synchronized (coverageData) {
             stopExecution.set(true);
+            if (finalCollectionIncomplete) {
+                logger.warn("Final collection is incomplete; writing the measurements received");
+            }
             coverageWritten = dumpCoverage();
         }
     }
 
     private boolean collectionSucceeded() {
-        return profilingFinished && !finalMeasureFailed && coverageWritten && targets.matchedAnyTarget();
+        return profilingFinished && !finalCollectionIncomplete && coverageWritten && targets.matchedAnyTarget();
     }
 
     private boolean disableProfiling() {

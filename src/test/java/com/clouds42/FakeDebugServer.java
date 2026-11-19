@@ -63,6 +63,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -83,6 +84,8 @@ class FakeDebugServer implements AutoCloseable {
     private final List<DBGUIExtCmdInfoBase> eventsOnMeasureOff = new CopyOnWriteArrayList<>();
     private final AtomicInteger pings = new AtomicInteger();
     private volatile boolean proxyPings;
+    private final AtomicBoolean proxyNextPing = new AtomicBoolean();
+    private final AtomicInteger nextPingFailure = new AtomicInteger();
     private volatile boolean proxyProfilingDisable;
     private volatile AttachDebugUIResult attachResult = AttachDebugUIResult.REGISTERED;
     private volatile String apiVersion = "8.3.24";
@@ -175,6 +178,14 @@ class FakeDebugServer implements AutoCloseable {
 
     void sendProxyPings() {
         proxyPings = true;
+    }
+
+    void sendProxyReplyOnNextPing() {
+        proxyNextPing.set(true);
+    }
+
+    void failNextPing(int status) {
+        nextPingFailure.set(status);
     }
 
     void sendProxyReplyWhenProfilingIsDisabled() {
@@ -326,11 +337,17 @@ class FakeDebugServer implements AutoCloseable {
                 return;
             }
             Integer failure = failures.get(command);
+            if (failure == null && command.equals("pingDebugUIParams")) {
+                int oneShotFailure = nextPingFailure.getAndSet(0);
+                if (oneShotFailure != 0) {
+                    failure = oneShotFailure;
+                }
+            }
             if (failure != null) {
                 exchange.sendResponseHeaders(failure, -1);
                 return;
             }
-            if ((proxyPings && command.equals("pingDebugUIParams"))
+            if ((command.equals("pingDebugUIParams") && (proxyPings || proxyNextPing.getAndSet(false)))
                     || (proxyProfilingDisable && turningProfilingOff)) {
                 Thread.sleep(20);
                 byte[] message = "Upstream unavailable".getBytes(StandardCharsets.UTF_8);

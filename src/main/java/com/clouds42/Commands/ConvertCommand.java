@@ -23,12 +23,14 @@ package com.clouds42.Commands;
 
 import com.clouds42.BuildConfig;
 import com.clouds42.CommandLineOptions.*;
+import com.clouds42.CoverageHits;
 import com.clouds42.PipeMessages;
 import com.clouds42.SourceKey;
 import com.clouds42.Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
+import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import picocli.CommandLine;
@@ -160,6 +162,41 @@ public class ConvertCommand implements Callable<Integer> {
                 + "To convert that source use {} with its sources directory", hint));
     }
 
+    private static Element validateRawReport(Document document) {
+        Element coverage = document.getDocumentElement();
+        if (!"coverage".equals(coverage.getTagName())) {
+            throw new IllegalArgumentException("Expected a RAW coverage XML report");
+        }
+        for (Node node = coverage.getFirstChild(); node != null; node = node.getNextSibling()) {
+            if (!(node instanceof Element file)) {
+                continue;
+            }
+            if (!"file".equals(file.getTagName()) || file.getAttribute("path").isBlank()) {
+                throw new IllegalArgumentException("Expected a file with a path in the RAW coverage report");
+            }
+            for (Node child = file.getFirstChild(); child != null; child = child.getNextSibling()) {
+                if (!(child instanceof Element line)) {
+                    continue;
+                }
+                String covered = line.getAttribute("covered");
+                if (!"lineToCover".equals(line.getTagName()) || !("true".equals(covered) || "false".equals(covered))
+                        || line.getElementsByTagName("*").getLength() != 0) {
+                    throw new IllegalArgumentException("Invalid line entry in the RAW coverage report");
+                }
+                parseRawLineNumber(line.getAttribute("lineNumber"));
+            }
+        }
+        return coverage;
+    }
+
+    private static BigDecimal parseRawLineNumber(String number) {
+        try {
+            return CoverageHits.lineNumber(new BigDecimal(number));
+        } catch (IllegalArgumentException | ArithmeticException e) {
+            throw new IllegalArgumentException("Invalid RAW line number: " + number, e);
+        }
+    }
+
     @Override
     public Integer call() throws Exception {
 
@@ -183,10 +220,10 @@ public class ConvertCommand implements Callable<Integer> {
 
             DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
             DocumentBuilder builder = builderFactory.newDocumentBuilder();
-            Document xmlDocument = builder.parse(fileIS);
-            NodeList fileNodeList = xmlDocument.getElementsByTagName("file");
+            Element coverage = validateRawReport(builder.parse(fileIS));
+            NodeList fileNodeList = coverage.getElementsByTagName("file");
             boolean includesExtensions = includesExtensionAttributes(fileNodeList);
-            boolean sourceIdentity = "true".equals(xmlDocument.getDocumentElement().getAttribute("sourceIdentity"));
+            boolean sourceIdentity = "true".equals(coverage.getAttribute("sourceIdentity"));
             verifySelectedSource(fileNodeList, uriListByKey, sourceIdentity, includesExtensions);
             for(int fileNodeNumber = 0; fileNodeNumber < fileNodeList.getLength(); fileNodeNumber++) {
                 Node fileNode = fileNodeList.item(fileNodeNumber);
@@ -211,7 +248,7 @@ public class ConvertCommand implements Callable<Integer> {
                         if (!lineNoNode.getAttributes().getNamedItem("covered").getTextContent().equals("true")) {
                             continue;
                         }
-                        BigDecimal lineNo = new BigDecimal(lineNoNode.getAttributes().getNamedItem("lineNumber").getTextContent());
+                        BigDecimal lineNo = parseRawLineNumber(attribute(lineNoNode, "lineNumber"));
                         if (!coverMap.containsKey(lineNo)) {
                             if (loggingOptions.isVerbose()) {
                                 logger.info("Can't find line to cover {} in module {}", lineNo, fileUri);

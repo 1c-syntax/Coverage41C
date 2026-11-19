@@ -26,7 +26,27 @@ import java.util.Map;
 
 public final class CoverageHits {
 
+    private static final BigDecimal MAX_HIT_COUNT = BigDecimal.valueOf(Integer.MAX_VALUE);
+
     private CoverageHits() {
+    }
+
+    public static BigDecimal lineNumber(BigDecimal value) {
+        if (value == null) {
+            throw new IllegalArgumentException("Missing line number");
+        }
+        int line = value.intValueExact();
+        if (line < 1) {
+            throw new IllegalArgumentException("Line number must be positive");
+        }
+        return BigDecimal.valueOf(line);
+    }
+
+    public static int hitCount(BigDecimal value) {
+        if (value == null || value.signum() < 0 || value.stripTrailingZeros().scale() > 0) {
+            throw new IllegalArgumentException("Hit count must be a nonnegative integer");
+        }
+        return value.min(MAX_HIT_COUNT).intValueExact();
     }
 
     /**
@@ -42,7 +62,8 @@ public final class CoverageHits {
         if (!rawMode && !coverMap.containsKey(lineNo)) {
             return false;
         }
-        coverMap.put(lineNo, Math.max(coverMap.getOrDefault(lineNo, 0), 0) + hits);
+        long total = (long) Math.max(coverMap.getOrDefault(lineNo, 0), 0) + hits;
+        coverMap.put(lineNo, (int) Math.min(total, Integer.MAX_VALUE));
         return true;
     }
 }

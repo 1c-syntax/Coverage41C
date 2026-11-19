@@ -31,7 +31,19 @@ public final class SourceKey {
     private SourceKey() { }
 
     public static String of(String objectId, String propertyId, String extension, String url) {
-        return qualify(Utils.getUriKey(objectId, propertyId), extension, url);
+        return qualify(moduleKey(objectId, propertyId), extension, url);
+    }
+
+    public static String moduleKey(String objectId, String propertyId) {
+        validateModuleComponent(objectId, "object");
+        validateModuleComponent(propertyId, "property");
+        return Utils.getUriKey(objectId, propertyId);
+    }
+
+    private static void validateModuleComponent(String value, String component) {
+        if (value == null || value.isBlank() || value.indexOf('/') >= 0) {
+            throw new IllegalArgumentException("Invalid module " + component + " identifier");
+        }
     }
 
     public static String qualify(String legacyKey, String extension, String url) {
