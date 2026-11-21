@@ -590,6 +590,20 @@ class ConversionOutputTest {
     }
 
     @Test
+    void publicationRemovesNamespaceWithAReadOnlyStamp() throws IOException {
+        org.junit.jupiter.api.Assumptions.assumeTrue(PosixFiles.supportsNamespaceLeases(directory));
+        String namespaceName = ".coverage41c-creating";
+        Path namespace = directory.resolve(namespaceName);
+        Path stamp = namespace.resolve(namespaceName);
+        ConversionOutput.publish(directory.resolve("coverage.xml"), directory.resolve("exclusions.json"), xml -> {
+            Files.setPosixFilePermissions(stamp, PosixFilePermissions.fromString("r--r--r--"));
+            org.junit.jupiter.api.Assumptions.assumeFalse(Files.isWritable(stamp));
+            xml.write('x');
+        }, json -> json.write('j'), null);
+        assertFalse(Files.exists(namespace));
+    }
+
+    @Test
     void suspendedNamespaceCreatorCannotSplitAReservedPair() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeTrue(PosixFiles.supportsNamespaceLeases(directory));
         Path coordination = Files.createDirectory(directory.resolve("coordination"));
