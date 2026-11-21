@@ -209,6 +209,33 @@ class ExternalDataProcessorTest {
 
     @Test
     @EnabledOnOs({OS.LINUX, OS.MAC})
+    void freshConversionCannotWriteThroughAParentRetargetedIntoTheExport() throws Exception {
+        Path descriptor = tempDir.resolve("ExternalReport.xml");
+        writeConfiguratorExternalSource(descriptor, "ExternalReport");
+        Path export = tempDir.resolve("ExternalReport");
+        Path forms = export.resolve("Forms");
+        Path outside = Files.createDirectory(tempDir.resolve("outside"));
+        Path coverageFile = outside.resolve("coverage.xml");
+        var metadata = CommandLine.populateCommand(new MetadataOptions(), "-s", descriptor.toString());
+        var output = CommandLine.populateCommand(new OutputOptions(), "-o", coverageFile.toString());
+        Map<URI, Map<BigDecimal, Integer>> coverage = new HashMap<>();
+        Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(forms);
+        try {
+            Files.setPosixFilePermissions(forms, PosixFilePermissions.fromString("---------"));
+            assumeTrue(!Files.isReadable(forms), "Forms permissions are ineffective for the current user");
+            var conversion = Utils.prepareConversion(metadata, "", "", coverage, null, coverageFile.toFile());
+            Files.delete(outside);
+            Files.createSymbolicLink(outside, export);
+
+            assertThrows(IllegalArgumentException.class, () -> conversion.writeConversion(coverage, metadata, output));
+            assertFalse(Files.exists(export.resolve("coverage.xml")));
+        } finally {
+            Files.setPosixFilePermissions(forms, permissions);
+        }
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
     void freshCoverageCanBeWrittenAfterFormDirectoryBecomesUnreadable() throws Exception {
         Path descriptor = tempDir.resolve("ExternalReport.xml");
         writeConfiguratorExternalSource(descriptor, "ExternalReport");

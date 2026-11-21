@@ -591,6 +591,7 @@ public class Utils {
             File output = outputOptions.getOutputFile();
             boolean coverageToStdout = output == null || StandardOutputFile.isAlias(output);
             boolean reportToStdout = StandardOutputFile.isAlias(reportFile);
+            validateConversionTargets(output, coverageToStdout, reportToStdout);
             if (coverageToStdout && reportFile == null) {
                 OutputStream stdout = reportStdout(reportOutput);
                 try (OutputStream stream = stdout) {
@@ -606,7 +607,7 @@ public class Utils {
             ConversionOutput.Writer writeCoverage =
                     file -> writeCoverageFile(coverage, metadataOptions, outputOptions, file.toFile());
             ConversionOutput.Writer writeReport = file -> report.writeJson(file.toFile());
-            if (StandardOutputFile.isAlias(reportFile)) {
+            if (reportToStdout) {
                 // Publish the named coverage file first so it can be restored if stdout fails.
                 ConversionOutput.write(null, coveragePath, writeReport, writeCoverage, reportOutput, freshOutputs != null);
             } else {
@@ -617,6 +618,46 @@ public class Utils {
             if (reportFile != null) {
                 logger.info("Exclusion report written to {}", reportFile.getAbsolutePath());
             }
+        }
+
+        // A caller can change the output or retarget a link while the RAW measurements are being read.
+        private void validateConversionTargets(File output, boolean coverageToStdout, boolean reportToStdout)
+                throws IOException {
+            boolean writesToStdout = coverageToStdout || reportToStdout;
+            boolean processStdout = writesToStdout && StandardOutputFile.isProcessOutput(reportOutput);
+            File namedCoverage = coverageToStdout ? null : output;
+            File namedReport = reportToStdout ? null : reportFile;
+            if (freshOutputs != null) {
+                namedCoverage = checkedPreparedPath(namedCoverage, freshOutputs.coverage);
+                namedReport = checkedPreparedPath(namedReport, freshOutputs.report);
+            }
+            File pairedOutput = coverageToStdout ? namedReport : namedCoverage;
+            if (coverageToStdout && reportToStdout
+                    || processStdout && pairedOutput != null && StandardOutputFile.matches(pairedOutput.toPath())) {
+                throw new IllegalArgumentException("Exclusion report and coverage output must use different files: "
+                        + reportFile + " and " + (coverageToStdout ? "standard output" : output));
+            }
+            Set<Path> files = new LinkedHashSet<>(inputs.files);
+            moduleUris.values().stream().map(Path::of).filter(Files::isRegularFile).forEach(files::add);
+            if (writesToStdout && (reportOutput == null || processStdout)) {
+                StandardOutputFile.FileIdentity stdout = StandardOutputFile.regularFile();
+                if (stdout != null) {
+                    rejectStdoutOverwritingInputs(stdout, files, inputs.trees);
+                }
+            }
+            ExclusionRules.rejectReportInsideConfigDirectory(inputs.config, namedReport, "--exclusion-report");
+            validateOutputFiles(namedCoverage, namedReport, inputs.config, files, inputs.trees,
+                    freshOutputs == null ? null : freshOutputs.unreadableForms);
+        }
+
+        private static File checkedPreparedPath(File requested, Path prepared) throws IOException {
+            if (requested == null) {
+                return null;
+            }
+            if (prepared == null) {
+                throw new IOException("Report destination changed after preparation: " + requested);
+            }
+            return prepared.toFile();
         }
 
         private Path reportPath() throws IOException {
@@ -1209,10 +1250,12 @@ public class Utils {
     private static final class FreshOutputs {
         private final Path coverage;
         private final Path report;
+        private final Path unreadableForms;
 
-        private FreshOutputs(Path coverage, Path report) {
+        private FreshOutputs(Path coverage, Path report, Path unreadableForms) {
             this.coverage = coverage;
             this.report = report;
+            this.unreadableForms = unreadableForms;
         }
     }
 
@@ -1262,7 +1305,7 @@ public class Utils {
             }
         }
         return createOnly ? new FreshOutputs(coverage == null ? null : coverage.destination,
-                report == null ? null : report.destination) : null;
+                report == null ? null : report.destination, unreadableExternalForms) : null;
     }
 
     private static void rejectOverlappingOutputs(OutputPaths coverage, OutputPaths report) throws IOException {

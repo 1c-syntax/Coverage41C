@@ -438,6 +438,32 @@ class ConversionOutputTest {
     }
 
     @Test
+    void publicationCanUseAnotherNamespaceWhenTheFirstIsSearchableButNotWritable() throws IOException {
+        org.junit.jupiter.api.Assumptions.assumeTrue(directory.getFileSystem().supportedFileAttributeViews().contains("posix"));
+        Path namespace = Files.createDirectory(directory.resolve(".coverage41c-creating"));
+        Path reserved = Files.createDirectory(namespace.resolve("reserved.xml"));
+        Path coverage = directory.resolve("coverage.xml");
+        Path report = directory.resolve("exclusions.json");
+        var original = Files.getPosixFilePermissions(namespace);
+        try {
+            Files.setPosixFilePermissions(namespace, PosixFilePermissions.fromString("r-xr-xr-x"));
+            org.junit.jupiter.api.Assumptions.assumeFalse(Files.isWritable(namespace));
+            IOException busy = assertThrows(IOException.class, () -> ConversionOutput.publish(
+                    directory.resolve("reserved.xml"), report, output -> output.write('x'), output -> output.write('j'), null));
+            assertTrue(busy.getMessage().contains("Report creation is in progress"), busy.toString());
+
+            ConversionOutput.publish(coverage, report, output -> output.write('c'), output -> output.write('j'), null);
+
+            assertEquals("c", Files.readString(coverage));
+            assertEquals("j", Files.readString(report));
+            assertTrue(Files.isDirectory(reserved));
+            assertFalse(Files.exists(directory.resolve(".coverage41c-creating-1")));
+        } finally {
+            Files.setPosixFilePermissions(namespace, original);
+        }
+    }
+
+    @Test
     void anotherPublicationDoesNotUseAReservedReportNameAsItsMarkerDirectory() throws IOException {
         Path first = directory.resolve(".coverage41c-creating");
         Path firstJson = directory.resolve("first.json");
@@ -756,6 +782,66 @@ class ConversionOutputTest {
         String classes = Path.of(ExternalLockProbe.class.getProtectionDomain().getCodeSource().getLocation().toURI()).toString();
         return new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(), "-cp", classes,
                 ExternalLockProbe.class.getName(), path.toString()).inheritIO();
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void conversionProtectsRawInputWhenCoverageLinkChangesAfterPreparation() throws Exception {
+        Path raw = Files.copy(Path.of("src/test/resources/coverage/start-raw.xml"), directory.resolve("raw.xml"));
+        Path coveragePath = Files.createSymbolicLink(directory.resolve("coverage.xml"), directory.resolve("safe.xml"));
+        Path exclusions = directory.resolve("exclusions.json");
+        byte[] original = Files.readAllBytes(raw);
+        var source = picocli.CommandLine.populateCommand(new com.clouds42.CommandLineOptions.MetadataOptions(),
+                "-s", "src/test/resources/configuration", "--exclusion-report", exclusions.toString());
+        var options = picocli.CommandLine.populateCommand(new com.clouds42.CommandLineOptions.OutputOptions(),
+                "-o", coveragePath.toString());
+        var coverage = new java.util.HashMap<java.net.URI, java.util.Map<java.math.BigDecimal, Integer>>();
+        var conversion = Utils.prepareConversion(source, "", "", coverage, raw.toFile(), coveragePath.toFile());
+        Files.delete(coveragePath);
+        Files.createSymbolicLink(coveragePath, raw);
+
+        assertThrows(IllegalArgumentException.class, () -> conversion.writeConversion(coverage, source, options));
+        assertArrayEquals(original, Files.readAllBytes(raw));
+        assertFalse(Files.exists(exclusions));
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void conversionRejectsJsonLinkRetargetedIntoTheConfigDirectory() throws Exception {
+        Path config = Files.createDirectory(directory.resolve("rules"));
+        Files.writeString(config.resolve("rules.json"),
+                "{\"exclude\":{\"objects\":[\"Catalog.Справочник1\"]}}");
+        Path reportLink = Files.createSymbolicLink(directory.resolve("exclusions.json"), directory.resolve("safe.json"));
+        Path coveragePath = directory.resolve("coverage.xml");
+        var source = picocli.CommandLine.populateCommand(new com.clouds42.CommandLineOptions.MetadataOptions(),
+                "-s", "src/test/resources/configuration", "--config", config.toString(), "--exclusion-report", reportLink.toString());
+        var output = picocli.CommandLine.populateCommand(new com.clouds42.CommandLineOptions.OutputOptions(),
+                "-o", coveragePath.toString());
+        var coverage = new java.util.HashMap<java.net.URI, java.util.Map<java.math.BigDecimal, Integer>>();
+        var conversion = Utils.prepareConversion(source, "", "", coverage, null, coveragePath.toFile());
+        Path generated = config.resolve("generated.json");
+        Files.delete(reportLink);
+        Files.createSymbolicLink(reportLink, generated);
+
+        assertThrows(IllegalArgumentException.class, () -> conversion.writeConversion(coverage, source, output));
+        assertFalse(Files.exists(generated));
+        assertFalse(Files.exists(coveragePath));
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void conversionRejectsTwoStdoutOutputsAfterReportLinkChanges() throws Exception {
+        Path report = directory.resolve("exclusions.json");
+        var source = picocli.CommandLine.populateCommand(new com.clouds42.CommandLineOptions.MetadataOptions(),
+                "-s", "src/test/resources/configuration", "--exclusion-report", report.toString());
+        var output = picocli.CommandLine.populateCommand(new com.clouds42.CommandLineOptions.OutputOptions(), "-f", "LCOV");
+        var coverage = new java.util.HashMap<java.net.URI, java.util.Map<java.math.BigDecimal, Integer>>();
+        var stdout = new ByteArrayOutputStream();
+        var conversion = Utils.prepareConversion(source, "", "", coverage, null, null, stdout);
+        Files.createSymbolicLink(report, Path.of("/dev/stdout"));
+
+        assertThrows(IllegalArgumentException.class, () -> conversion.writeConversion(coverage, source, output));
+        assertEquals(0, stdout.size());
     }
 
     @Test

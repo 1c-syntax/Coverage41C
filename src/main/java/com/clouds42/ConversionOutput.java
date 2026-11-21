@@ -546,6 +546,12 @@ final class ConversionOutput {
                     return new CreationClaim(marker);
                 } catch (FileAlreadyExistsException busy) {
                     throw inProgress(path, marker);
+                } catch (AccessDeniedException denied) {
+                    // A shared directory may have a searchable namespace owned by another user.
+                    if (Files.isDirectory(namespace, LinkOption.NOFOLLOW_LINKS) && Files.isExecutable(namespace)) {
+                        return null;
+                    }
+                    throw denied;
                 } catch (IOException failure) {
                     // A creator can remove the empty namespace between the two creates.
                     if (Files.isSymbolicLink(namespace) || Files.isRegularFile(namespace, LinkOption.NOFOLLOW_LINKS)) {
