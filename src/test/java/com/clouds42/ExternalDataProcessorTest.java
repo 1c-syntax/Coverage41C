@@ -21,6 +21,8 @@
  */
 package com.clouds42;
 
+import com.clouds42.CommandLineOptions.MetadataOptions;
+import com.clouds42.CommandLineOptions.OutputOptions;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -34,6 +36,8 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.math.BigDecimal;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -42,6 +46,7 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -52,6 +57,7 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -199,6 +205,32 @@ class ExternalDataProcessorTest {
                 "missing form descriptor");
         assertEquals(Map.of("ExternalReport/Ext/ObjectModule.bsl", Map.of(2, true, 3, false)),
                 convertExternalSource(descriptor.toString()));
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    void freshCoverageCanBeWrittenAfterFormDirectoryBecomesUnreadable() throws Exception {
+        Path descriptor = tempDir.resolve("ExternalReport.xml");
+        writeConfiguratorExternalSource(descriptor, "ExternalReport");
+        Path forms = tempDir.resolve("ExternalReport/Forms");
+        Path coverageFile = tempDir.resolve("coverage.xml");
+        var metadata = CommandLine.populateCommand(new MetadataOptions(), "-s", descriptor.toString());
+        var output = CommandLine.populateCommand(new OutputOptions(), "-o", coverageFile.toString());
+        Map<URI, Map<BigDecimal, Integer>> coverage = new HashMap<>();
+        Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(forms);
+        try (Utils.MeasurementReports reports = new Utils.MeasurementReports()) {
+            reports.readMetadata(metadata, "", "", coverage, false, coverageFile.toFile(), () -> null);
+            Files.setPosixFilePermissions(forms, PosixFilePermissions.fromString("---------"));
+            assumeTrue(!Files.isReadable(forms), "Forms permissions are ineffective for the current user");
+
+            reports.dump(coverage, metadata, output, () -> null);
+            assertTrue(Files.size(coverageFile) > 0);
+            byte[] original = Files.readAllBytes(coverageFile);
+            assertThrows(IOException.class, () -> reports.dump(coverage, metadata, output, () -> null));
+            assertArrayEquals(original, Files.readAllBytes(coverageFile));
+        } finally {
+            Files.setPosixFilePermissions(forms, permissions);
+        }
     }
 
     @Test

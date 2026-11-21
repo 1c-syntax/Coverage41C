@@ -62,8 +62,9 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
-import java.util.function.LongSupplier;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongSupplier;
 import java.util.stream.Stream;
 
 @Command(name = PipeMessages.START_COMMAND, mixinStandardHelpOptions = true,
@@ -379,13 +380,11 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
             throws RuntimeDebugClientException, InterruptedException {
         while (canSendDebuggerRequest()) {
             long pollStarted = finalMeasureClock.getAsLong();
-            long pollReceived;
+            AtomicLong pollReceived = new AtomicLong(pollStarted);
             Optional<List<? extends DBGUIExtCmdInfoBase>> response;
             try {
-                response = client.pingResponse();
-                pollReceived = finalMeasureClock.getAsLong();
+                response = client.pingResponse(() -> pollReceived.set(finalMeasureClock.getAsLong()));
             } catch (RuntimeDebugClientException | RuntimeException e) {
-                pollReceived = finalMeasureClock.getAsLong();
                 if (!recordFinalMeasureFailure()) {
                     throw e;
                 }
@@ -395,7 +394,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
             if (response.isEmpty()) {
                 logger.debug("Ignoring unexpected ping response from debug server");
                 recordFinalMeasureFailure();
-                if (shouldStopAfterFinalPoll(pollStarted, pollReceived, false)) {
+                if (shouldStopAfterFinalPoll(pollStarted, pollReceived.get(), false)) {
                     return;
                 }
                 waitBeforeNextPoll();
@@ -416,7 +415,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                 }
                 completePendingPoll(uriListByKey, externalDataProcessorsUriSet, pending);
             }
-            if (shouldStopAfterFinalPoll(pollStarted, pollReceived, !hasMeasures)) {
+            if (shouldStopAfterFinalPoll(pollStarted, pollReceived.get(), !hasMeasures)) {
                 return;
             }
         }

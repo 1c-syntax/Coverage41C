@@ -60,6 +60,7 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -470,6 +471,142 @@ class StartCommandTest {
         assertArrayEquals(original, Files.readAllBytes(report));
     }
 
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void namedDumpAndStopRejectAnOutputNowLinkedToTheConfig() throws Exception {
+        Path config = Files.writeString(tempDir.resolve("coverage41c.json"),
+                "{\"exclude\":{\"objects\":[\"Catalog.Справочник1\"]}}");
+        byte[] original = Files.readAllBytes(config);
+        Future<Integer> collector = start("--config", config.toString());
+        int dumpResult;
+        int stopResult;
+        try {
+            Files.deleteIfExists(output);
+            Files.createSymbolicLink(output, config);
+            dumpResult = send(PipeMessages.DUMP_COMMAND);
+        } finally {
+            stopResult = send(PipeMessages.EXIT_COMMAND);
+        }
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, dumpResult);
+        assertEquals(CommandLine.ExitCode.SOFTWARE, stopResult);
+        assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertArrayEquals(original, Files.readAllBytes(config));
+    }
+
+    @Test
+    void namedDumpAndStopPreserveThePublishedJsonAfterItIsMoved() throws Exception {
+        Path report = tempDir.resolve("exclusions.json");
+        Future<Integer> collector = start("--exclusion-report", report.toString());
+        Path archived = Files.move(report, tempDir.resolve("archived.json"));
+        Files.setLastModifiedTime(archived, java.nio.file.attribute.FileTime.fromMillis(1_000));
+        byte[] original = Files.readAllBytes(archived);
+        Files.writeString(report, "replacement");
+        int dumpResult;
+        int stopResult;
+        try {
+            Files.createLink(output, archived);
+            dumpResult = send(PipeMessages.DUMP_COMMAND);
+        } finally {
+            stopResult = send(PipeMessages.EXIT_COMMAND);
+        }
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, dumpResult);
+        assertEquals(CommandLine.ExitCode.SOFTWARE, stopResult);
+        assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertArrayEquals(original, Files.readAllBytes(archived));
+        assertEquals("replacement", Files.readString(report));
+    }
+
+    @Test
+    void replacingLoadedConfigDoesNotBlockACoverageFile() throws Exception {
+        String rules = "{\"exclude\":{\"objects\":[\"Catalog.Справочник1\"]}}";
+        Path config = Files.writeString(tempDir.resolve("coverage41c.json"), rules);
+        Path replacement = Files.writeString(tempDir.resolve("replacement.json"), rules);
+        Future<Integer> collector = start("--config", config.toString());
+        try {
+            Files.move(replacement, config, StandardCopyOption.REPLACE_EXISTING);
+            Files.createFile(output);
+            assertFalse(Files.isSameFile(config, output));
+            assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.DUMP_COMMAND));
+        } finally {
+            assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
+        }
+        assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals("coverage", Utils.newInputXmlBuilder().parse(output.toFile()).getDocumentElement().getTagName());
+        assertEquals(rules, Files.readString(config));
+    }
+
+    @Test
+    void defaultEmbeddedStartCanWriteToReplacedSystemOutWhenNativeStdoutNamesJson() throws Exception {
+        Path report = tempDir.resolve("exclusions.json");
+        Process collector = embeddedStart("redirected", output, report, report);
+        try {
+            awaitStarted(collector.onExit().thenApply(Process::exitValue));
+            byte[] json = Files.readAllBytes(report);
+            assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.DUMP_COMMAND));
+            assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
+            assertTrue(collector.waitFor(TIMEOUT, TimeUnit.SECONDS));
+            assertEquals(CommandLine.ExitCode.OK, collector.exitValue());
+            assertTrue(Files.readString(output).contains("<coverage "));
+            assertArrayEquals(json, Files.readAllBytes(report));
+        } finally {
+            collector.destroyForcibly();
+        }
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void dumpAndStopProtectAConfigAlreadyOpenOnStdout() throws Exception {
+        Path config = Files.writeString(tempDir.resolve("coverage41c.json"),
+                "{\"exclude\":{\"objects\":[\"Catalog.Справочник1\"]}}");
+        byte[] original = Files.readAllBytes(config);
+        Path report = tempDir.resolve("exclusions.json");
+        Process collector = embeddedStart("system", output, report, config,
+                "-o", output.toString(), "--config", config.toString());
+        try {
+            awaitStarted(collector.onExit().thenApply(Process::exitValue));
+            Path archived = Files.move(config, tempDir.resolve("archived-config.json"));
+            Files.write(config, original);
+            Files.createSymbolicLink(output, Path.of("/dev/stdout"));
+
+            assertEquals(CommandLine.ExitCode.SOFTWARE, send(PipeMessages.DUMP_COMMAND));
+            assertEquals(CommandLine.ExitCode.SOFTWARE, send(PipeMessages.EXIT_COMMAND));
+            assertTrue(collector.waitFor(TIMEOUT, TimeUnit.SECONDS));
+            assertEquals(CommandLine.ExitCode.SOFTWARE, collector.exitValue());
+            assertArrayEquals(original, Files.readAllBytes(archived));
+            assertArrayEquals(original, Files.readAllBytes(config));
+        } finally {
+            collector.destroyForcibly();
+        }
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void dumpAndStopPreserveJsonInitiallyWrittenThroughStdoutAlias() throws Exception {
+        Path reportAlias = Files.createSymbolicLink(tempDir.resolve("exclusions.json"), Path.of("/dev/stdout"));
+        Path published = tempDir.resolve("published.json");
+        Path replacement = Files.writeString(tempDir.resolve("replacement.json"), "{}");
+        Process collector = embeddedStart("unused", output, reportAlias, published, "-o", output.toString());
+        try {
+            awaitStarted(collector.onExit().thenApply(Process::exitValue));
+            byte[] json = Files.readAllBytes(published);
+            assertTrue(json.length > 2);
+            Files.delete(reportAlias);
+            Files.createSymbolicLink(reportAlias, replacement);
+            Files.createLink(output, published);
+
+            assertEquals(CommandLine.ExitCode.SOFTWARE, send(PipeMessages.DUMP_COMMAND));
+            assertEquals(CommandLine.ExitCode.SOFTWARE, send(PipeMessages.EXIT_COMMAND));
+            assertTrue(collector.waitFor(TIMEOUT, TimeUnit.SECONDS));
+            assertEquals(CommandLine.ExitCode.SOFTWARE, collector.exitValue());
+            assertArrayEquals(json, Files.readAllBytes(published));
+            assertEquals("{}", Files.readString(replacement));
+        } finally {
+            collector.destroyForcibly();
+        }
+    }
+
     private Process embeddedStart(String sink, Path capture, Path report, Path stdout, String... options) throws IOException {
         ProcessBuilder builder = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                 "-cp", System.getProperty("coverage41c.testClasspath", System.getProperty("java.class.path")),
@@ -498,6 +635,9 @@ class StartCommandTest {
                 CoverageCommand command = new CoverageCommand(TEST_FINAL_MEASURE_WINDOW, TEST_FINAL_CONFIRMATION_TIMEOUT) {
                     @Override
                     protected OutputStream coverageOutput() {
+                        if (args[0].equals("system")) {
+                            return super.coverageOutput();
+                        }
                         if (args[0].equals("unused")) {
                             throw new AssertionError("A named coverage file does not use the coverage sink");
                         }

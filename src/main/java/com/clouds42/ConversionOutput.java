@@ -158,6 +158,9 @@ final class ConversionOutput {
             return;
         }
         if (published != null && published.channel != null) {
+            if (!published.readable) {
+                throw unverifiableReport(path);
+            }
             try (Destination original = Destination.reservePublished(published, path).withBackup();
                  Closeable verify = original::verifyUnchanged) {
                 if (published.hasReplacement(path)) {
@@ -167,6 +170,13 @@ final class ConversionOutput {
                 }
             }
         } else {
+            if (published != null && published.outputIdentity != null) {
+                Object current = StandardOutputFile.isAlias(peer) ? StandardOutputFile.regularFileKey()
+                        : StandardOutputFile.regularFileKey(path);
+                if (!published.matches(current)) {
+                    throw unverifiableReport(path);
+                }
+            }
             writeWithNamedPeer(stream, path, writer);
         }
     }
@@ -189,7 +199,22 @@ final class ConversionOutput {
     // The publication lock is released before collection begins. Each dump takes its own lock.
     static final class PublishedReport implements Closeable {
         private Object fileKey;
+        private Object outputIdentity;
+        private Closeable identityPin;
         private FileChannel channel;
+        private boolean readable;
+
+        boolean matches(Object identity) {
+            return identity != null && identity.equals(outputIdentity);
+        }
+
+        void rememberProcessOutput() throws IOException {
+            Object identity = StandardOutputFile.regularFileKey();
+            if (identity != null) {
+                identityPin = PosixFiles.pinOnLinux(StandardOutputFile.unixDescriptor());
+                outputIdentity = identity;
+            }
+        }
 
         private boolean hasReplacement(Path path) throws IOException {
             try {
@@ -201,6 +226,10 @@ final class ConversionOutput {
         }
 
         void write(Path path, Writer writer) throws IOException {
+            write(path, writer, true);
+        }
+
+        void write(Path path, Writer writer, boolean guardChanges) throws IOException {
             try (Temporary staged = Temporary.create(path)) {
                 writer.write(staged.path);
                 try (Destination output = Destination.open(path, false, SYSTEM_FILE_KEYS)) {
@@ -208,10 +237,16 @@ final class ConversionOutput {
                     if (output != null) {
                         output.installNewOutput(null);
                         output.committed = true;
-                        if (output.fileKey != null && output.access != Access.WRITE_ONLY) {
-                            fileKey = output.fileKey;
-                            channel = output.channel;
-                            output.keepChannel = true;
+                        if (output.fileKey != null) {
+                            outputIdentity = StandardOutputFile.regularFileKey(path);
+                            if (guardChanges || File.separatorChar == '\\') {
+                                fileKey = output.fileKey;
+                                channel = output.channel;
+                                readable = output.access != Access.WRITE_ONLY;
+                                output.keepChannel = true;
+                            } else {
+                                identityPin = PosixFiles.pinOnLinux(path);
+                            }
                         }
                     }
                 }
@@ -220,9 +255,14 @@ final class ConversionOutput {
 
         @Override
         public void close() throws IOException {
-            if (channel != null) {
-                Destination.closeAfterUse(fileKey, channel);
-                channel = null;
+            outputIdentity = null;
+            try (Closeable pin = identityPin) {
+                identityPin = null;
+                if (channel != null) {
+                    FileChannel retained = channel;
+                    channel = null;
+                    Destination.closeAfterUse(fileKey, retained);
+                }
             }
         }
     }
@@ -424,14 +464,22 @@ final class ConversionOutput {
         }
 
         private static void rejectIfHeld(Path path, Path destination, Path ownMarker) throws IOException {
+            Path marker = findClaim(destination, ownMarker);
+            if (marker != null) {
+                throw inProgress(path, marker);
+            }
+        }
+
+        private static Path findClaim(Path destination, Path ownMarker) {
             for (String name : NAMESPACES) {
                 Path namespace = destination.resolveSibling(name);
                 Path marker = namespace.resolve(destination.getFileName());
                 if (!marker.equals(ownMarker) && Files.isDirectory(namespace, LinkOption.NOFOLLOW_LINKS)
                         && Files.isDirectory(marker, LinkOption.NOFOLLOW_LINKS)) {
-                    throw inProgress(path, marker);
+                    return marker;
                 }
             }
+            return null;
         }
 
         static CreationClaim acquire(Path path, Path peer) throws IOException {
@@ -440,10 +488,8 @@ final class ConversionOutput {
             Path peerDestination = peer == null ? null : Utils.resolveOutputPath(peer.toAbsolutePath());
             for (String name : NAMESPACES) {
                 Path namespace = destination.resolveSibling(name);
-                if (Files.isSymbolicLink(namespace)) {
-                    throw new IOException("Report creation marker path is not a directory: " + namespace);
-                }
-                if (Files.isRegularFile(namespace, LinkOption.NOFOLLOW_LINKS)
+                if (Files.isSymbolicLink(namespace) || Files.isRegularFile(namespace, LinkOption.NOFOLLOW_LINKS)
+                        || findClaim(namespace, null) != null
                         || Utils.sameOutputFile(namespace, destination)
                         || (peerDestination != null && Utils.sameOutputFile(namespace, peerDestination))) {
                     continue;
@@ -476,13 +522,16 @@ final class ConversionOutput {
         private static CreationClaim acquireInNamespace(Path path, Path marker) throws IOException {
             Path namespace = marker.getParent();
             while (true) {
+                if (findClaim(namespace, null) != null) {
+                    return null;
+                }
                 try {
                     createNamespace(namespace);
                 } catch (FileAlreadyExistsException occupied) {
                     try {
                         BasicFileAttributes attributes = Files.readAttributes(namespace, BasicFileAttributes.class,
                                 LinkOption.NOFOLLOW_LINKS);
-                        if (attributes.isRegularFile()) {
+                        if (attributes.isRegularFile() || attributes.isSymbolicLink()) {
                             return null;
                         }
                         if (!attributes.isDirectory()) {
@@ -499,7 +548,7 @@ final class ConversionOutput {
                     throw inProgress(path, marker);
                 } catch (IOException failure) {
                     // A creator can remove the empty namespace between the two creates.
-                    if (Files.isRegularFile(namespace, LinkOption.NOFOLLOW_LINKS)) {
+                    if (Files.isSymbolicLink(namespace) || Files.isRegularFile(namespace, LinkOption.NOFOLLOW_LINKS)) {
                         return null;
                     }
                     if (!(failure instanceof NoSuchFileException) || !Files.isDirectory(namespace.getParent())) {

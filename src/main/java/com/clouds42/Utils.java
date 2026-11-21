@@ -63,6 +63,7 @@ import java.math.BigDecimal;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.FileSystemLoopException;
@@ -313,33 +314,110 @@ public class Utils {
     /** Owns the exclusion report descriptor used to protect embedded dumps during one collection. */
     public static final class MeasurementReports implements Closeable {
         private final ConversionOutput.PublishedReport published = new ConversionOutput.PublishedReport();
+        private final Map<Object, Closeable> loadedConfigs = new HashMap<>();
         private File report;
-        private ProtectedInputs inputs = new ProtectedInputs(Set.of(), Set.of(), null);
+        private ProtectedInputs inputs = new ProtectedInputs(Set.of(), Set.of(), Set.of(), null, Set.of());
 
         public Map<String, URI> readMetadata(MetadataOptions options, String mainExtension, String mainSourceUrl,
                                              Map<URI, Map<BigDecimal, Integer>> coverage,
                                              boolean hasUserFilter, File coverageFile, Supplier<OutputStream> stdout)
                 throws Exception {
-            published.close();
-            Metadata metadata = loadMetadata(options, mainExtension, mainSourceUrl, coverage, new ExclusionReport(), true, hasUserFilter, null,
-                    coverageFile, false, stdout);
-            report = metadata.reportFile;
-            inputs = metadata.inputs;
-            boolean guard = report != null && (coverageFile == null || StandardOutputFile.isAlias(coverageFile))
-                    && ConversionOutput.needsFileVerification(metadata.reportOutput);
-            metadata.writeExclusionReport(guard ? published : null);
-            return metadata.getModuleUris();
+            close();
+            try {
+                Metadata metadata = loadMetadata(options, mainExtension, mainSourceUrl, coverage, new ExclusionReport(), true,
+                        hasUserFilter, null, coverageFile, false, stdout, this::readConfig);
+                report = metadata.reportFile;
+                inputs = metadata.inputs;
+                boolean guardReport = report != null && (coverageFile == null || StandardOutputFile.isAlias(coverageFile))
+                        && ConversionOutput.needsFileVerification(metadata.reportOutput);
+                if (options.isRawMode()) {
+                    for (Path config : inputs.configFiles) {
+                        retainConfig(config);
+                    }
+                }
+                metadata.writeExclusionReport(published, guardReport);
+                return metadata.getModuleUris();
+            } catch (Exception error) {
+                try {
+                    close();
+                } catch (IOException cleanup) {
+                    error.addSuppressed(cleanup);
+                }
+                throw error;
+            }
+        }
+
+        private CoverageConfig readConfig(File file) throws IOException {
+            Object identity = retainConfig(file.toPath());
+            CoverageConfig config = ExclusionRules.read(file);
+            if (identity != null && !identity.equals(StandardOutputFile.regularFileKey(file.toPath()))) {
+                throw changedConfig(file.toPath());
+            }
+            return config;
+        }
+
+        private Object retainConfig(Path config) throws IOException {
+            Object identity = StandardOutputFile.regularFileKey(config);
+            if (identity == null || loadedConfigs.containsKey(identity)) {
+                return identity;
+            }
+            // Linux can recycle an unlinked inode. Keep that inode alive without taking a file lock.
+            Closeable pin = File.separatorChar == '\\' ? FileChannel.open(config, StandardOpenOption.READ)
+                    : PosixFiles.pinOnLinux(config);
+            boolean retained = false;
+            try {
+                if (!identity.equals(StandardOutputFile.regularFileKey(config))) {
+                    throw changedConfig(config);
+                }
+                loadedConfigs.put(identity, pin);
+                retained = true;
+                return identity;
+            } finally {
+                if (!retained && pin != null) {
+                    pin.close();
+                }
+            }
+        }
+
+        private IOException changedConfig(Path config) {
+            return new IOException("Coverage configuration changed while it was being read: " + config);
         }
 
         public void dump(Map<URI, Map<BigDecimal, Integer>> coverage, MetadataOptions metadata,
                          OutputOptions options, Supplier<OutputStream> stdout) throws IOException {
             File output = options.getOutputFile();
             if (output == null || StandardOutputFile.isAlias(output)) {
-                dumpMeasurement(coverage, metadata, options, stdout, report, published);
+                OutputStream stream = stdout.get();
+                if (stream == null || StandardOutputFile.isProcessOutput(stream)) {
+                    StandardOutputFile.FileIdentity current = StandardOutputFile.regularFile();
+                    if (current != null) {
+                        rejectStdoutOverwritingInputs(current, inputs.files, inputs.trees);
+                    }
+                    Object identity = StandardOutputFile.regularFileKey();
+                    rejectConfigIdentity(identity, "Standard output");
+                    // The default embedded stream reads System.out at each dump. It may not be fd 1.
+                    if (stream != null && published.matches(identity)) {
+                        throw new IOException("Standard output would overwrite the published exclusion report");
+                    }
+                }
+                dumpMeasurement(coverage, metadata, options, () -> stream, report, published);
                 return;
             }
             OutputPaths target = new OutputPaths(output);
-            rejectOutputOverwritingInputs(target, inputs.files, inputs.trees, "Coverage output", null);
+            Set<Path> unreadableForms = new HashSet<>();
+            if (Files.notExists(target.destination, LinkOption.NOFOLLOW_LINKS)) {
+                for (Path forms : inputs.externalForms) {
+                    if (Files.isDirectory(forms) && !Files.isReadable(forms)) {
+                        unreadableForms.add(forms);
+                    }
+                }
+            }
+            rejectOutputOverwritingInputs(target, inputs.files, inputs.trees, "Coverage output", unreadableForms);
+            Object identity = StandardOutputFile.regularFileKey(target.destination);
+            rejectConfigIdentity(identity, "Coverage output " + output);
+            if (published.matches(identity)) {
+                throw new IOException("Coverage output would overwrite the published exclusion report: " + output);
+            }
             ExclusionRules.rejectReportInsideConfigDirectory(inputs.config, output, "-o");
             if (StandardOutputFile.isAlias(report)) {
                 if (StandardOutputFile.matches(target.destination)) {
@@ -348,16 +426,51 @@ public class Utils {
             } else if (report != null) {
                 rejectOverlappingOutputs(target, new OutputPaths(report));
             }
-            try (OutputStream stream = Files.newOutputStream(target.destination, StandardOpenOption.CREATE,
-                    StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)) {
-                writeCoverage(coverage, metadata, options, stream);
+            if (!unreadableForms.isEmpty()) {
+                ConversionOutput.writeNewFile(target.destination, staged -> writeCoverageFile(coverage, metadata, options,
+                        staged.toFile()));
+            } else {
+                try (OutputStream stream = Files.newOutputStream(target.destination, StandardOpenOption.CREATE,
+                        StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)) {
+                    writeCoverage(coverage, metadata, options, stream);
+                }
             }
             logCoverageStats(coverage);
         }
 
+        private void rejectConfigIdentity(Object identity, String output) throws IOException {
+            if (identity != null && loadedConfigs.containsKey(identity)) {
+                throw new IOException(output + " would overwrite an input file");
+            }
+        }
+
         @Override
         public void close() throws IOException {
-            published.close();
+            try (Closeable configs = this::closeConfigs) {
+                published.close();
+            }
+        }
+
+        private void closeConfigs() throws IOException {
+            IOException failure = null;
+            for (Closeable config : loadedConfigs.values()) {
+                if (config == null) {
+                    continue;
+                }
+                try {
+                    config.close();
+                } catch (IOException error) {
+                    if (failure == null) {
+                        failure = error;
+                    } else {
+                        failure.addSuppressed(error);
+                    }
+                }
+            }
+            loadedConfigs.clear();
+            if (failure != null) {
+                throw failure;
+            }
         }
     }
 
@@ -390,7 +503,7 @@ public class Utils {
                                              Map<URI, Map<BigDecimal, Integer>> coverageData,
                                              File rawInput, File coverageOutput, OutputStream reportOutput) throws Exception {
         return loadMetadata(metadataOptions, mainExtension, mainSourceUrl, coverageData, new ExclusionReport(),
-                false, false, rawInput, coverageOutput, true, () -> reportOutput);
+                false, false, rawInput, coverageOutput, true, () -> reportOutput, ExclusionRules::read);
     }
 
     public static List<String> validateMetadata(MetadataOptions metadataOptions) throws Exception {
@@ -403,7 +516,7 @@ public class Utils {
         }
         ExclusionReport report = new ExclusionReport();
         metadataOptions.validateSourceFilters("", "");
-        Metadata metadata = loadMetadata(metadataOptions, "", "", new HashMap<>(), report, false, false, null, null, true, () -> stdout);
+        Metadata metadata = loadMetadata(metadataOptions, "", "", new HashMap<>(), report, false, false, null, null, true, () -> stdout, ExclusionRules::read);
         metadata.writeExclusionReport();
         return report.getWarnings();
     }
@@ -413,12 +526,13 @@ public class Utils {
                                          ExclusionReport report, boolean measuring, boolean hasUserFilter,
                                          File rawInput, File coverageOutput, Supplier<OutputStream> stdout) throws Exception {
         Metadata metadata = loadMetadata(metadataOptions, mainExtension, mainSourceUrl, coverageData, report,
-                measuring, hasUserFilter, rawInput, coverageOutput, false, stdout);
+                measuring, hasUserFilter, rawInput, coverageOutput, false, stdout, ExclusionRules::read);
         metadata.writeExclusionReport();
         return metadata;
     }
 
-    private record ProtectedInputs(Set<Path> files, Set<Path> trees, File config) {}
+    private record ProtectedInputs(Set<Path> files, Set<Path> trees, Set<Path> configFiles, File config,
+                                   Set<Path> externalForms) {}
 
     public static final class Metadata {
         private final Map<String, URI> moduleUris;
@@ -447,21 +561,24 @@ public class Utils {
         }
 
         private void writeExclusionReport() throws IOException {
-            writeExclusionReport(null);
+            writeExclusionReport(null, false);
         }
 
-        private void writeExclusionReport(ConversionOutput.PublishedReport published) throws IOException {
+        private void writeExclusionReport(ConversionOutput.PublishedReport published, boolean guardChanges) throws IOException {
             if (reportFile != null) {
                 if (freshOutputs != null) {
                     ConversionOutput.writeNewFile(reportPath(), file -> report.writeJson(file.toFile()));
                 } else if (StandardOutputFile.isAlias(reportFile)) {
+                    if (published != null && StandardOutputFile.isProcessOutput(reportOutput)) {
+                        published.rememberProcessOutput();
+                    }
                     try (OutputStream stdout = reportStdout(reportOutput)) {
                         report.writeJson(stdout);
                     }
                 } else if (ConversionOutput.isSpecialFile(reportFile.toPath())) {
                     report.writeJson(reportFile);
                 } else if (published != null) {
-                    published.write(outputPath(reportFile, true), file -> report.writeJson(file.toFile()));
+                    published.write(outputPath(reportFile, true), file -> report.writeJson(file.toFile()), guardChanges);
                 } else {
                     ConversionOutput.writeFile(outputPath(reportFile, true), file -> report.writeJson(file.toFile()));
                 }
@@ -528,7 +645,8 @@ public class Utils {
                                                  Map<URI, Map<BigDecimal, Integer>> coverageData,
                                                  ExclusionReport report, boolean measuring,
                                                  boolean hasUserFilter, File rawInput, File coverageOutput,
-                                                 boolean allowFreshOutputs, Supplier<OutputStream> stdoutSupplier) throws Exception {
+                                                 boolean allowFreshOutputs, Supplier<OutputStream> stdoutSupplier,
+                                                 ExclusionRules.ConfigReader configReader) throws Exception {
 
         boolean rawMode = false;
         if (metadataOptions.isRawMode()) {
@@ -555,6 +673,8 @@ public class Utils {
         Map<String, URI> uriListByKey = new HashMap<>();
         Set<Path> inputFiles = new LinkedHashSet<>();
         Set<Path> exportTrees = new LinkedHashSet<>();
+        Set<Path> loadedConfigFiles = new LinkedHashSet<>();
+        Set<Path> externalForms = new LinkedHashSet<>();
         if (rawInput != null) {
             inputFiles.add(rawInput.toPath());
         }
@@ -608,8 +728,9 @@ public class Utils {
                                 metadataOptions.getExclusionReportFile(), "--exclusion-report");
                         rules = ExclusionRules.load(metadataOptions.getConfigFile(),
                                 Path.of(metadataOptions.getProjectDirName()), conf, report,
-                                metadataOptions.hasMultipleSources(), metadataOptions.getExclusionReportFile() != null);
-                        rules.getLoadedFiles().forEach(file -> inputFiles.add(file.toPath()));
+                                metadataOptions.hasMultipleSources(), metadataOptions.getExclusionReportFile() != null,
+                                configReader);
+                        rules.getLoadedFiles().forEach(file -> loadedConfigFiles.add(file.toPath()));
                         configExclusionReportFile = rules.getExclusionReportFile();
                         rules.getIncludeSources().forEach(report::addScopeSource);
                         if (!rules.getPrefixes().isEmpty()) {
@@ -729,7 +850,8 @@ public class Utils {
                     inputFiles.add(rootPath);
 
                     Path unreadableForms = readExternalDataProcessorSources(rootPath, source.getKey(), mainSourceUrl,
-                            metadataOptions.hasMultipleSources(), projectUri, uriListByKey, coverageData, report, inputFiles, exportTrees);
+                            metadataOptions.hasMultipleSources(), projectUri, uriListByKey, coverageData, report, inputFiles,
+                            exportTrees, externalForms);
                     if (allowFreshOutputs && unreadableForms != null) {
                         unreadableExternalForms = unreadableForms;
                     }
@@ -806,8 +928,9 @@ public class Utils {
         }
         File configFile = metadataOptions.getConfigFile();
         if (rawMode && configFile != null) {
-            ExclusionRules.configFiles(configFile).forEach(file -> inputFiles.add(file.toPath()));
+            ExclusionRules.configFiles(configFile).forEach(file -> loadedConfigFiles.add(file.toPath()));
         }
+        inputFiles.addAll(loadedConfigFiles);
         // System.out may still be fd 1. Keep the input preflight even when its actual sink is opaque.
         StandardOutputFile.FileIdentity stdout = writesToStdout && (usesProcessStdout || reportOutput == null)
                 ? StandardOutputFile.regularFile() : null;
@@ -822,7 +945,8 @@ public class Utils {
         if (!rawMode) {
             logger.info("Configuration sources reading DONE");
         }
-        ProtectedInputs protectedInputs = new ProtectedInputs(Set.copyOf(inputFiles), Set.copyOf(exportTrees), configFile);
+        ProtectedInputs protectedInputs = new ProtectedInputs(Set.copyOf(inputFiles), Set.copyOf(exportTrees),
+                Set.copyOf(loadedConfigFiles), configFile, Set.copyOf(externalForms));
         return new Metadata(uriListByKey, report, exclusionReportFile, freshOutputs, reportOutput, protectedInputs);
     }
 
@@ -1077,7 +1201,7 @@ public class Utils {
         for (Path tree : trees) {
             if (Files.isDirectory(tree)) {
                 checkExportTree(tree, null, (file, attributes) -> stdout.matches(file), Set.of(), Set.of(), visited,
-                        "Standard output", null);
+                        "Standard output", Set.of());
             }
         }
     }
@@ -1124,7 +1248,7 @@ public class Utils {
         boolean createOnly = unreadableExternalForms != null
                 && (coverage == null || Files.notExists(coverage.destination))
                 && (report == null || Files.notExists(report.destination));
-        Path toleratedUnreadableForms = createOnly ? unreadableExternalForms : null;
+        Set<Path> toleratedUnreadableForms = createOnly ? Set.of(unreadableExternalForms) : Set.of();
         if (coverage != null) {
             rejectOutputOverwritingInputs(coverage, inputs, exportTrees, "Coverage output",
                     toleratedUnreadableForms);
@@ -1154,7 +1278,7 @@ public class Utils {
     }
 
     private static void rejectOutputOverwritingInputs(OutputPaths output, Set<Path> inputs, Set<Path> trees,
-                                                       String outputLabel, Path toleratedUnreadableForms)
+                                                       String outputLabel, Set<Path> toleratedUnreadableForms)
             throws IOException {
         boolean outputExists = Files.exists(output.destination);
         for (Path input : inputs) {
@@ -1175,7 +1299,7 @@ public class Utils {
     }
 
     private static void rejectOutputInExportTrees(OutputPaths paths, Set<Path> trees, String label,
-                                                   Path toleratedUnreadableForms) throws IOException {
+                                                   Set<Path> toleratedUnreadableForms) throws IOException {
         Path output = paths.requested;
         Path destination = paths.destination;
         Set<Object> parents = new HashSet<>();
@@ -1282,7 +1406,7 @@ public class Utils {
 
     private static void checkExportTree(Path root, Path output, ExportFileIdentity identity,
                                         Set<Object> parents, Set<Path> missing, Set<Object> visited, String label,
-                                        Path toleratedUnreadableForms) throws IOException {
+                                        Set<Path> toleratedUnreadableForms) throws IOException {
         Files.walkFileTree(root, EnumSet.of(FileVisitOption.FOLLOW_LINKS), Integer.MAX_VALUE, new SimpleFileVisitor<Path>() {
             @Override
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
@@ -1311,12 +1435,15 @@ public class Utils {
                 if (error instanceof FileSystemLoopException) {
                     return FileVisitResult.CONTINUE;
                 }
-                if (toleratedUnreadableForms != null && error instanceof AccessDeniedException
-                        && sameExistingFile(file, toleratedUnreadableForms)) {
-                    if (parents.contains(directoryKey(file))) {
-                        throw new IllegalArgumentException(label + " is inside a source directory: " + output);
+                if (error instanceof AccessDeniedException) {
+                    for (Path forms : toleratedUnreadableForms) {
+                        if (sameExistingFile(file, forms)) {
+                            if (parents.contains(directoryKey(file))) {
+                                throw new IllegalArgumentException(label + " is inside a source directory: " + output);
+                            }
+                            return FileVisitResult.CONTINUE;
+                        }
                     }
-                    return FileVisitResult.CONTINUE;
                 }
                 throw error;
             }
@@ -1363,7 +1490,8 @@ public class Utils {
                                                          URI projectUri,
                                                          Map<String, URI> uriListByKey,
                                                          Map<URI, Map<BigDecimal, Integer>> coverageData,
-                                                         ExclusionReport report, Set<Path> inputFiles, Set<Path> exportTrees)
+                                                         ExclusionReport report, Set<Path> inputFiles, Set<Path> exportTrees,
+                                                         Set<Path> externalForms)
             throws IOException, ParserConfigurationException, SAXException {
 
         Path descriptor = resolveExternalDescriptor(rootPath, Path.of(projectUri), inputFiles);
@@ -1376,7 +1504,9 @@ public class Utils {
         Path unreadableForms = null;
         if (isConfiguratorMetadataRoot(descriptorElement)) {
             String objectName = com.google.common.io.Files.getNameWithoutExtension(descriptor.getFileName().toString());
-            exportTrees.add(descriptor.resolveSibling(objectName));
+            Path sources = descriptor.resolveSibling(objectName);
+            exportTrees.add(sources);
+            externalForms.add(sources.resolve("Forms"));
             ConfiguratorExternalSource source = readConfiguratorExternalSource(descriptor, descriptorElement,
                     builder, inputFiles, projectUri, report);
             externalDataProcessorUriListByKey = source.modules();

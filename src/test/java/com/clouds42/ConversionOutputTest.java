@@ -24,6 +24,7 @@ package com.clouds42;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.channels.FileChannel;
@@ -437,6 +438,26 @@ class ConversionOutputTest {
     }
 
     @Test
+    void anotherPublicationDoesNotUseAReservedReportNameAsItsMarkerDirectory() throws IOException {
+        Path first = directory.resolve(".coverage41c-creating");
+        Path firstJson = directory.resolve("first.json");
+        Path second = directory.resolve("second.xml");
+        Path secondJson = directory.resolve("second.json");
+
+        ConversionOutput.publish(first, firstJson, output -> {
+            ConversionOutput.publish(second, secondJson, other -> {
+                assertFalse(Files.isDirectory(first), "The first publication already reserved this report name");
+                other.write('b');
+            }, json -> json.write('j'), null);
+            output.write('a');
+        }, json -> json.write('j'), null);
+
+        assertEquals("a", Files.readString(first));
+        assertEquals("b", Files.readString(second));
+        assertDirectorySize(4);
+    }
+
+    @Test
     void orphanedDestinationClaimProtectsOnlyThatReportAndItsAliases() throws IOException {
         ConversionOutput.FileKeys keys = markerKeysWithBasicIdentity();
         Path coverage = Files.writeString(directory.resolve("coverage.xml"), "old");
@@ -467,16 +488,22 @@ class ConversionOutputTest {
     }
 
     @Test
-    void fallbackCreationDoesNotFollowASymlinkAtTheCreationNamespace() throws IOException {
+    void newReportSkipsSymlinksAtCreationNamespaces() throws IOException {
         ConversionOutput.FileKeys keys = markerKeysWithBasicIdentity();
         Path foreign = Files.createDirectory(directory.resolve("foreign"));
         Path namespace = Files.createSymbolicLink(directory.resolve(".coverage41c-creating"), foreign);
+        Path alternate = Files.createSymbolicLink(directory.resolve(".coverage41c-creating-1"), foreign);
         Path coverage = directory.resolve("coverage.xml");
+        Path fallback = directory.resolve("fallback.xml");
 
-        IOException failure = assertThrows(IOException.class, () -> publishMarkerOutput(coverage, keys));
-        assertTrue(failure.getMessage().contains("Report creation marker path is not a directory"));
+        ConversionOutput.writeNewFile(coverage, staged -> Files.writeString(staged, "coverage"));
+        publishMarkerOutput(fallback, keys);
+
+        assertEquals("coverage", Files.readString(coverage));
+        assertEquals("x", Files.readString(fallback));
         assertTrue(Files.isSymbolicLink(namespace));
-        assertFalse(Files.exists(coverage));
+        assertTrue(Files.isSymbolicLink(alternate));
+        assertFalse(Files.exists(directory.resolve(".coverage41c-creating-2")));
         try (Stream<Path> contents = Files.list(foreign)) {
             assertEquals(0, contents.count());
         }
@@ -729,6 +756,86 @@ class ConversionOutputTest {
         String classes = Path.of(ExternalLockProbe.class.getProtectionDomain().getCodeSource().getLocation().toURI()).toString();
         return new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(), "-cp", classes,
                 ExternalLockProbe.class.getName(), path.toString()).inheritIO();
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void collectorRejectsOpaqueStdoutAfterPublishedJsonIsMoved() throws Exception {
+        Path coverage = directory.resolve("coverage.xml");
+        Path report = directory.resolve("exclusions.json");
+        Path archive = directory.resolve("archive.json");
+        var metadata = picocli.CommandLine.populateCommand(new com.clouds42.CommandLineOptions.MetadataOptions(),
+                "-s", "src/test/resources/configuration", "--exclusion-report", report.toString());
+        var output = picocli.CommandLine.populateCommand(new com.clouds42.CommandLineOptions.OutputOptions(),
+                "-o", coverage.toString());
+        var paths = new java.util.HashMap<java.net.URI, java.util.Map<java.math.BigDecimal, Integer>>();
+        try (var collector = new Utils.MeasurementReports()) {
+            collector.readMetadata(metadata, "", "", paths, false, coverage.toFile(), () -> null);
+            Files.move(report, archive);
+            byte[] original = Files.readAllBytes(archive);
+            Files.writeString(report, "{}");
+            Files.createSymbolicLink(coverage, Path.of("/dev/stdout"));
+            try (var sink = Files.newOutputStream(archive, StandardOpenOption.APPEND)) {
+                assertThrows(IOException.class, () -> collector.dump(paths, metadata, output, () -> sink));
+            }
+            assertArrayEquals(original, Files.readAllBytes(archive));
+            assertEquals("{}", Files.readString(report));
+        }
+    }
+
+    @Test
+    void collectorProtectsRulesLoadedBeforeTheirPathWasReplaced() throws Exception {
+        Path rules = directory.resolve("rules.json");
+        Path archive = directory.resolve("archive.json");
+        Path output = directory.resolve("coverage.xml");
+        String config = "{\"exclude\":{\"objects\":[\"Catalog.Справочник1\"]}}";
+        Files.writeString(rules, config);
+        var metadata = picocli.CommandLine.populateCommand(new com.clouds42.CommandLineOptions.MetadataOptions(),
+                "-s", "src/test/resources/configuration", "--config", rules.toString());
+        var outputOptions = picocli.CommandLine.populateCommand(new com.clouds42.CommandLineOptions.OutputOptions(),
+                "-o", output.toString());
+        var coverage = new java.util.HashMap<java.net.URI, java.util.Map<java.math.BigDecimal, Integer>>();
+        try (var collector = new Utils.MeasurementReports()) {
+            collector.readMetadata(metadata, "", "", coverage, false, null, () -> {
+                // The rules have already been parsed when the startup output is selected.
+                try {
+                    Files.move(rules, archive);
+                    Files.writeString(rules, config);
+                } catch (IOException error) {
+                    throw new java.io.UncheckedIOException(error);
+                }
+                return new ByteArrayOutputStream();
+            });
+            Files.createLink(output, archive);
+            assertThrows(IOException.class, () -> collector.dump(coverage, metadata, outputOptions, () -> null));
+            assertEquals(config, Files.readString(archive));
+        }
+    }
+
+    @Test
+    void namedCollectorClosePreservesHostLocksOnJsonAndRules() throws Exception {
+        Path coverage = directory.resolve("coverage.xml");
+        Path report = directory.resolve("exclusions.json");
+        Path rules = Files.writeString(directory.resolve("rules.json"),
+                "{\"exclude\":{\"objects\":[\"Catalog.Справочник1\"]}}");
+        var options = picocli.CommandLine.populateCommand(new com.clouds42.CommandLineOptions.MetadataOptions(),
+                "-s", "src/test/resources/configuration", "--config", rules.toString(),
+                "--exclusion-report", report.toString());
+        try (var collector = new Utils.MeasurementReports()) {
+            collector.readMetadata(options, "", "", new java.util.HashMap<>(), false, coverage.toFile(), () -> null);
+            try (FileChannel reportWriter = FileChannel.open(report, StandardOpenOption.WRITE);
+                 FileChannel rulesWriter = FileChannel.open(rules, StandardOpenOption.WRITE);
+                 FileLock reportLock = reportWriter.lock();
+                 FileLock rulesLock = rulesWriter.lock()) {
+                ProcessBuilder reportCheck = lockChecker(report);
+                ProcessBuilder rulesCheck = lockChecker(rules);
+                assertLocked(reportCheck);
+                assertLocked(rulesCheck);
+                collector.close();
+                assertLocked(reportCheck);
+                assertLocked(rulesCheck);
+            }
+        }
     }
 
     private static void assertLocked(ProcessBuilder checker) throws IOException {

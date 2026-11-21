@@ -111,6 +111,17 @@ final class ExclusionRules {
 
     static ExclusionRules load(File path, Path projectDir, CF configuration, ExclusionReport report,
                                boolean multipleSources, boolean reportOverridden) throws IOException {
+        return load(path, projectDir, configuration, report, multipleSources, reportOverridden, ExclusionRules::read);
+    }
+
+    @FunctionalInterface
+    interface ConfigReader {
+        CoverageConfig read(File file) throws IOException;
+    }
+
+    static ExclusionRules load(File path, Path projectDir, CF configuration, ExclusionReport report,
+                               boolean multipleSources, boolean reportOverridden, ConfigReader reader)
+            throws IOException {
         boolean filtersScope = false;
         Set<String> includedSubsystems = new HashSet<>();
         List<ScopePrefix> prefixes = new ArrayList<>();
@@ -126,7 +137,7 @@ final class ExclusionRules {
         List<File> loadedFiles = configFiles(path);
         for (File file : loadedFiles) {
             String fileName = file.getName();
-            CoverageConfig config = read(file);
+            CoverageConfig config = reader.read(file);
             config.getUnknownKeys().forEach(key -> report.warn(fileName + ": unknown key " + key));
             if (config.isEmpty()) {
                 throw new IllegalArgumentException("Coverage configuration " + fileName + " contains no rules");

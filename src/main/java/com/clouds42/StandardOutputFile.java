@@ -35,6 +35,7 @@ import java.nio.file.FileSystemLoopException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.NoSuchFileException;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
@@ -93,6 +94,37 @@ final class StandardOutputFile {
         boolean matches(Path destination) throws IOException;
     }
 
+    static Object regularFileKey(Path path) throws IOException {
+        if (!Files.isRegularFile(path)) {
+            return null;
+        }
+        try {
+            if (File.separatorChar == '\\') {
+                return WindowsFiles.key(path, false);
+            }
+            if (path.getFileSystem().supportedFileAttributeViews().contains("unix")) {
+                Map<String, Object> attributes = Files.readAttributes(path, "unix:dev,ino");
+                return fileKey(((Number) attributes.get("dev")).longValue(),
+                        ((Number) attributes.get("ino")).longValue());
+            }
+            return Files.readAttributes(path, BasicFileAttributes.class).fileKey();
+        } catch (NoSuchFileException movedOrRemoved) {
+            return null;
+        }
+    }
+
+    static Object regularFileKey() throws IOException {
+        if (File.separatorChar == '\\') {
+            return WindowsFiles.stdoutKey();
+        }
+        Path descriptor = unixDescriptor();
+        return isDarwin() ? darwinKey(descriptor) : regularFileKey(descriptor);
+    }
+
+    private static Object fileKey(long device, long inode) {
+        return Map.of("dev", device, "ino", inode);
+    }
+
     static FileIdentity regularFile() throws IOException {
         if (File.separatorChar == '\\') {
             return WindowsFiles.stdout();
@@ -104,7 +136,7 @@ final class StandardOutputFile {
         return isDarwin() ? darwinIdentity(descriptor) : path -> Files.isSameFile(descriptor, path);
     }
 
-    private static Path unixDescriptor() {
+    static Path unixDescriptor() {
         Path proc = Path.of("/proc/self/fd/1");
         return Files.exists(proc) ? proc : Path.of("/dev/fd/1");
     }
@@ -135,10 +167,14 @@ final class StandardOutputFile {
     // Darwin's /dev/fd is on devfs. Ask the open vnode for its device and 64-bit file ID:
     // a pathname may already have been unlinked or reused while the shell still holds the descriptor.
     private static FileIdentity darwinIdentity(Path descriptor) throws IOException {
-        // struct attrlist (sys/attr.h): bitmap count, reserved, then five attribute groups.
+        Object identity = darwinKey(descriptor);
+        return identity == null ? null : destination -> identity.equals(regularFileKey(destination));
+    }
+
+    private static Object darwinKey(Path descriptor) throws IOException {
+        // APFS file IDs are stable across renames and timestamp changes.
         byte[] attributes = ByteBuffer.allocate(24).order(ByteOrder.nativeOrder())
                 .putShort((short) 5).putShort((short) 0).putInt(Darwin.ATTR_CMN_DEVID | Darwin.ATTR_CMN_FILEID).array();
-        // Darwin packs the requested attributes after a 4-byte length: dev_t, then uint64_t file ID.
         ByteBuffer result = ByteBuffer.allocate(16).order(ByteOrder.nativeOrder());
         if (Native.load("c", Darwin.class).fgetattrlist(1, attributes, result.array(), result.capacity(), 0) != 0) {
             int error = Native.getLastError();
@@ -151,13 +187,7 @@ final class StandardOutputFile {
         if (result.getInt(0) != result.capacity()) {
             throw new IOException("Incomplete file identity for standard output");
         }
-        int device = result.getInt(4);
-        long inode = result.getLong(8);
-        return destination -> {
-            Map<String, Object> identity = Files.readAttributes(destination, "unix:dev,ino");
-            return device == ((Number) identity.get("dev")).intValue()
-                    && inode == ((Number) identity.get("ino")).longValue();
-        };
+        return fileKey(result.getInt(4), result.getLong(8));
     }
 
     private interface Darwin extends Library {

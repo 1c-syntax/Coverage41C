@@ -25,6 +25,7 @@ import com.sun.jna.Library;
 import com.sun.jna.Native;
 import com.sun.jna.Platform;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.FileSystemException;
@@ -33,6 +34,24 @@ import java.util.Arrays;
 
 final class PosixFiles {
     private PosixFiles() { }
+
+    static Closeable pinOnLinux(Path path) throws IOException {
+        if (!Platform.isLinux()) {
+            return null;
+        }
+        // O_PATH keeps the inode alive without the lock-releasing close of an ordinary POSIX descriptor.
+        int descriptor = LibC.INSTANCE.open(nativePath(path), 0x200000 | 0x80000); // O_PATH | O_CLOEXEC
+        if (descriptor < 0) {
+            throw new FileSystemException(path.toString(), null, "Cannot retain report identity (errno "
+                    + Native.getLastError() + ")");
+        }
+        return () -> {
+            if (LibC.INSTANCE.close(descriptor) != 0) {
+                throw new FileSystemException(path.toString(), null, "Cannot release report identity (errno "
+                        + Native.getLastError() + ")");
+            }
+        };
+    }
 
     static void moveNewFile(Path source, Path target) throws IOException {
         byte[] from = nativePath(source);
@@ -79,6 +98,10 @@ final class PosixFiles {
 
     private interface LibC extends Library {
         LibC INSTANCE = Native.load(Platform.C_LIBRARY_NAME, LibC.class);
+
+        int open(byte[] name, int flags);
+
+        int close(int descriptor);
 
         int renameat2(int sourceDirectory, byte[] from, int targetDirectory, byte[] to, int flags);
 

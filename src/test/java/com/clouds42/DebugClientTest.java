@@ -51,6 +51,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.CRC32;
 import java.util.zip.DeflaterOutputStream;
@@ -603,6 +604,23 @@ class DebugClientTest {
 
     private String emptyPingXml() throws IOException {
         return pingXml(ResponseFactory.eINSTANCE.createRDBGPingDebugUIResponse());
+    }
+
+    @Test
+    void pingSignalsReceiptBeforeParsingTheResponse() throws Exception {
+        respond(200, "application/xml", emptyPingXml());
+        AtomicBoolean received = new AtomicBoolean();
+        AtomicBoolean parsed = new AtomicBoolean();
+        client.serializer = new MyRuntimeDebugModelXmlSerializer() {
+            @Override
+            public <T extends EObject> T deserialize(String xml, Class<T> type) throws IOException {
+                assertTrue(received.get());
+                parsed.set(true);
+                return super.deserialize(xml, type);
+            }
+        };
+        assertTrue(client.pingResponse(() -> received.set(true)).isPresent());
+        assertTrue(parsed.get());
     }
 
     private String pingXml(RDBGPingDebugUIResponse response) throws IOException {

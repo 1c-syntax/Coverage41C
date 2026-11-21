@@ -54,6 +54,11 @@ final class WindowsFiles {
     }
 
     static StandardOutputFile.FileIdentity stdout() throws IOException {
+        Object key = stdoutKey();
+        return key == null ? null : path -> key.equals(key(path, false));
+    }
+
+    static Object stdoutKey() throws IOException {
         Pointer handle = Kernel.INSTANCE.GetStdHandle(-11);
         if (invalid(handle) || Kernel.INSTANCE.GetFileType(handle) != 1) {
             return null;
@@ -62,7 +67,7 @@ final class WindowsFiles {
         if (key == null) {
             throw new IOException("Cannot identify standard output");
         }
-        return path -> key.equals(key(path, false));
+        return key;
     }
 
     static boolean caseSensitiveDirectory(Path path) throws IOException {

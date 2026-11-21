@@ -196,8 +196,14 @@ public class DebugClient extends AbstractDebugClient{
 
     /** A present result acknowledges the poll, even if dbgs sent no commands. */
     public Optional<List<? extends DBGUIExtCmdInfoBase>> pollDebugServer() throws RuntimeDebugClientException {
+        return pollDebugServer(() -> { });
+    }
+
+    private Optional<List<? extends DBGUIExtCmdInfoBase>> pollDebugServer(Runnable responseReceived)
+            throws RuntimeDebugClientException {
         Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl)
-                .param("cmd", "pingDebugUIParams").param("dbgui", this.debugServerUuid.toString());
+                .param("cmd", "pingDebugUIParams").param("dbgui", this.debugServerUuid.toString())
+                .onResponseSuccess(response -> responseReceived.run());
         RDBGPingDebugUIResponse responseContent = this.performRuntimeHttpRequest(request, RDBGPingDebugUIResponse.class);
         return Optional.ofNullable(responseContent).map(RDBGPingDebugUIResponse::getResult);
     }
@@ -438,6 +444,12 @@ public class DebugClient extends AbstractDebugClient{
 
     public Optional<List<? extends DBGUIExtCmdInfoBase>> pingResponse() throws RuntimeDebugClientException {
         return pollDebugServer();
+    }
+
+    /** Runs the callback when the HTTP response has arrived, before decoding its body. */
+    public Optional<List<? extends DBGUIExtCmdInfoBase>> pingResponse(Runnable responseReceived)
+            throws RuntimeDebugClientException {
+        return pollDebugServer(responseReceived);
     }
 
     private void requireEmptyAcknowledgement(Request request, EObject content, String command)
