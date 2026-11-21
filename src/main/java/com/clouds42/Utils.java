@@ -66,10 +66,13 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.FileSystemLoopException;
+import java.nio.file.FileSystems;
 import java.nio.file.FileVisitOption;
 import java.nio.file.FileVisitResult;
+import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.SimpleFileVisitor;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
@@ -311,6 +314,7 @@ public class Utils {
     public static final class MeasurementReports implements Closeable {
         private final ConversionOutput.PublishedReport published = new ConversionOutput.PublishedReport();
         private File report;
+        private ProtectedInputs inputs = new ProtectedInputs(Set.of(), Set.of(), null);
 
         public Map<String, URI> readMetadata(MetadataOptions options, String mainExtension, String mainSourceUrl,
                                              Map<URI, Map<BigDecimal, Integer>> coverage,
@@ -320,6 +324,7 @@ public class Utils {
             Metadata metadata = loadMetadata(options, mainExtension, mainSourceUrl, coverage, new ExclusionReport(), true, hasUserFilter, null,
                     coverageFile, false, stdout);
             report = metadata.reportFile;
+            inputs = metadata.inputs;
             boolean guard = report != null && (coverageFile == null || StandardOutputFile.isAlias(coverageFile))
                     && ConversionOutput.needsFileVerification(metadata.reportOutput);
             metadata.writeExclusionReport(guard ? published : null);
@@ -328,7 +333,26 @@ public class Utils {
 
         public void dump(Map<URI, Map<BigDecimal, Integer>> coverage, MetadataOptions metadata,
                          OutputOptions options, Supplier<OutputStream> stdout) throws IOException {
-            dumpMeasurement(coverage, metadata, options, stdout, report, published);
+            File output = options.getOutputFile();
+            if (output == null || StandardOutputFile.isAlias(output)) {
+                dumpMeasurement(coverage, metadata, options, stdout, report, published);
+                return;
+            }
+            OutputPaths target = new OutputPaths(output);
+            rejectOutputOverwritingInputs(target, inputs.files, inputs.trees, "Coverage output", null);
+            ExclusionRules.rejectReportInsideConfigDirectory(inputs.config, output, "-o");
+            if (StandardOutputFile.isAlias(report)) {
+                if (StandardOutputFile.matches(target.destination)) {
+                    throw new IOException("Exclusion report and coverage output must use different files: " + output);
+                }
+            } else if (report != null) {
+                rejectOverlappingOutputs(target, new OutputPaths(report));
+            }
+            try (OutputStream stream = Files.newOutputStream(target.destination, StandardOpenOption.CREATE,
+                    StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)) {
+                writeCoverage(coverage, metadata, options, stream);
+            }
+            logCoverageStats(coverage);
         }
 
         @Override
@@ -394,19 +418,24 @@ public class Utils {
         return metadata;
     }
 
+    private record ProtectedInputs(Set<Path> files, Set<Path> trees, File config) {}
+
     public static final class Metadata {
         private final Map<String, URI> moduleUris;
         private final ExclusionReport report;
         private final File reportFile;
         private final FreshOutputs freshOutputs;
         private final OutputStream reportOutput;
+        private final ProtectedInputs inputs;
 
-        private Metadata(Map<String, URI> moduleUris, ExclusionReport report, File reportFile, FreshOutputs freshOutputs, OutputStream reportOutput) {
+        private Metadata(Map<String, URI> moduleUris, ExclusionReport report, File reportFile,
+                         FreshOutputs freshOutputs, OutputStream reportOutput, ProtectedInputs inputs) {
             this.moduleUris = moduleUris;
             this.report = report;
             this.reportFile = reportFile;
             this.freshOutputs = freshOutputs;
             this.reportOutput = reportOutput;
+            this.inputs = inputs;
         }
 
         public Map<String, URI> getModuleUris() {
@@ -778,7 +807,7 @@ public class Utils {
         // System.out may still be fd 1. Keep the input preflight even when its actual sink is opaque.
         StandardOutputFile.FileIdentity stdout = writesToStdout && (usesProcessStdout || reportOutput == null)
                 ? StandardOutputFile.regularFile() : null;
-        if (stdout != null || existingFile(coverageOutput) || existingFile(exclusionReportFile)) {
+        if (measuring || stdout != null || existingFile(coverageOutput) || existingFile(exclusionReportFile)) {
             uriListByKey.values().stream().map(Path::of).filter(Files::isRegularFile).forEach(inputFiles::add);
         }
         if (stdout != null) {
@@ -789,27 +818,40 @@ public class Utils {
         if (!rawMode) {
             logger.info("Configuration sources reading DONE");
         }
-        return new Metadata(uriListByKey, report, exclusionReportFile, freshOutputs, reportOutput);
+        ProtectedInputs protectedInputs = new ProtectedInputs(Set.copyOf(inputFiles), Set.copyOf(exportTrees), configFile);
+        return new Metadata(uriListByKey, report, exclusionReportFile, freshOutputs, reportOutput, protectedInputs);
+    }
+
+    private static boolean sameExistingFile(Path left, Path right) throws IOException {
+        if (File.separatorChar == '\\' && left.getFileSystem() == FileSystems.getDefault()
+                && right.getFileSystem() == left.getFileSystem() && !left.toString().equals(right.toString())) {
+            Object leftKey = WindowsFiles.key(left, false);
+            Object rightKey = WindowsFiles.key(right, false);
+            if (leftKey != null && rightKey != null) {
+                return leftKey.equals(rightKey);
+            }
+        }
+        return Files.isSameFile(left, right);
     }
 
     static boolean sameOutputFile(Path report, Path coverage) throws IOException {
         if (Files.exists(report) && Files.exists(coverage)) {
-            return Files.isSameFile(report, coverage);
+            return sameExistingFile(report, coverage);
         }
-        if (report.equals(coverage)) {
+        if (report.toString().equals(coverage.toString())) {
             return true;
         }
         Path reportDestination = resolveOutputPath(report);
         Path coverageDestination = resolveOutputPath(coverage);
-        if (reportDestination.equals(coverageDestination)) {
+        if (reportDestination.toString().equals(coverageDestination.toString())) {
             return true;
         }
         if (Files.exists(reportDestination) && Files.exists(coverageDestination)) {
-            return Files.isSameFile(reportDestination, coverageDestination);
+            return sameExistingFile(reportDestination, coverageDestination);
         }
         Path reportDirectory = existingOutputDirectory(reportDestination.getParent());
         Path coverageDirectory = existingOutputDirectory(coverageDestination.getParent());
-        return reportDirectory != null && coverageDirectory != null && Files.isSameFile(reportDirectory, coverageDirectory)
+        return reportDirectory != null && coverageDirectory != null && sameExistingFile(reportDirectory, coverageDirectory)
                 && aliasesOnVolume(reportDirectory, reportDirectory.relativize(reportDestination),
                         coverageDirectory.relativize(coverageDestination));
     }
@@ -826,7 +868,8 @@ public class Utils {
         if (report.toString().equals(coverage.toString())) {
             return true;
         }
-        if (report.getNameCount() != coverage.getNameCount()) {
+        if (report.getNameCount() != coverage.getNameCount()
+                || (File.separatorChar == '\\' && WindowsFiles.caseSensitiveDirectory(directory))) {
             return false;
         }
         Path probeDirectory = Files.createTempDirectory(directory, ".coverage41c-path-");
@@ -840,7 +883,7 @@ public class Utils {
                 Path probe = Files.createFile(probeDirectory.resolve(reportName));
                 try {
                     Path alternative = probeDirectory.resolve(coverageName);
-                    if (!Files.exists(alternative) || !Files.isSameFile(probe, alternative)) {
+                    if (!Files.exists(alternative) || !sameExistingFile(probe, alternative)) {
                         return false;
                     }
                 } finally {
@@ -855,18 +898,23 @@ public class Utils {
 
     // The exclusion report creates missing directories and can write through a dangling symlink.
     static Path resolveOutputPath(Path path) throws IOException {
-        return resolveOutputPath(path, new HashSet<>(), false);
+        return resolveOutputPath(path, Set.of());
+    }
+
+    static Path resolveOutputPath(Path path, Set<Path> futureDirectories) throws IOException {
+        return resolveOutputPath(path, new HashSet<>(), false, futureDirectories);
     }
 
     private static Path resolveFileOutputPath(Path path) throws IOException {
-        Path destination = resolveOutputPath(path, new HashSet<>(), true);
+        Path destination = resolveOutputPath(path, new HashSet<>(), true, Set.of());
         if (Files.isDirectory(destination)) {
             throw new IOException("Output destination must name a file: " + path);
         }
         return destination;
     }
 
-    private static Path resolveOutputPath(Path path, Set<Path> links, boolean fileDestination) throws IOException {
+    private static Path resolveOutputPath(Path path, Set<Path> links, boolean fileDestination,
+                                          Set<Path> futureDirectories) throws IOException {
         Path name = path.getFileName();
         if (fileDestination && (name == null || name.toString().equals(".") || name.toString().equals(".."))) {
             throw new IOException("Output destination must name a file: " + path);
@@ -876,10 +924,15 @@ public class Utils {
         } catch (NoSuchFileException missing) {
             // POSIX traversal must reach the preceding directory before interpreting "..".
             // Collapsing a missing directory here would silently redirect an invalid output path.
-            if (path.getParent() == null || name.toString().equals("..")) {
+            boolean goesUp = name.toString().equals("..");
+            if (path.getParent() == null || goesUp && futureDirectories.isEmpty()) {
                 throw missing;
             }
-            Path candidate = resolveOutputPath(path.getParent(), links, false).resolve(name).normalize();
+            Path parent = resolveOutputPath(path.getParent(), links, false, futureDirectories);
+            if (goesUp && !matchesFutureDirectory(parent, futureDirectories)) {
+                throw missing;
+            }
+            Path candidate = parent.resolve(name).normalize();
             if (!Files.isSymbolicLink(candidate)) {
                 return candidate;
             }
@@ -887,11 +940,21 @@ public class Utils {
                 throw new FileSystemLoopException(candidate.toString());
             }
             try {
-                return resolveOutputPath(candidate.resolveSibling(Files.readSymbolicLink(candidate)), links, fileDestination);
+                return resolveOutputPath(candidate.resolveSibling(Files.readSymbolicLink(candidate)), links,
+                        fileDestination, futureDirectories);
             } finally {
                 links.remove(candidate);
             }
         }
+    }
+
+    private static boolean matchesFutureDirectory(Path parent, Set<Path> futureDirectories) throws IOException {
+        for (Path futureDirectory : futureDirectories) {
+            if (sameOutputFile(parent, futureDirectory)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean existingFile(File file) {
@@ -1099,7 +1162,7 @@ public class Utils {
         for (Path input : inputs) {
             Path inputPath = input.toAbsolutePath();
             boolean inputMissing = Files.notExists(inputPath);
-            boolean sameInput = outputExists ? Files.exists(inputPath) && Files.isSameFile(output.destination, inputPath)
+            boolean sameInput = outputExists ? Files.exists(inputPath) && sameExistingFile(output.destination, inputPath)
                     : inputMissing && sameOutputFile(output.destination, inputPath);
             if (sameInput) {
                 throw new IllegalArgumentException(outputLabel + " would overwrite input file: " + inputPath);
@@ -1126,7 +1189,7 @@ public class Utils {
         BasicFileAttributes target = Files.isRegularFile(destination)
                 ? Files.readAttributes(destination, BasicFileAttributes.class) : null;
         ExportFileIdentity identity = target == null ? null : (file, attributes) ->
-                target.fileKey() == null || attributes.fileKey() == null ? Files.isSameFile(file, destination)
+                target.fileKey() == null || attributes.fileKey() == null ? sameExistingFile(file, destination)
                         : target.fileKey().equals(attributes.fileKey());
         Set<Path> missing = new LinkedHashSet<>();
         for (Path path = destination; path != null && Files.notExists(path);
@@ -1251,7 +1314,7 @@ public class Utils {
                     return FileVisitResult.CONTINUE;
                 }
                 if (toleratedUnreadableForms != null && error instanceof AccessDeniedException
-                        && Files.isSameFile(file, toleratedUnreadableForms)) {
+                        && sameExistingFile(file, toleratedUnreadableForms)) {
                     if (parents.contains(directoryKey(file))) {
                         throw new IllegalArgumentException(label + " is inside a source directory: " + output);
                     }
@@ -1616,8 +1679,15 @@ public class Utils {
     }
 
     private static boolean isExternalResourceName(String name) {
-        return !name.isBlank() && !name.equals(".") && !name.equals("..")
-                && !name.contains("/") && !name.contains("\\") && !name.contains(":");
+        if (name.isBlank() || name.equals(".") || name.equals("..")
+                || name.contains("/") || name.contains("\\") || name.contains(":")) {
+            return false;
+        }
+        try {
+            return Path.of(name).getNameCount() == 1;
+        } catch (InvalidPathException invalid) {
+            return false;
+        }
     }
 
     private static void warnMissingMainSchema(ExclusionReport report, URI projectUri, Path descriptor, String reference) {
@@ -2219,7 +2289,7 @@ public class Utils {
             Path tempDir = tempDirFile.toPath();
             Path sock = tempDir.resolve(String.format("%s_%s.sock", connectionOptions.getInfobaseAlias(),
                     debugUri.toString().replaceAll("[^a-zA-Z0-9-_.]", "_")));
-            pipeName = sock.toString();
+            pipeName = sock.toAbsolutePath().normalize().toString();
         }
         return pipeName;
     }

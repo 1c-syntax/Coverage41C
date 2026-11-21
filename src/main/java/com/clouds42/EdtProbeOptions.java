@@ -38,16 +38,17 @@ final class EdtProbeOptions {
             "--add-modules", "--limit-modules", "--add-reads", "--add-exports", "--add-opens",
             "--patch-module", "--enable-native-access", "--source");
 
+    private enum Syntax { JVM_ENVIRONMENT, ARGUMENT_FILE, SHELL_OPTIONS }
+
     private EdtProbeOptions() { }
 
     static List<String> readFrom(Reader input) throws IOException {
-        List<String> options = fromVmArguments(tokens(readOptionGroup(input), false));
-        List<String> launcher = tokens(readOptionGroup(input), false);
-        options.addAll(fromVmArguments(tokens(readOptionGroup(input), false)));
-        String scriptOptions = readOptionGroup(input);
-        if (!scriptOptions.isEmpty()) {
-            launcher.addAll(List.of(scriptOptions.split("\n")));
-        }
+        List<String> options = fromVmArguments(tokens(readOptionGroup(input), Syntax.JVM_ENVIRONMENT));
+        List<String> launcher = tokens(readOptionGroup(input), Syntax.JVM_ENVIRONMENT);
+        options.addAll(fromVmArguments(tokens(readOptionGroup(input), Syntax.JVM_ENVIRONMENT)));
+        // The launcher splits on shell whitespace and rejoins the words before eval parses the quotes.
+        String scriptOptions = readOptionGroup(input).replaceAll("[ \t\n]+", " ");
+        launcher.addAll(tokens(scriptOptions, Syntax.SHELL_OPTIONS));
         addLauncherOptions(launcher, options);
         return options;
     }
@@ -76,7 +77,7 @@ final class EdtProbeOptions {
                     Path file = Path.of(token.substring(1));
                     try {
                         // Keep arbitrary bytes in comments from blocking a valid option.
-                        args = tokens(Files.readString(file, StandardCharsets.ISO_8859_1), true);
+                        args = tokens(Files.readString(file, StandardCharsets.ISO_8859_1), Syntax.ARGUMENT_FILE);
                     } catch (IOException e) {
                         throw new IOException("Cannot read Java argument file " + file + ": " + e.getMessage(), e);
                     }
@@ -143,7 +144,8 @@ final class EdtProbeOptions {
         }
     }
 
-    private static List<String> tokens(String text, boolean argumentFile) {
+    private static List<String> tokens(String text, Syntax syntax) {
+        boolean argumentFile = syntax == Syntax.ARGUMENT_FILE;
         List<String> result = new ArrayList<>();
         StringBuilder token = new StringBuilder();
         char quote = 0;
@@ -163,13 +165,17 @@ final class EdtProbeOptions {
             } else if (argumentFile && quote != 0 && c == '\\' && i + 1 < text.length()) {
                 c = text.charAt(++i);
                 if (c == '\n' || c == '\r') {
-                    while (i + 1 < text.length() && whitespace(text.charAt(i + 1), true)) {
+                    while (i + 1 < text.length() && whitespace(text.charAt(i + 1), syntax)) {
                         i++;
                     }
                 } else {
                     token.append(unescape(c));
                 }
-            } else if (whitespace(c, argumentFile) && (quote == 0 || (argumentFile && (c == '\r' || c == '\n')))) {
+            } else if (syntax == Syntax.SHELL_OPTIONS && c == '\\' && i + 1 < text.length()
+                    && shellEscapes(text.charAt(i + 1), quote)) {
+                token.append(text.charAt(++i));
+                started = true;
+            } else if (whitespace(c, syntax) && (quote == 0 || (argumentFile && (c == '\r' || c == '\n')))) {
                 if (started) {
                     result.add(token.toString());
                     token.setLength(0);
@@ -187,9 +193,15 @@ final class EdtProbeOptions {
         return result;
     }
 
-    private static boolean whitespace(char c, boolean argumentFile) {
+    private static boolean shellEscapes(char next, char quote) {
+        return quote == 0 || (quote == '"' && (next == '"' || next == '\\' || next == '$' || next == '`'));
+    }
+
+    private static boolean whitespace(char c, Syntax syntax) {
         // OpenJDK also treats vertical tab as whitespace in environment variables.
-        return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f' || (!argumentFile && c == 0x0b);
+        return c == ' ' || c == '\t' || c == '\n'
+                || (syntax != Syntax.SHELL_OPTIONS && (c == '\r' || c == '\f'))
+                || (syntax == Syntax.JVM_ENVIRONMENT && c == 0x0b);
     }
 
     private static char unescape(char c) {

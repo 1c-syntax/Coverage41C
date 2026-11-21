@@ -161,7 +161,8 @@ public class ConvertCommand implements Callable<Integer> {
 
     private static boolean includesExtensionAttributes(NodeList files) {
         for (int index = 0; index < files.getLength(); index++) {
-            if (files.item(index).getAttributes().getNamedItem("extension") != null) {
+            Element file = (Element) files.item(index);
+            if (file.hasAttribute("extension") && hasRecordedLines(file)) {
                 return true;
             }
         }
@@ -223,26 +224,30 @@ public class ConvertCommand implements Callable<Integer> {
             String moduleKey = SourceKey.normalizeRawKey(rawPath(file),
                     sourceIdentity || file.hasAttribute("extension") || file.hasAttribute("sourceUrl"));
             file.setAttribute("path", moduleKey);
-            for (Node child = file.getFirstChild(); child != null; child = child.getNextSibling()) {
-                if (isNonBlankText(child)) {
-                    throw new IllegalArgumentException("Unexpected text in the RAW coverage file entry");
-                }
-                if (!(child instanceof Element line)) {
-                    continue;
-                }
-                String covered = line.getAttribute("covered");
-                if (!isRawElement(line, "lineToCover") || !("true".equals(covered) || "false".equals(covered))) {
-                    throw new IllegalArgumentException("Invalid line entry in the RAW coverage report");
-                }
-                for (Node content = line.getFirstChild(); content != null; content = content.getNextSibling()) {
-                    if (content instanceof Element || isNonBlankText(content)) {
-                        throw new IllegalArgumentException("Unexpected content in the RAW coverage line entry");
-                    }
-                }
-                parseRawLineNumber(line.getAttribute("lineNumber"));
-            }
+            validateRawFileLines(file);
         }
         return coverage;
+    }
+
+    private static void validateRawFileLines(Element file) {
+        for (Node child = file.getFirstChild(); child != null; child = child.getNextSibling()) {
+            if (isNonBlankText(child)) {
+                throw new IllegalArgumentException("Unexpected text in the RAW coverage file entry");
+            }
+            if (!(child instanceof Element line)) {
+                continue;
+            }
+            String covered = line.getAttribute("covered");
+            if (!isRawElement(line, "lineToCover") || !("true".equals(covered) || "false".equals(covered))) {
+                throw new IllegalArgumentException("Invalid line entry in the RAW coverage report");
+            }
+            for (Node content = line.getFirstChild(); content != null; content = content.getNextSibling()) {
+                if (content instanceof Element || isNonBlankText(content)) {
+                    throw new IllegalArgumentException("Unexpected content in the RAW coverage line entry");
+                }
+            }
+            parseRawLineNumber(line.getAttribute("lineNumber"));
+        }
     }
 
     private static boolean isNonBlankText(Node node) {

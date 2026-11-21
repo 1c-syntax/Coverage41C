@@ -21,10 +21,6 @@
  */
 package com.clouds42;
 
-import com.sun.jna.Native;
-import com.sun.jna.Pointer;
-import com.sun.jna.WString;
-import com.sun.jna.win32.StdCallLibrary;
 
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
@@ -32,33 +28,27 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.FileAlreadyExistsException;
-import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
+import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.nio.file.attribute.AclEntry;
-import java.nio.file.attribute.AclEntryPermission;
-import java.nio.file.attribute.AclEntryType;
 import java.nio.file.attribute.BasicFileAttributes;
-import java.nio.file.attribute.FileAttribute;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Function;
 
 /** Serialize both reports before publishing either. Keep the original inodes, links and access rights. */
@@ -175,8 +165,11 @@ final class ConversionOutput {
     }
 
     private static void writeWithNamedPeer(OutputStream stream, Path path, Content writer) throws IOException {
+        if (!Files.exists(path)) {
+            throw unverifiableReport(path);
+        }
         try (Destination other = Destination.open(path, false, SYSTEM_FILE_KEYS)) {
-            if (other == null || other.access == Access.WRITE_ONLY) {
+            if (other == null || other.access != Access.READ_WRITE) {
                 throw unverifiableReport(path);
             }
             try (Closeable verify = other::verifyUnchanged) {
@@ -206,6 +199,7 @@ final class ConversionOutput {
                 try (Destination output = Destination.open(path, false, SYSTEM_FILE_KEYS)) {
                     writeResult(path, output, stream -> Files.copy(staged.path, stream), null);
                     if (output != null) {
+                        output.installNewOutput();
                         output.committed = true;
                         if (output.fileKey != null && output.access != Access.WRITE_ONLY) {
                             fileKey = output.fileKey;
@@ -247,8 +241,10 @@ final class ConversionOutput {
 
     private static void publish(Path coverage, Path report, Content coverageContent, Content reportContent,
                                 OutputStream stdout, boolean createOnly, FileKeys keys, Path verifyReport) throws IOException {
-        try (Destination coverageFile = Destination.open(coverage, createOnly, keys);
-             Destination reportFile = Destination.open(report, createOnly, keys)) {
+        boolean newPair = coverage != null && report != null && Files.notExists(coverage, LinkOption.NOFOLLOW_LINKS)
+                && Files.notExists(report, LinkOption.NOFOLLOW_LINKS);
+        try (Destination coverageFile = Destination.open(coverage, createOnly, keys, newPair);
+             Destination reportFile = Destination.open(report, createOnly, keys, newPair)) {
             if (reportFile != null && reportFile.access == Access.WRITE_ONLY) {
                 if (verifyReport != null) {
                     throw new IOException("Cannot verify separate outputs for a write-only report and an unknown stream: "
@@ -266,11 +262,27 @@ final class ConversionOutput {
                     reportFile.verifyContents(verifyReport);
                 }
             }
+            if (coverageFile != null) {
+                coverageFile.checkNewName();
+            }
             if (reportFile != null) {
-                reportFile.committed = true;
+                reportFile.checkNewName();
+                reportFile.installNewOutput();
             }
             if (coverageFile != null) {
-                coverageFile.committed = true;
+                try {
+                    coverageFile.installNewOutput();
+                    coverageFile.committed = true;
+                } catch (IOException failure) {
+                    if (reportFile != null && reportFile.privateName != null) {
+                        throw new IOException("Cannot publish " + coverage + "; new exclusion report was saved to " + report,
+                                failure);
+                    }
+                    throw failure;
+                }
+            }
+            if (reportFile != null) {
+                reportFile.committed = true;
             }
         }
     }
@@ -297,72 +309,8 @@ final class ConversionOutput {
     }
 
     private static Object windowsFileKey(Path path, LinkOption... options) throws IOException {
-        if (File.separatorChar != '\\' || path.getFileSystem() != FileSystems.getDefault()) {
-            return null;
-        }
-        WindowsFileIds api = WindowsFileIds.INSTANCE;
-        String name = path.toAbsolutePath().toString();
-        if (name.length() >= 248 && !name.startsWith("\\\\?\\")) {
-            name = name.startsWith("\\\\") ? "\\\\?\\UNC\\" + name.substring(2) : "\\\\?\\" + name;
-        }
-        int flags = options.length == 0 ? 0 : WindowsFileIds.OPEN_REPARSE_POINT;
-        Pointer handle = api.CreateFileW(new WString(name), WindowsFileIds.READ_ATTRIBUTES,
-                WindowsFileIds.SHARE_READ_WRITE_DELETE, null, WindowsFileIds.OPEN_EXISTING, flags, null);
-        long value = Pointer.nativeValue(handle);
-        if (value == 0 || value == -1 || (Native.POINTER_SIZE == 4 && value == 0xffffffffL)) {
-            throw windowsIdentityError(path, Native.getLastError());
-        }
-        try {
-            // FILE_ID_INFO contains an eight-byte volume serial number and a 128-bit file ID.
-            byte[] id = new byte[24];
-            if (api.GetFileInformationByHandleEx(handle, WindowsFileIds.FILE_ID_INFO, id, id.length) != 0) {
-                ByteBuffer identity = ByteBuffer.wrap(id).asReadOnlyBuffer();
-                return identity.getLong(8) == 0 && identity.getLong(16) == 0 ? null : identity;
-            }
-            int error = Native.getLastError();
-            if (error != WindowsFileIds.INVALID_FUNCTION && error != WindowsFileIds.NOT_SUPPORTED
-                    && error != WindowsFileIds.INVALID_PARAMETER) {
-                throw windowsIdentityError(path, error);
-            }
-            // Older Windows and filesystems may only provide BY_HANDLE_FILE_INFORMATION.
-            byte[] attributes = new byte[52];
-            if (api.GetFileInformationByHandle(handle, attributes) == 0) {
-                throw windowsIdentityError(path, Native.getLastError());
-            }
-            ByteBuffer info = ByteBuffer.wrap(attributes).order(ByteOrder.LITTLE_ENDIAN);
-            int indexHigh = info.getInt(44);
-            int indexLow = info.getInt(48);
-            return indexHigh == 0 && indexLow == 0 ? null : List.of(info.getInt(28), indexHigh, indexLow);
-        } finally {
-            api.CloseHandle(handle);
-        }
-    }
-
-    private static IOException windowsIdentityError(Path path, int error) {
-        if (error == WindowsFileIds.FILE_NOT_FOUND || error == WindowsFileIds.PATH_NOT_FOUND) {
-            return new NoSuchFileException(path.toString());
-        }
-        return new IOException("Cannot identify report destination " + path + " (Windows error " + error + ")");
-    }
-
-    private interface WindowsFileIds extends StdCallLibrary {
-        WindowsFileIds INSTANCE = Native.load("kernel32", WindowsFileIds.class);
-        int INVALID_FUNCTION = 1;
-        int FILE_NOT_FOUND = 2;
-        int PATH_NOT_FOUND = 3;
-        int NOT_SUPPORTED = 50;
-        int INVALID_PARAMETER = 87;
-        int OPEN_EXISTING = 3;
-        int READ_ATTRIBUTES = 0x80;
-        int SHARE_READ_WRITE_DELETE = 0x7;
-        int OPEN_REPARSE_POINT = 0x00200000;
-        int FILE_ID_INFO = 18;
-
-        Pointer CreateFileW(WString name, int access, int share, Pointer security, int creation,
-                            int flags, Pointer template);
-        int GetFileInformationByHandleEx(Pointer handle, int infoClass, byte[] info, int size);
-        int GetFileInformationByHandle(Pointer handle, byte[] info);
-        int CloseHandle(Pointer handle);
+        return File.separatorChar == '\\' && path.getFileSystem() == FileSystems.getDefault()
+                ? WindowsFiles.key(path, options.length > 0) : null;
     }
 
     private static final class Temporary implements Closeable {
@@ -379,21 +327,18 @@ final class ConversionOutput {
             this.inPrivateDirectory = inPrivateDirectory;
         }
 
-        // Apply the restriction at creation, including when staging has to use the system temp folder.
-        private static FileAttribute<?> ownerAccess(FileSystem fs) throws IOException {
-            if (fs.supportedFileAttributeViews().contains("posix")) {
-                return PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------"));
+        private static Path createPrivateFile(Path parent) throws IOException {
+            if (parent.getFileSystem().supportedFileAttributeViews().contains("posix")) {
+                return Files.createTempFile(parent, ".coverage41c-", ".tmp",
+                        PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
             }
-            if (!fs.supportedFileAttributeViews().contains("acl")) {
-                throw new IOException("Temporary reports require a filesystem with private file permissions");
+            if (File.separatorChar == '\\' && parent.getFileSystem() == FileSystems.getDefault()
+                    && Files.getFileStore(parent).supportsFileAttributeView("acl")) {
+                Path path = parent.resolve(".coverage41c-" + UUID.randomUUID() + ".tmp");
+                WindowsFiles.createPrivateFile(path);
+                return path;
             }
-            AclEntry owner = AclEntry.newBuilder().setType(AclEntryType.ALLOW)
-                    .setPrincipal(fs.getUserPrincipalLookupService().lookupPrincipalByName(System.getProperty("user.name")))
-                    .setPermissions(EnumSet.allOf(AclEntryPermission.class)).build();
-            return new FileAttribute<List<AclEntry>>() {
-                @Override public String name() { return "acl:acl"; }
-                @Override public List<AclEntry> value() { return List.of(owner); }
-            };
+            throw new IOException("Temporary reports require a filesystem with private file permissions");
         }
 
         static Temporary forNewOutput(Path parent) throws IOException {
@@ -404,20 +349,20 @@ final class ConversionOutput {
 
         static Temporary create(Path near) throws IOException {
             IOException besideFailure = null;
-            if (near != null && near.getParent() != null && !isSpecialFile(near)) {
+            Path parent = near == null ? null : near.toAbsolutePath().getParent();
+            if (parent != null && !isSpecialFile(near)) {
                 try {
-                    return new Temporary(Files.createTempFile(near.toAbsolutePath().getParent(), ".coverage41c-", ".tmp",
-                            ownerAccess(near.getFileSystem())));
+                    return new Temporary(createPrivateFile(parent));
                 } catch (IOException failure) {
-                    if (!Files.isRegularFile(near) || !Files.isWritable(near)) {
+                    if (File.separatorChar != '\\' && (!Files.isRegularFile(near) || !Files.isWritable(near))) {
                         throw new IOException("Cannot prepare report output: " + near, failure);
                     }
-                    // The file can be writable in a directory where creation is denied or on a read-only mount.
+                    // A named output may be writable even where staging is denied or private ACLs are unavailable.
                     besideFailure = failure;
                 }
             }
             try {
-                return new Temporary(Files.createTempFile("coverage41c-", ".tmp", ownerAccess(FileSystems.getDefault())));
+                return new Temporary(createPrivateFile(Path.of(System.getProperty("java.io.tmpdir"))));
             } catch (IOException failure) {
                 if (besideFailure != null) {
                     failure.addSuppressed(besideFailure);
@@ -513,8 +458,8 @@ final class ConversionOutput {
         // On POSIX, closing another channel to the same inode can drop this JVM's OS lock.
         // Reject local contenders before open; unrelated files and output streams remain independent.
         private static final Set<Destination> ACTIVE = new HashSet<>();
+        private static final List<FileChannel> REJECTED_CHANNELS = new ArrayList<>();
         private final Object fileKey;
-        private final FileKeys keys;
         private final Path path;
         private final FileChannel channel;
         private final FileLock lock;
@@ -522,26 +467,36 @@ final class ConversionOutput {
         private final List<FileChannel> deferredClose = new ArrayList<>();
         private final Access access;
         private final Temporary privateName;
+        private final WindowsFiles.PendingOutput pendingOutput;
+        private final CreationClaim claim;
+        private final boolean useHardLink;
         private Temporary backup;
         private boolean modified;
         private boolean committed;
 
-        private Destination(Path path, FileChannel channel, FileLock lock, Access access, Temporary privateName,
-                            Object fileKey, FileKeys keys) {
+        private Destination(Path path, FileChannel channel, FileLock lock, Access access, Object fileKey,
+                            Temporary privateName, WindowsFiles.PendingOutput pendingOutput, CreationClaim claim,
+                            boolean useHardLink) {
             this.path = path;
             this.channel = channel;
             this.lock = lock;
             this.access = access;
             this.privateName = privateName;
             this.fileKey = fileKey;
-            this.keys = keys;
+            this.pendingOutput = pendingOutput;
+            this.claim = claim;
+            this.useHardLink = useHardLink;
         }
 
         static Destination open(Path path, boolean createOnly, FileKeys keys) throws IOException {
+            return open(path, createOnly, keys, false);
+        }
+
+        static Destination open(Path path, boolean createOnly, FileKeys keys, boolean claimNewOutput) throws IOException {
             if (path == null || (!createOnly && isSpecialFile(path))) {
                 return null;
             }
-            return reserve(path, createOnly, keys).withBackup();
+            return reserve(path, createOnly, keys, claimNewOutput).withBackup();
         }
 
         private Destination withBackup() throws IOException {
@@ -564,17 +519,21 @@ final class ConversionOutput {
             }
         }
 
-        private static synchronized Destination reserve(Path path, boolean createOnly, FileKeys keys) throws IOException {
-            Destination destination = !createOnly && Files.exists(path) ? openExisting(path, keys) : create(path, createOnly, keys);
+        private static synchronized Destination reserve(Path path, boolean createOnly, FileKeys keys,
+                                                        boolean claimNewOutput) throws IOException {
+            rejectDuringDeferredClose(path);
+            Destination destination = !createOnly && Files.exists(path)
+                    ? openExisting(path, keys) : create(path, createOnly, keys, claimNewOutput);
             ACTIVE.add(destination);
             return destination;
         }
 
         private static synchronized Destination reservePublished(PublishedReport published, Path name) throws IOException {
+            rejectDuringDeferredClose(name);
             rejectActive(name, published.fileKey);
             FileLock acquired = lock(published.channel, name);
             Destination original = new Destination(name, published.channel, acquired, Access.READ_WRITE,
-                    null, published.fileKey, SYSTEM_FILE_KEYS);
+                    published.fileKey, null, null, null, false);
             original.keepChannel = true;
             ACTIVE.add(original);
             return original;
@@ -596,6 +555,7 @@ final class ConversionOutput {
             }
             Object previousKey = keys.read(path, previous);
             rejectActive(path, previousKey);
+            CreationClaim.rejectIfHeld(path);
             FileChannel channel;
             Access access = Access.READ_WRITE;
             try {
@@ -605,19 +565,35 @@ final class ConversionOutput {
                 access = Access.WRITE_ONLY;
             }
             try {
-                // A fallback creator must lock its new file before another publisher can claim it.
-                CreationClaim.rejectIfHeld(path);
                 FileLock acquired = lock(channel, path);
+                // Recheck after open and lock in case another creator claimed the name meanwhile.
+                CreationClaim.rejectIfHeld(path);
                 // An earlier publisher may have rolled back and unlinked this file after open.
                 BasicFileAttributes current = Files.readAttributes(path, BasicFileAttributes.class);
                 Object currentKey = keys.read(path, current);
                 if (previousKey != null && !previousKey.equals(currentKey)) {
                     throw new IOException("Report destination changed during conversion: " + path);
                 }
-                return new Destination(path, channel, acquired, access, null, currentKey, keys);
+                return new Destination(path, channel, acquired, access, currentKey, null, null, null, false);
             } catch (IOException | RuntimeException error) {
-                channel.close();
+                // A key read by name does not identify the open channel if the entry changed.
+                if (error.getCause() instanceof OverlappingFileLockException
+                        && File.separatorChar != '\\' && !ACTIVE.isEmpty()) {
+                    REJECTED_CHANNELS.add(channel);
+                } else {
+                    try {
+                        channel.close();
+                    } catch (IOException closeError) {
+                        error.addSuppressed(closeError);
+                    }
+                }
                 throw error;
+            }
+        }
+
+        private static void rejectDuringDeferredClose(Path path) throws IOException {
+            if (!REJECTED_CHANNELS.isEmpty()) {
+                throw new IOException("Another conversion is releasing report locks; retry writing " + path);
             }
         }
 
@@ -632,114 +608,122 @@ final class ConversionOutput {
             channel.close();
         }
 
-        // Publish a locked inode with a no-replace link. A concurrent opener can never lock an
-        // empty placeholder before its creator. Use the ordinary create-file mode under the umask.
-        private static Destination create(Path path, boolean createOnly, FileKeys keys) throws IOException {
-            Path parent = path.toAbsolutePath().getParent();
-            if (!keys.usePrivateLinks || !path.getFileSystem().supportedFileAttributeViews().contains("posix")) {
-                // Let the new output inherit the destination directory's ACL.
-                return createWithMarker(path, createOnly, keys);
-            }
-            CreationClaim.rejectIfHeld(path);
-            Temporary scratch = Temporary.forNewOutput(parent);
-            boolean linked = false;
-            boolean alreadyExists = false;
+        private static Destination create(Path path, boolean createOnly, FileKeys keys, boolean claimNewOutput)
+                throws IOException {
+            boolean posix = path.getFileSystem().supportedFileAttributeViews().contains("posix");
+            CreationClaim claim = claimNewOutput || !keys.usePrivateLinks || !posix ? CreationClaim.acquire(path) : null;
             try {
-                FileChannel channel = openNewChannel(scratch.path);
-                try {
-                    Object fileKey = keys.read(scratch.path, Files.readAttributes(scratch.path, BasicFileAttributes.class));
-                    FileLock acquired = lock(channel, scratch.path);
-                    try {
-                        Files.createLink(path, scratch.path);
-                        linked = true;
-                        return new Destination(path, channel, acquired, Access.CREATED, scratch, fileKey, keys);
-                    } catch (FileAlreadyExistsException collision) {
-                        if (createOnly) {
-                            throw collision;
-                        }
-                        alreadyExists = true;
-                    } catch (UnsupportedOperationException | IOException unsupported) {
-                        // Some providers or users cannot create hard links. Reserve under a creation marker below.
-                    }
-                } finally {
-                    if (!linked) {
-                        channel.close();
-                    }
+                if (claim == null) {
+                    CreationClaim.rejectIfHeld(path);
                 }
-            } finally {
-                if (!linked) {
-                    scratch.close();
+                if (Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+                    throw new FileAlreadyExistsException(path.toString());
                 }
-            }
-            return alreadyExists ? openExisting(path, keys) : createWithMarker(path, createOnly, keys);
-        }
-
-        // Fallback for providers without hard links. Hold the claim until CREATE_NEW and tryLock complete.
-        private static Destination createWithMarker(Path path, boolean createOnly, FileKeys keys) throws IOException {
-            Destination created = null;
-            try (CreationClaim claim = CreationClaim.acquire(path)) {
-                // Check identity support while the only new file is inside the directory owned by this claim.
-                Path probe = Files.createFile(claim.marker.resolve("identity"));
-                try {
-                    requireNewFileKey(probe, path, keys);
-                } finally {
-                    Files.delete(probe);
+                if (posix) {
+                    return createPrivate(path, keys, claim);
                 }
-
-                try {
-                    created = createAndLock(path, keys);
-                } catch (FileAlreadyExistsException collision) {
-                    if (createOnly) {
-                        throw collision;
-                    }
-                    // A hard-link-capable publisher may have installed the destination first.
+                if (File.separatorChar == '\\' && path.getFileSystem() == FileSystems.getDefault()) {
+                    return createWindows(path, keys, claim);
                 }
-            } catch (IOException | RuntimeException failure) {
-                if (created != null) {
-                    try {
-                        created.close();
-                    } catch (IOException | RuntimeException cleanup) {
-                        failure.addSuppressed(cleanup);
-                    }
-                }
-                throw failure;
-            }
-            return created == null ? openExisting(path, keys) : created;
-        }
-
-        private static Destination createAndLock(Path path, FileKeys keys) throws IOException {
-            FileChannel channel = openNewChannel(path);
-            Object fileKey = null;
-            try {
-                fileKey = requireNewFileKey(path, path, keys);
-                FileLock acquired = lock(channel, path);
-                return new Destination(path, channel, acquired, Access.CREATED, null, fileKey, keys);
+                throw new IOException("Cannot publish a new report safely on this filesystem: " + path);
             } catch (IOException | RuntimeException error) {
-                try (FileChannel allocated = channel) {
-                    if (stillOwnsPath(path, fileKey, null, keys)) {
-                        Files.deleteIfExists(path);
+                if (claim != null) {
+                    try {
+                        claim.close();
+                    } catch (IOException closeError) {
+                        error.addSuppressed(closeError);
                     }
-                } catch (IOException | RuntimeException cleanup) {
-                    error.addSuppressed(cleanup);
+                }
+                if (!createOnly && error instanceof FileAlreadyExistsException) {
+                    return openExisting(path, keys);
                 }
                 throw error;
             }
         }
 
-        private static Object requireNewFileKey(Path file, Path destination, FileKeys keys) throws IOException {
-            BasicFileAttributes attributes = Files.readAttributes(file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-            if (!attributes.isRegularFile()) {
-                throw new IOException("Report destination changed during conversion: " + destination);
+        private static Destination createPrivate(Path path, FileKeys keys, CreationClaim claim) throws IOException {
+            Temporary scratch = Temporary.forNewOutput(path.toAbsolutePath().getParent());
+            try {
+                return lockNewOutput(path, scratch.path, keys, scratch, null, claim, StandardOpenOption.CREATE_NEW);
+            } catch (IOException | RuntimeException failure) {
+                try {
+                    scratch.close();
+                } catch (IOException cleanup) {
+                    failure.addSuppressed(cleanup);
+                }
+                throw failure;
             }
-            Object key = keys.read(file, attributes, LinkOption.NOFOLLOW_LINKS);
-            if (key == null) {
-                throw new IOException("Cannot identify new report destination for safe rollback: " + destination);
-            }
-            return key;
         }
 
-        private static FileChannel openNewChannel(Path path) throws IOException {
-            return FileChannel.open(path, StandardOpenOption.CREATE_NEW, StandardOpenOption.READ, StandardOpenOption.WRITE);
+        private static Destination createWindows(Path path, FileKeys keys, CreationClaim claim) throws IOException {
+            WindowsFiles.PendingOutput pending = WindowsFiles.createPendingOutput(path);
+            try {
+                return lockNewOutput(path, path, keys, null, pending, claim, LinkOption.NOFOLLOW_LINKS);
+            } catch (IOException | RuntimeException failure) {
+                try (pending) {
+                    pending.rollback();
+                } catch (IOException cleanup) {
+                    failure.addSuppressed(cleanup);
+                }
+                throw failure;
+            }
+        }
+
+        private static Destination lockNewOutput(Path destination, Path file, FileKeys keys, Temporary scratch,
+                                                 WindowsFiles.PendingOutput pending, CreationClaim claim,
+                                                 OpenOption option) throws IOException {
+            FileChannel channel = FileChannel.open(file, StandardOpenOption.READ, StandardOpenOption.WRITE, option);
+            try {
+                BasicFileAttributes attrs = Files.readAttributes(file, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+                Object key = attrs.isRegularFile() ? keys.read(file, attrs, LinkOption.NOFOLLOW_LINKS) : null;
+                if (key == null) {
+                    throw new IOException("Cannot identify new report destination for safe rollback: " + destination);
+                }
+                return new Destination(destination, channel, lock(channel, file), Access.CREATED,
+                        key, scratch, pending, claim, keys.usePrivateLinks);
+            } catch (IOException | RuntimeException failure) {
+                try {
+                    channel.close();
+                } catch (IOException cleanup) {
+                    failure.addSuppressed(cleanup);
+                }
+                throw failure;
+            }
+        }
+
+        private void checkNewName() throws IOException {
+            if (privateName != null && Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+                throw new FileAlreadyExistsException(path.toString());
+            }
+        }
+
+        private void installNewOutput() throws IOException {
+            if (privateName == null) {
+                return;
+            }
+            // A single-file publisher also cooperates with claims held for a pair of new reports.
+            try (CreationClaim publication = claim == null ? CreationClaim.acquire(path) : null) {
+                if (useHardLink) {
+                    linkOrMove();
+                } else {
+                    PosixFiles.moveNewFile(privateName.path, path);
+                }
+            }
+        }
+
+        private void linkOrMove() throws IOException {
+            try {
+                Files.createLink(path, privateName.path);
+            } catch (FileAlreadyExistsException collision) {
+                throw collision;
+            } catch (UnsupportedOperationException | IOException linkUnavailable) {
+                try {
+                    PosixFiles.moveNewFile(privateName.path, path);
+                } catch (IOException moveFailure) {
+                    moveFailure.addSuppressed(linkUnavailable);
+                    throw moveFailure;
+                }
+            }
         }
 
         private static FileLock lock(FileChannel channel, Path path) throws IOException {
@@ -792,28 +776,13 @@ final class ConversionOutput {
             }
         }
 
-        private static boolean stillOwnsPath(Path path, Object fileKey, Temporary privateName, FileKeys keys)
-                throws IOException {
-            try {
-                BasicFileAttributes current = Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-                if (!current.isRegularFile()) {
-                    return false;
-                }
-                return fileKey != null ? fileKey.equals(keys.read(path, current, LinkOption.NOFOLLOW_LINKS))
-                        : privateName != null && Files.isSameFile(path, privateName.path);
-            } catch (NoSuchFileException removed) {
-                return false;
-            }
-        }
-
         @Override
         public void close() throws IOException {
-            try (Closeable unregister = this::finish; Temporary name = privateName;
+            try (CreationClaim creation = claim; Closeable unregister = this::finish; Temporary name = privateName;
+                 WindowsFiles.PendingOutput pending = pendingOutput;
                  Closeable locked = keepChannel ? lock::release : channel) {
-                if (!committed && access == Access.CREATED) {
-                    if (stillOwnsPath(path, fileKey, privateName, keys)) {
-                        Files.deleteIfExists(path);
-                    }
+                if (!committed && pending != null) {
+                    pending.rollback();
                 } else if (!committed && modified && backup != null) {
                     try {
                         replace(output -> Files.copy(backup.path, output));
@@ -830,6 +799,10 @@ final class ConversionOutput {
         private void finish() throws IOException {
             synchronized (Destination.class) {
                 ACTIVE.remove(this);
+                if (ACTIVE.isEmpty()) {
+                    deferredClose.addAll(REJECTED_CHANNELS);
+                    REJECTED_CHANNELS.clear();
+                }
                 IOException failure = null;
                 for (FileChannel descriptor : deferredClose) {
                     try {

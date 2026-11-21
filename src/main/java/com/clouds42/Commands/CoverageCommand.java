@@ -135,6 +135,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     private volatile boolean mainLoopRunning = false;
     private final long finalMeasureWindowNanos;
     private final long finalConfirmationTimeoutNanos;
+    private final LongSupplier finalMeasureClock;
     private volatile Long finalMeasureWindowEndNanos;
     // Guarded by coverageData.
     private boolean finalDrainConfirmed;
@@ -162,9 +163,15 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     }
 
     public CoverageCommand(LongSupplier targetLookupClock, Duration finalMeasureWindow, Duration finalConfirmationTimeout) {
+        this(targetLookupClock, finalMeasureWindow, finalConfirmationTimeout, System::nanoTime);
+    }
+
+    protected CoverageCommand(LongSupplier targetLookupClock, Duration finalMeasureWindow,
+                              Duration finalConfirmationTimeout, LongSupplier finalMeasureClock) {
         this.targetLookupClock = targetLookupClock;
         this.finalMeasureWindowNanos = finalMeasureWindow.toNanos();
         this.finalConfirmationTimeoutNanos = finalConfirmationTimeout.toNanos();
+        this.finalMeasureClock = finalMeasureClock;
     }
 
     private void connectAllTargets(List<DebugTargetId> debugTargets) {
@@ -371,11 +378,14 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     private void pingLoop(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet)
             throws RuntimeDebugClientException, InterruptedException {
         while (canSendDebuggerRequest()) {
-            long pollStarted = System.nanoTime();
+            long pollStarted = finalMeasureClock.getAsLong();
+            long pollReceived;
             Optional<List<? extends DBGUIExtCmdInfoBase>> response;
             try {
                 response = client.pingResponse();
+                pollReceived = finalMeasureClock.getAsLong();
             } catch (RuntimeDebugClientException | RuntimeException e) {
+                pollReceived = finalMeasureClock.getAsLong();
                 if (!recordFinalMeasureFailure()) {
                     throw e;
                 }
@@ -385,7 +395,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
             if (response.isEmpty()) {
                 logger.debug("Ignoring unexpected ping response from debug server");
                 recordFinalMeasureFailure();
-                if (shouldStopAfterFinalPoll(pollStarted, false)) {
+                if (shouldStopAfterFinalPoll(pollStarted, pollReceived, false)) {
                     return;
                 }
                 waitBeforeNextPoll();
@@ -406,7 +416,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                 }
                 completePendingPoll(uriListByKey, externalDataProcessorsUriSet, pending);
             }
-            if (shouldStopAfterFinalPoll(pollStarted, !hasMeasures)) {
+            if (shouldStopAfterFinalPoll(pollStarted, pollReceived, !hasMeasures)) {
                 return;
             }
         }
@@ -544,7 +554,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     private boolean canSendDebuggerRequest() {
         Long windowEnd = finalMeasureWindowEndNanos;
         return !stopExecution.get()
-                && (windowEnd == null || System.nanoTime() - windowEnd < finalConfirmationTimeoutNanos);
+                && (windowEnd == null || finalMeasureClock.getAsLong() - windowEnd < finalConfirmationTimeoutNanos);
     }
 
     private void mergeByVerdict(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet,
@@ -577,18 +587,21 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         }
     }
 
-    private boolean shouldStopAfterFinalPoll(long pollStarted, boolean quiet) {
+    private boolean shouldStopAfterFinalPoll(long pollStarted, long pollReceived, boolean quiet) {
         Long windowEnd = finalMeasureWindowEndNanos;
-        if (windowEnd == null || System.nanoTime() - windowEnd < 0) {
+        if (windowEnd == null || finalMeasureClock.getAsLong() - windowEnd < 0) {
             return false;
         }
         synchronized (coverageData) {
-            if (stopExecution.get() || System.nanoTime() - windowEnd >= finalConfirmationTimeoutNanos) {
+            if (stopExecution.get() || finalMeasureClock.getAsLong() - windowEnd >= finalConfirmationTimeoutNanos) {
                 return true;
             }
-            // A late batch means more may still be in flight. Save what arrives before the deadline.
             if (!quiet) {
-                finalConfirmationFailed = true;
+                // A late batch means more may still be in flight. Processing time does not make a batch late.
+                if (pollReceived - windowEnd >= 0) {
+                    finalConfirmationFailed = true;
+                }
+                return false;
             }
             // An empty reply to a request already in flight may predate the end of the window.
             if (finalConfirmationFailed || pollStarted - windowEnd < 0) {
@@ -836,12 +849,12 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
 
     // A debugger poll acknowledges only that poll. Observe the full window, then confirm with a new poll.
     private boolean awaitFinalMeasures() throws InterruptedException {
-        long windowEnd = System.nanoTime() + finalMeasureWindowNanos;
+        long windowEnd = finalMeasureClock.getAsLong() + finalMeasureWindowNanos;
         long deadline = windowEnd + finalConfirmationTimeoutNanos;
         synchronized (coverageData) {
             finalMeasureWindowEndNanos = windowEnd;
             while (mainLoopRunning) {
-                long remaining = deadline - System.nanoTime();
+                long remaining = deadline - finalMeasureClock.getAsLong();
                 if (remaining <= 0) {
                     break;
                 }

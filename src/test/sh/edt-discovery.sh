@@ -190,21 +190,24 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 class ProfilingProbe {
     public static void main(String[] args) throws Exception {
-        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         AtomicInteger requests = new AtomicInteger();
-        server.createContext("/", request -> {
-            requests.incrementAndGet();
-            request.sendResponseHeaders(204, -1);
-            request.close();
-        });
-        server.start();
-        DebugClient client = new DebugClient(new MyRuntimeDebugModelXmlSerializer());
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         try {
-            client.configure("http://127.0.0.1:" + server.getAddress().getPort(), UUID.randomUUID(), "fixture");
-            client.toggleProfiling(UUID.randomUUID());
-            if (requests.get() != 1) throw new AssertionError("Expected a profiling request");
+            server.createContext("/", request -> {
+                requests.incrementAndGet();
+                request.sendResponseHeaders(204, -1);
+                request.close();
+            });
+            server.start();
+            DebugClient client = new DebugClient(new MyRuntimeDebugModelXmlSerializer());
+            try {
+                client.configure("http://127.0.0.1:" + server.getAddress().getPort(), UUID.randomUUID(), "fixture");
+                client.toggleProfiling(UUID.randomUUID());
+                if (requests.get() != 1) throw new AssertionError("Expected a profiling request");
+            } finally {
+                client.dispose();
+            }
         } finally {
-            client.dispose();
             server.stop(0);
         }
     }

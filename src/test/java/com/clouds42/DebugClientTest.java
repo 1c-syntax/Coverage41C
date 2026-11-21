@@ -71,9 +71,14 @@ class DebugClientTest {
         try {
             client.dispose();
         } finally {
-            if (responseServer != null) {
-                responseServer.stop(0);
-            }
+            stopResponseServer();
+        }
+    }
+
+    private void stopResponseServer() {
+        if (responseServer != null) {
+            responseServer.stop(0);
+            responseServer = null;
         }
     }
 
@@ -229,6 +234,21 @@ class DebugClientTest {
         var serializer = new DelegatingSerializer() { };
         String xml = "<response xmlns:model=\"" + ResponsePackage.eINSTANCE.getNsURI()
                 + "\"></model:MiscRDbgGetAPIVerResponse>";
+        assertThrows(IOException.class, () -> serializer.deserialize(xml, MiscRDbgGetAPIVerResponse.class,
+                "response", "model:MiscRDbgGetAPIVerResponse"));
+    }
+
+    @Test
+    void modifiedRootReplacementStillRejectsAMismatchedClosingTagInTheOriginalXml() {
+        var serializer = new MyRuntimeDebugModelXmlSerializer() {
+            @Override
+            protected String replaceRootElement(String xml, String from, String to) {
+                return super.replaceRootElement(xml, from, to).replace("><", "> <");
+            }
+        };
+        String xml = "<response xmlns:model=\"" + ResponsePackage.eINSTANCE.getNsURI()
+                + "\"></model:MiscRDbgGetAPIVerResponse>";
+
         assertThrows(IOException.class, () -> serializer.deserialize(xml, MiscRDbgGetAPIVerResponse.class,
                 "response", "model:MiscRDbgGetAPIVerResponse"));
     }
@@ -1083,6 +1103,7 @@ class DebugClientTest {
 
     private void respondWithContentEncodings(int status, String contentType, byte[] content, int length,
             List<String> contentEncodings) throws IOException {
+        stopResponseServer();
         responseServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         responseServer.createContext("/e1crdbg/rdbg", exchange -> {
             exchange.getRequestBody().readAllBytes();

@@ -32,6 +32,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -118,9 +119,30 @@ class ConversionFileLimitTest {
         ProcessBuilder builder = new ProcessBuilder(command).redirectErrorStream(true);
         builder.environment().remove("LC_ALL");
         builder.environment().put("LC_MESSAGES", "C");
-        Process process = builder.start();
-        String log = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        assertEquals(1, process.waitFor(), log);
-        assertTrue(log.contains("File too large"), log);
+        Path output = Files.createTempFile("limited-convert-", ".log");
+        try {
+            // The child inherits the file size limit. Keep its stdout on a pipe and drain it in
+            // the unrestricted test JVM, so the expected error can always be captured.
+            Process process = builder.start();
+            try {
+                var logCopy = process.getInputStream();
+                var reader = java.util.concurrent.CompletableFuture.runAsync(() -> {
+                    try (logCopy) {
+                        Files.copy(logCopy, output, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    } catch (java.io.IOException error) {
+                        throw new java.io.UncheckedIOException(error);
+                    }
+                });
+                assertTrue(process.waitFor(30, TimeUnit.SECONDS), "Limited JVM timed out");
+                reader.get(10, TimeUnit.SECONDS);
+                String log = Files.readString(output, StandardCharsets.UTF_8);
+                assertEquals(1, process.exitValue(), log);
+                assertTrue(log.contains("File too large"), log);
+            } finally {
+                process.destroyForcibly();
+            }
+        } finally {
+            Files.deleteIfExists(output);
+        }
     }
 }

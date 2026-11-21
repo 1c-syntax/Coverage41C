@@ -112,6 +112,7 @@ class StartCommandTest {
     private static final long TIMEOUT = 20;
     private static final Duration TEST_FINAL_MEASURE_WINDOW = Duration.ofSeconds(1);
     private static final Duration TEST_FINAL_CONFIRMATION_TIMEOUT = Duration.ofSeconds(1);
+    private static final Duration AFTER_OBSERVATION_WINDOW = TEST_FINAL_MEASURE_WINDOW.plusNanos(1);
 
     private final ExecutorService executor = Executors.newCachedThreadPool();
     private Path output;
@@ -443,6 +444,32 @@ class StartCommandTest {
         }
     }
 
+    @Test
+    void namedDumpAndStopRejectAnOutputNowLinkedToTheExclusionReport() throws Exception {
+        Path report = tempDir.resolve("exclusions.json");
+        Future<Integer> collector = start("--exclusion-report", report.toString());
+        byte[] original;
+        int dumpResult;
+        int stopResult;
+        boolean linkedAfterDump;
+        try {
+            original = Files.readAllBytes(report);
+            Files.deleteIfExists(output);
+            Files.createLink(output, report);
+            dumpResult = send(PipeMessages.DUMP_COMMAND);
+            linkedAfterDump = Files.isSameFile(output, report);
+        } finally {
+            stopResult = send(PipeMessages.EXIT_COMMAND);
+        }
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, dumpResult);
+        assertTrue(linkedAfterDump);
+        assertEquals(CommandLine.ExitCode.SOFTWARE, stopResult);
+        assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertTrue(Files.isSameFile(output, report));
+        assertArrayEquals(original, Files.readAllBytes(report));
+    }
+
     private Process embeddedStart(String sink, Path capture, Path report, Path stdout, String... options) throws IOException {
         ProcessBuilder builder = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                 "-cp", System.getProperty("coverage41c.testClasspath", System.getProperty("java.class.path")),
@@ -516,7 +543,8 @@ class StartCommandTest {
 
     @Test
     void stopFailsAndKeepsLateMeasurementsThroughConfirmationTimeout() throws Exception {
-        Future<Integer> collector = startRaw();
+        FinalPollClock clock = new FinalPollClock();
+        Future<Integer> collector = startRaw(startCommandLine(System::nanoTime, clock));
         dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 1, 1));
         dbgs.pause("pingDebugUIParams");
         Future<Integer> stop;
@@ -529,9 +557,13 @@ class StartCommandTest {
                     List.of(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 4, 1))));
             stop = executor.submit(() -> send(PipeMessages.EXIT_COMMAND));
             waitForFinalMeasureThread();
-            Thread.sleep(TEST_FINAL_MEASURE_WINDOW.toMillis());
+            clock.advance(AFTER_OBSERVATION_WINDOW);
+            dbgs.resume("pingDebugUIParams");
+            dbgs.awaitFinalPollProcessing();
         } finally {
             dbgs.resume("pingDebugUIParams");
+            clock.advance(TEST_FINAL_CONFIRMATION_TIMEOUT);
+            clock.resumeRealTime();
         }
 
         assertEquals(CommandLine.ExitCode.SOFTWARE, stop.get(TIMEOUT, TimeUnit.SECONDS));
@@ -541,24 +573,62 @@ class StartCommandTest {
 
     @Test
     void inFlightEmptyPollDoesNotConfirmFinalQuietWindow() throws Exception {
-        Future<Integer> collector = start("-f", "LCOV");
+        FinalPollClock clock = new FinalPollClock();
+        Future<Integer> collector = start(startCommandLine(System::nanoTime, clock), "-f", "LCOV");
         dbgs.pause("pingDebugUIParams");
         Future<Integer> stop;
         try {
             dbgs.awaitPaused("pingDebugUIParams");
-            dbgs.deliverAcrossFinalPolls(List.of(List.of(), List.of(),
+            dbgs.deliverAcrossFinalPolls(List.of(List.of(),
                     List.of(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 10, 1)), List.of(),
                     List.of(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 10, 1))));
             stop = executor.submit(() -> send(PipeMessages.EXIT_COMMAND));
             waitForFinalMeasureThread();
+            clock.advance(AFTER_OBSERVATION_WINDOW);
+            dbgs.resume("pingDebugUIParams");
+            dbgs.awaitFinalPollProcessing();
         } finally {
             dbgs.resume("pingDebugUIParams");
+            clock.advance(TEST_FINAL_CONFIRMATION_TIMEOUT);
+            clock.resumeRealTime();
+        }
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, stop.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        List<String> lcov = Files.readAllLines(output);
+        assertTrue(lcov.contains("DA:10,2"), lcov.toString());
+    }
+
+    @Test
+    void stopAcceptsTimelyMeasureWhenTargetLookupFinishesAfterObservationWindow() throws Exception {
+        FinalPollClock clock = new FinalPollClock();
+        dbgs.setTargets();
+        Future<Integer> collector = start(startCommandLine(System::nanoTime, clock), "--include-user", "suite");
+        DebugTargetId target = user("suite");
+        DebugTargetId nameless = FakeDebugServer.target(UUID.fromString(target.getId()),
+                DebugTargetType.MANAGED_CLIENT, null);
+        dbgs.setTargets(target);
+
+        dbgs.pause("pingDebugUIParams");
+        dbgs.pause("getDbgTargets");
+        Future<Integer> stop;
+        try {
+            dbgs.awaitPaused("pingDebugUIParams");
+            dbgs.deliverAcrossFinalPolls(List.of(List.of(FakeDebugServer.measure(nameless, OBJECT_ID, PROPERTY_ID, 10, 1))));
+            stop = executor.submit(() -> send(PipeMessages.EXIT_COMMAND));
+            waitForFinalMeasureThread();
+            dbgs.resume("pingDebugUIParams");
+            dbgs.awaitPaused("getDbgTargets");
+            clock.advance(AFTER_OBSERVATION_WINDOW);
+        } finally {
+            dbgs.resume("pingDebugUIParams");
+            dbgs.resume("getDbgTargets");
+            clock.resumeRealTime();
         }
 
         assertEquals(CommandLine.ExitCode.OK, stop.get(TIMEOUT, TimeUnit.SECONDS));
         assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
-        List<String> lcov = Files.readAllLines(output);
-        assertTrue(lcov.contains("DA:10,2"), lcov.toString());
+        assertEquals(Map.of(2, false, 10, true, 11, false), coverage());
     }
 
     @Test
@@ -2582,6 +2652,21 @@ class StartCommandTest {
     }
 
     @Test
+    void scopedTargetLookupMatchesTheWholeAreaName() throws Exception {
+        DebugTargetId expected = user("suite");
+        dbgs.setTargets();
+        dbgs.setTargetsForArea("North", user("other"));
+        dbgs.setTargetsForArea("NorthEast", expected);
+        Future<Integer> collector = start("-n", "NorthEast", "--include-user", "suite");
+        List<FakeDebugServer.Request> attachments = dbgs.requests("attachDetachDbgTargets");
+
+        assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(1, attachments.size());
+        assertTrue(attachments.getFirst().body.contains(expected.getId()));
+    }
+
+    @Test
     void includeUserResolvesPacketsFromMultipleAreasInOneLookupWithoutAttachingOtherTargets() throws Exception {
         String runner = "demo_runner";
         DebugTargetId first = user(runner);
@@ -3054,13 +3139,17 @@ class StartCommandTest {
     }
 
     private static CommandLine startCommandLine(LongSupplier targetLookupClock) {
+        return startCommandLine(targetLookupClock, System::nanoTime);
+    }
+
+    private static CommandLine startCommandLine(LongSupplier targetLookupClock, LongSupplier finalPollClock) {
         CommandLine.IFactory defaultFactory = CommandLine.defaultFactory();
         return new CommandLine(new Coverage41C(), new CommandLine.IFactory() {
             @Override
             public <T> T create(Class<T> type) throws Exception {
                 if (type == CoverageCommand.class) {
                     return type.cast(new CoverageCommand(targetLookupClock, TEST_FINAL_MEASURE_WINDOW,
-                            TEST_FINAL_CONFIRMATION_TIMEOUT) {
+                            TEST_FINAL_CONFIRMATION_TIMEOUT, finalPollClock) {
                         @Override
                         protected java.io.OutputStream statisticsOutput() {
                             java.io.OutputStream sink = statisticsSink;
@@ -3074,6 +3163,10 @@ class StartCommandTest {
     }
 
     private Future<Integer> startRaw(String... options) throws Exception {
+        return startRaw(startCommandLine(), options);
+    }
+
+    private Future<Integer> startRaw(CommandLine command, String... options) throws Exception {
         List<String> arguments = new ArrayList<>(List.of(
                 PipeMessages.START_COMMAND,
                 "-i", infobase,
@@ -3081,7 +3174,27 @@ class StartCommandTest {
                 "-o", output.toString(),
                 "-t", "10"));
         arguments.addAll(Arrays.asList(options));
-        return submit(arguments);
+        return submit(command, arguments);
+    }
+
+    private static final class FinalPollClock implements LongSupplier {
+        private volatile LongSupplier time = () -> 0;
+
+        @Override
+        public long getAsLong() {
+            return time.getAsLong();
+        }
+
+        void advance(Duration duration) {
+            long next = getAsLong() + duration.toNanos();
+            time = () -> next;
+        }
+
+        void resumeRealTime() {
+            long start = System.nanoTime();
+            long current = getAsLong();
+            time = () -> current + (System.nanoTime() - start);
+        }
     }
 
     private Future<Integer> start(String... options) throws Exception {

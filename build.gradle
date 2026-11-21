@@ -199,9 +199,12 @@ def edtClassList = tasks.register('generateEdtClassList') {
         String caller
         bytecode.toString().eachLine { line ->
             if (line.startsWith('Classfile ')) {
-                def file = new File(line.substring('Classfile '.length()))
-                caller = classes.get().asFile.toPath().relativize(file.toPath()).toString()
-                        .replaceAll(/\.class$/, '').replace(File.separatorChar, '.' as char)
+                caller = null
+            }
+            // The Classfile header can be a path or a URI. Use the name in the class itself.
+            def className = line =~ /^\s*this_class:\s+#\d+\s+\/\/\s+(\S+)\s*$/
+            if (className.find()) {
+                caller = className.group(1).replace('/', '.')
             }
             def instruction = line =~ /^\s*\d+:\s+(invokevirtual|invokeinterface|invokestatic|invokespecial|getfield|getstatic|putfield|putstatic)\s+.*?\/\/\s+(?:InterfaceMethod|Method|Field) (\S+)$/
             def handle = line =~ /\bREF_(getField|getStatic|putField|putStatic|invokeVirtual|invokeInterface|invokeStatic|invokeSpecial|newInvokeSpecial) (\S+)\s*$/
@@ -217,6 +220,9 @@ def edtClassList = tasks.register('generateEdtClassList') {
             if (reference != null) {
                 def member = reference =~ /^(com\/_1c\/g5\/v8\/dt\/(?:internal\/)?debug\/[\w\/$]+)\.("?[^":]+"?):(\S+)$/
                 if (member.matches()) {
+                    if (caller == null) {
+                        throw new GradleException("Cannot determine class for EDT member reference: ${reference}")
+                    }
                     members.add("${opcode} ${member.group(1).replace('/', '.')} ${member.group(2).replace('"', '')} ${member.group(3)} ${caller}")
                 }
             }

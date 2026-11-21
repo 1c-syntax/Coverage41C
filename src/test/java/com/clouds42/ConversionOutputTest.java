@@ -206,8 +206,9 @@ class ConversionOutputTest {
             Path report = directory.resolve(replacement + ".json");
             Path moved = directory.resolve(replacement + "-moved.json");
             IOException error = assertThrows(IOException.class, () -> ConversionOutput.publish(null, report, output -> {
-                Files.move(report, moved);
+                assertFalse(Files.exists(report));
                 if (replacement.equals("symlink")) {
+                    Files.writeString(moved, "independent");
                     Files.createSymbolicLink(report, moved.getFileName());
                 } else {
                     Files.writeString(report, "replacement");
@@ -215,15 +216,14 @@ class ConversionOutputTest {
                 throw new IOException("coverage stream failed");
             }, output -> output.write('j'), OutputStream.nullOutputStream(), keys));
             assertEquals("coverage stream failed", error.getMessage());
-            assertEquals("j", Files.readString(moved));
             if (replacement.equals("symlink")) {
                 assertTrue(Files.isSymbolicLink(report));
-                assertEquals("j", Files.readString(report));
+                assertEquals("independent", Files.readString(report));
             } else {
                 assertEquals("replacement", Files.readString(report));
             }
         }
-        assertDirectorySize(4);
+        assertDirectorySize(3);
     }
 
     @Test
@@ -269,7 +269,7 @@ class ConversionOutputTest {
     @Test
     void independentJvmCanPublishOtherReportsWhileFallbackCreationIsPending() throws Exception {
         ConversionOutput.FileKeys keys = markerKeysWithBasicIdentity();
-        Path coverage = directory.resolve("coverage.xml");
+        Path coverage = directory.resolve("покрытие+%.xml");
         Path unrelated = directory.resolve("unrelated.json");
         Path existing = Files.writeString(directory.resolve("existing.json"), "old");
         Path coordination = Files.createDirectory(directory.resolve("coordination"));
@@ -293,7 +293,7 @@ class ConversionOutputTest {
                         publishMarkerOutput(existing, keys);
                         assertEquals("x", Files.readString(existing));
                     });
-            assertEquals(0, Files.size(coverage));
+            assertFalse(Files.exists(coverage));
             Files.createFile(release);
             assertTrue(holder.waitFor(15, TimeUnit.SECONDS));
             assertEquals(0, holder.exitValue(), new String(holder.getInputStream().readAllBytes(), StandardCharsets.UTF_8));
@@ -403,7 +403,7 @@ class ConversionOutputTest {
             Path release = Path.of(args[2]);
             ConversionOutput.FileKeys keys = new ConversionOutput.FileKeys(false, attributes -> null, (file, options) -> {
                 Object key = Files.readAttributes(file, BasicFileAttributes.class, options).fileKey();
-                if (file.equals(output)) {
+                if (file.getFileName().toString().equals("output")) {
                     Files.createFile(ready);
                     awaitMarkerSignal(release);
                 }
@@ -487,19 +487,19 @@ class ConversionOutputTest {
     }
 
     @Test
-    void rollbackLeavesAReplacementAtTheCreatedOutputName() throws Exception {
+    void rollbackLeavesAFileCreatedByAnotherWriter() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(directory.getFileSystem().supportedFileAttributeViews().contains("posix"));
         Path report = directory.resolve("report.json");
-        Path moved = directory.resolve("moved.json");
         IOException error = assertThrows(IOException.class, () -> ConversionOutput.publish(null, report,
                 stream -> {
-                    Files.move(report, moved);
+                    assertFalse(Files.exists(report));
                     Files.writeString(report, "replacement");
                     throw new IOException("coverage stream failed");
                 }, stream -> stream.write('1'), OutputStream.nullOutputStream()));
 
         assertEquals("coverage stream failed", error.getMessage());
         assertEquals("replacement", Files.readString(report));
-        assertEquals("1", Files.readString(moved));
+        assertDirectorySize(1);
     }
 
     @Test

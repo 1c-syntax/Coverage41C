@@ -333,6 +333,8 @@ class ValidateCommandTest {
         var permissions = Files.getPosixFilePermissions(root);
         Files.setPosixFilePermissions(root, PosixFilePermissions.fromString("r-xr-xr-x"));
         try {
+            assumeTrue(!Files.isWritable(root), "Export root permissions are ineffective for the current user");
+            assumeTrue(Files.isWritable(reports), "Report directory must be writable");
             StringWriter stderr = new StringWriter();
             assertEquals(CommandLine.ExitCode.OK, validateProject(project, stderr,
                     "--exclusion-report", output.toString()), stderr.toString());
@@ -409,6 +411,7 @@ class ValidateCommandTest {
                 "--exclusion-report", report.toString()), stderr.toString());
         assertTrue(stderr.toString().contains("Exclusion report would overwrite input file"), stderr.toString());
         assertArrayEquals(original, Files.readAllBytes(descriptor));
+        assertTrue(Files.isSameFile(report, descriptor));
     }
 
     @Test
@@ -443,6 +446,43 @@ class ValidateCommandTest {
                 + " is inside the configuration directory and would be read as a config on the next run"),
                 stderr.toString());
         assertFalse(Files.exists(report));
+    }
+
+    @Test
+    void unrelatedBrokenConfigLinkDoesNotPreventAFreshReport() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path config = Files.createDirectory(project.resolve("rules"));
+        Files.writeString(config.resolve("rules.json"), "{\"exclude\":{\"objects\":[\"Catalog.Справочник1\"]}}");
+        Path broken = config.resolve("broken.json");
+        linkForExportTest(broken, Path.of("../absent/../unrelated.json"));
+        Path report = project.resolve("report.json");
+        StringWriter stderr = new StringWriter();
+
+        assertEquals(CommandLine.ExitCode.OK, validateProject(project, stderr, "--config", config.toString(),
+                "--exclusion-report", report.toString(), "--strict"), stderr.toString());
+        assertEquals(1, new ObjectMapper().readTree(report.toFile()).path("entries").size());
+        assertTrue(Files.isSymbolicLink(broken));
+        assertFalse(Files.exists(broken));
+    }
+
+    @Test
+    void refusesReportThatWouldActivateADanglingConfigLink() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path config = Files.createDirectory(project.resolve("rules"));
+        Files.writeString(config.resolve("rules.json"), "{\"exclude\":{\"objects\":[\"Catalog.Справочник1\"]}}");
+        Path report = project.resolve("future/report.json");
+        Path link = config.resolve("future.json");
+
+        for (Path target : List.of(Path.of("../future/report.json"), Path.of("../future/../future/report.json"))) {
+            linkForExportTest(link, target);
+            StringWriter stderr = new StringWriter();
+
+            assertEquals(CommandLine.ExitCode.SOFTWARE, validateProject(project, stderr, "--config", config.toString(),
+                    "--exclusion-report", report.toString()), stderr.toString());
+            assertTrue(stderr.toString().contains("would be read as a config on the next run"), stderr.toString());
+            assertFalse(Files.exists(report.getParent()));
+            Files.delete(link);
+        }
     }
 
     @Test

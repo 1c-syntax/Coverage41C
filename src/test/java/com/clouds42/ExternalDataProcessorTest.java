@@ -218,7 +218,6 @@ class ExternalDataProcessorTest {
             assertEquals(1, diagnostic.path("warnings").size());
             assertTrue(diagnostic.path("warnings").get(0).asText().contains("cannot list forms"), diagnostic.toString());
             assertEquals(2, diagnostic.path("totalLines").asInt());
-            Files.delete(tempDir.resolve("exclusions.json"));
             assertEquals(diagnostic, validateExternalSource(tempDir, "ExternalReport.xml", false, CommandLine.ExitCode.OK));
 
             StringWriter stderr = new StringWriter();
@@ -594,6 +593,7 @@ class ExternalDataProcessorTest {
     private JsonNode validateExternalSource(Path project, String source, boolean strict, int expectedExitCode)
             throws IOException {
         Path report = tempDir.resolve("exclusions.json");
+        Files.deleteIfExists(report);
         List<String> args = new ArrayList<>(List.of(PipeMessages.VALIDATE_COMMAND, "-P", project.toString(),
                 "-s", source, "--exclusion-report", report.toString()));
         if (strict) {
@@ -642,6 +642,7 @@ class ExternalDataProcessorTest {
                 </coverage>
                 """.formatted(coverageAttributes, processorKey, processorAttributes));
         Path output = tempDir.resolve("coverage.xml");
+        Files.deleteIfExists(output);
         StringWriter stderr = new StringWriter();
         List<String> arguments = new ArrayList<>(List.of(PipeMessages.CONVERT_COMMAND,
                 "-P", project.toString(), "-s", "ВнешняяОбработка.xml", "--extension", "A=A",

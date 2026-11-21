@@ -22,6 +22,7 @@ cat > "$fixture/bin/java" <<'JAVA'
 #!/bin/sh
 case " $* " in
     *' com.clouds42.EdtLocation '*)
+        case " $* " in *private-marker*) echo 'Private options reached selector argv' >&2; exit 1 ;; esac
         [ "${EDT_SELECTOR_NOISE:-}" != 1 ] || printf '%s\n' 'unrelated selector stdout'
         [ "${EDT_SELECTOR_DUPLICATE:-}" != 1 ] || printf '%s\n' 'COVERAGE41C_EDT_LOCATION=/untrusted'
         [ "${EDT_SELECTOR_FAIL:-}" != 1 ] || exit 23
@@ -60,7 +61,7 @@ for source in JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS JAVA_OPTS; do
         case "$kind" in
             gc) flags=-Xlog:gc ;;
             jmx) flags='-Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.local.port=17019' ;;
-            jdwp) flags='-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=127.0.0.1:17020' ;;
+            jdwp) flags='-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=127.0.0.1:0' ;;
             agent) flags= ;;
         esac
         marker="$fixture/$source-$kind.agent"
@@ -119,6 +120,7 @@ if [ "$(uname -s)" = Linux ]; then
     printf '#!/bin/sh\nprintf "%%s\\n" "$EDT_TEST_KERNEL"\n' > "$fixture/windows-bin/uname"
     cat > "$fixture/windows-bin/cygpath" <<'CYGPATH'
 #!/bin/sh
+printf '%s\n' "$*" >> "$EDT_CYGPATH_CALLS"
 if [ "$1" = --mixed ] && [ "$2" = --file ] && [ "$3" = - ]; then cat; exit; fi
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -133,13 +135,19 @@ CYGPATH
     chmod +x "$fixture/windows-bin/"*
     ln -s first/plugins "$fixture/-sdk"
     ln -s first "$fixture/-edt"
-    for kernel in CYGWIN_NT MSYS_NT; do
+    for kernel in CYGWIN_NT-10.0 MINGW64_NT-10.0; do
         for location in -sdk ''; do
             expected=${location:--edt/plugins}
+            conversion="--unix -- $location"
+            if [ -z "$location" ]; then conversion='--mixed --file -'; fi
+            : > "$fixture/cygpath-calls"
+            rm -f "$fixture/selected"
             if (cd "$fixture" && run_launcher env PATH="$fixture/windows-bin:$fixture/bin:$PATH" \
                     EDT_TEST_KERNEL="$kernel" EDT_LOCATION="$location" EDT_FIXTURE_FIRST=-edt \
+                    EDT_CYGPATH_CALLS="$fixture/cygpath-calls" \
                     EDT_SELECTED_FILE="$fixture/selected" > "$fixture/output" 2> "$fixture/errors") \
-                    && grep -Fxq "$version" "$fixture/output" && grep -Fxq -e "$expected" "$fixture/selected"; then
+                    && grep -Fxq "$version" "$fixture/output" && grep -Fxq -e "$expected" "$fixture/selected" \
+                    && grep -Fxq -e "$conversion" "$fixture/cygpath-calls"; then
                 echo "PASS $kernel relative EDT path $expected"
             else
                 echo "FAIL $kernel relative EDT path $expected" >&2
@@ -242,7 +250,7 @@ scenario='SDK requires extra permissions that are absent'
 check_sdk "$fixture/second" EDT_EXTRA_ACCESS=1
 for source in JAVA_TOOL_OPTIONS _JAVA_OPTIONS JDK_JAVA_OPTIONS JAVA_OPTS COVERAGE41_C_OPTS; do
     scenario="SDK requires --add-opens and --add-exports from $source"
-    # Native JVM environment variables use C whitespace, including vertical tab. Gradle uses xargs.
+    # Native JVM environment variables use C whitespace, including vertical tab.
     gap=' '
     case "$source" in JAVA_TOOL_OPTIONS|_JAVA_OPTIONS|JDK_JAVA_OPTIONS) gap=$(printf '\013') ;; esac
     flags="--add-opens=$opens${gap}--add-exports=$exports"
@@ -300,6 +308,24 @@ for source in JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS JAVA_OPTS; do
         fi
     done
 done
+# Literal newlines inside a property must not become option boundaries during discovery.
+multiline='-Dcoverage41c.option="private-marker
+--enable-preview
+trailing"'
+marker="$fixture/multiline.agent"
+for source in JAVA_OPTS COVERAGE41_C_OPTS; do
+    for expected in second first; do
+        scenario="multiline property in $source selects $expected SDK"
+        flags="$multiline -javaagent:$fixture/agent.jar=$marker"
+        if [ "$expected" = first ]; then flags="$flags --enable-preview"; fi
+        rm -f "$marker"
+        check_sdk "$fixture/$expected" "$source=$flags"
+        if [ "$(cat "$marker" 2>/dev/null || :)" != 'private-marker --enable-preview trailing' ]; then
+            echo "FAIL application option parsing for $scenario" >&2
+            status=1
+        fi
+    done
+done
 # Java launcher options can expand an argument file without sharing it with the probe JVM.
 mkdir "$fixture/args directory"
 agent_marker="$fixture/argfile.agent"
@@ -319,6 +345,17 @@ for source in JAVA_OPTS JDK_JAVA_OPTIONS COVERAGE41_C_OPTS; do
         status=1
     fi
 done
+flags='"@args
+directory/preview"'
+rm -f "$agent_marker"
+if (cd "$fixture" && run_launcher env "JAVA_OPTS=$flags" EDT_SELECTED_FILE="$fixture/selected" > "$fixture/output") \
+        && grep -Fxq "$version" "$fixture/output" && [ "$(cat "$agent_marker")" = preserved ] \
+        && grep -Fxq "$fixture/first/plugins" "$fixture/selected"; then
+    echo 'PASS preview argument file with a quoted newline'
+else
+    echo 'FAIL preview argument file with a quoted newline' >&2
+    status=1
+fi
 printf '# --enable-preview\r\n--enable-preview#not-an-option\r\n-Dlabel=" --enable-preview "\r\n' > "$fixture/args directory/ignored"
 if (cd "$fixture" && run_launcher env EDT_REAL_APP=0 'JAVA_OPTS="@args directory/ignored"' > "$fixture/output") \
         && grep -Fq "$fixture/second/plugins/com._1c.g5.v8.dt.debug.core_" "$fixture/output"; then

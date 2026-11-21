@@ -389,6 +389,37 @@ class MultipleSourcesTest {
     }
 
     @Test
+    void legacyExtensionSourcesGiveBareMeasurementsToTheTreePassedWithSrcDir() throws Exception {
+        writeRaw(KEY, 4, KEY, 2);
+
+        assertEquals(0, convert("-s", "configuration", "--extension", "A=extensions/A"));
+
+        Map<String, Map<Integer, Boolean>> result = coverage(output);
+        assertEquals(Map.of(2, true, 4, true, 6, false), result.get("configuration/" + MODULE));
+        assertEquals(Map.of(2, false, 4, false, 6, false), result.get("extensions/A/" + MODULE));
+    }
+
+    @Test
+    void emptyLegacyExtensionRecordDoesNotReclassifyBareMeasurements() throws Exception {
+        Files.writeString(raw, "<coverage><file path=\"" + KEY + "\" extension=\"B\"/>"
+                + "<file path=\"" + KEY + "\"><lineToCover covered=\"true\" lineNumber=\"4\"/></file></coverage>");
+
+        StringWriter error = new StringWriter();
+        assertEquals(0, convert(error, "-s", "extensions/A", "-e", "A", "--extension", "B=configuration"),
+                error.toString());
+
+        Map<String, Map<Integer, Boolean>> result = coverage(output);
+        assertEquals(Map.of(2, false, 4, true, 6, false), result.get("extensions/A/" + MODULE));
+        assertEquals(Map.of(2, false, 4, false, 6, false), result.get("configuration/" + MODULE));
+
+        Files.delete(output);
+        error = new StringWriter();
+        assertEquals(1, convert(error, "--source", "A=extensions/A", "--source", "B=configuration"));
+        assertTrue(error.toString().contains("Ambiguous legacy module key"), error.toString());
+        assertFalse(Files.exists(output));
+    }
+
+    @Test
     void legacyKeyCountsProtectedModulesAsPotentialMatches() throws Exception {
         Path mainModule = project.resolve("configuration/" + MODULE);
         Files.delete(mainModule);

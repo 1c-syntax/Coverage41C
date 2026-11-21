@@ -106,7 +106,7 @@ public abstract class CoverServer {
         if (serverSocket == null) {
             String pipeName = Utils.getPipeName(getConnectionOptions());
             CommandSocket socket = OS.contains("win") ? new CommandSocket(pipeName)
-                    : openUnixSocket(Path.of(pipeName).toAbsolutePath().normalize());
+                    : openUnixSocket(Path.of(pipeName));
             serverSocket = socket;
             socket.acceptThread = startDaemon(() -> acceptCommands(socket), "coverage41c-commands");
             logger.info("Create server socket");

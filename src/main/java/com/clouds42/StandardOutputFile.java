@@ -23,8 +23,6 @@ package com.clouds42;
 
 import com.sun.jna.Library;
 import com.sun.jna.Native;
-import com.sun.jna.Pointer;
-import com.sun.jna.win32.StdCallLibrary;
 
 import java.io.File;
 import java.io.FileDescriptor;
@@ -97,8 +95,7 @@ final class StandardOutputFile {
 
     static FileIdentity regularFile() throws IOException {
         if (File.separatorChar == '\\') {
-            Path file = windowsFile();
-            return file == null ? null : path -> Files.isSameFile(file, path);
+            return WindowsFiles.stdout();
         }
         Path descriptor = unixDescriptor();
         if (!Files.isRegularFile(descriptor)) {
@@ -117,8 +114,8 @@ final class StandardOutputFile {
             return false;
         }
         if (File.separatorChar == '\\') {
-            Path file = windowsFile();
-            return file != null && Files.isSameFile(file, destination);
+            FileIdentity identity = WindowsFiles.stdout();
+            return identity != null && identity.matches(destination);
         }
         Path descriptor = unixDescriptor();
         if (!Files.exists(descriptor)) {
@@ -169,31 +166,5 @@ final class StandardOutputFile {
         int EBADF = 9;
         int EINVAL = 22;
         int fgetattrlist(int fd, byte[] attributes, byte[] result, long size, int options);
-    }
-
-    private interface Windows extends StdCallLibrary {
-        int STD_OUTPUT_HANDLE = -11;
-        int FILE_TYPE_DISK = 1;
-        Pointer GetStdHandle(int handle);
-        int GetFileType(Pointer handle);
-        int GetFinalPathNameByHandleW(Pointer handle, char[] path, int size, int flags);
-    }
-
-    private static Path windowsFile() throws IOException {
-        Windows api = Native.load("kernel32", Windows.class);
-        Pointer handle = api.GetStdHandle(Windows.STD_OUTPUT_HANDLE);
-        if (handle == null || api.GetFileType(handle) != Windows.FILE_TYPE_DISK) {
-            return null;
-        }
-        char[] path = new char[32768]; // Maximum length of a Windows extended path, including its terminator.
-        int size = api.GetFinalPathNameByHandleW(handle, path, path.length, 0);
-        if (size == 0 || size >= path.length) {
-            throw new IOException("Cannot identify standard output (Windows error " + Native.getLastError() + ")");
-        }
-        String name = new String(path, 0, size);
-        if (name.startsWith("\\\\?\\UNC\\")) {
-            return Path.of("\\\\" + name.substring(8));
-        }
-        return Path.of(name.startsWith("\\\\?\\") ? name.substring(4) : name);
     }
 }

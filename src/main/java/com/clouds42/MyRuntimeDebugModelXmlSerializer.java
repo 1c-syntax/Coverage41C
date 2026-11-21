@@ -39,8 +39,13 @@ import org.eclipse.emf.ecore.xmi.impl.SAXXMLHandler;
 import org.eclipse.emf.ecore.xmi.impl.XMLLoadImpl;
 import org.eclipse.emf.ecore.xmi.impl.XMLResourceImpl;
 import org.xml.sax.InputSource;
+import org.xml.sax.SAXException;
 import org.xml.sax.helpers.DefaultHandler;
 
+import javax.xml.XMLConstants;
+import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.parsers.SAXParser;
+import javax.xml.parsers.SAXParserFactory;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.StringReader;
@@ -82,7 +87,7 @@ public class MyRuntimeDebugModelXmlSerializer extends RuntimeDebugModelXmlSerial
     private static final class ResponseRead {
         final String from;
         final String to;
-        String original;
+        String beforeRename;
         String renamed;
 
         ResponseRead(String from, String to) {
@@ -127,6 +132,8 @@ public class MyRuntimeDebugModelXmlSerializer extends RuntimeDebugModelXmlSerial
             return (T) loadResponse(xml, replaceFrom, replaceTo,
                     collectingMeasurements && deserializeTo == RDBGPingDebugUIResponse.class);
         }
+        // A hook may change either tag. Check the original syntax before invoking extension code.
+        validateOriginalXml(xml);
         ResponseRead previous = extensionRead.get();
         extensionRead.set(new ResponseRead(replaceFrom, replaceTo));
         try {
@@ -137,6 +144,16 @@ public class MyRuntimeDebugModelXmlSerializer extends RuntimeDebugModelXmlSerial
             } else {
                 extensionRead.set(previous);
             }
+        }
+    }
+
+    private static void validateOriginalXml(String xml) throws IOException {
+        try {
+            SAXParser parser = SAXParserFactory.newDefaultInstance().newSAXParser();
+            parser.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+            parser.parse(new InputSource(new StringReader(xml)), new DefaultHandler());
+        } catch (ParserConfigurationException | SAXException error) {
+            throw new IOException("Malformed debugger response XML", error);
         }
     }
 
@@ -198,8 +215,8 @@ public class MyRuntimeDebugModelXmlSerializer extends RuntimeDebugModelXmlSerial
     protected EObject convertToEObject(String xmlString) throws IOException {
         ResponseRead read = extensionRead.get();
         if (read != null && xmlString.equals(read.renamed)) {
-            // A delegating extension still validates the original document, including its matching end tag.
-            return loadResponse(read.original, read.from, read.to, false);
+            // Alias the actual root even if the legacy string replacement changed a comment or instruction.
+            return loadResponse(read.beforeRename, read.from, read.to, false);
         }
         return loadModel(xmlString, new XMLResourceImpl());
     }
@@ -267,7 +284,7 @@ public class MyRuntimeDebugModelXmlSerializer extends RuntimeDebugModelXmlSerial
 
         ResponseRead read = extensionRead.get();
         if (read != null && read.from.equals(replaceFromTag) && read.to.equals(replaceToTag)) {
-            read.original = xmlString;
+            read.beforeRename = xmlString;
             read.renamed = renamed;
         }
         return renamed;

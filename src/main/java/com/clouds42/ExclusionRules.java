@@ -32,6 +32,7 @@ import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.FileSystemLoopException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -271,16 +272,7 @@ final class ExclusionRules {
         Path report = reportFile.toPath().toAbsolutePath();
         Path configDirectory = configPath.toPath().toAbsolutePath();
         if (Files.notExists(report)) {
-            // A JSON link in the rules directory may point out of it to a future report.
-            try (DirectoryStream<Path> links = Files.newDirectoryStream(configDirectory,
-                    path -> isConfigFileName(path.toFile()) && Files.isSymbolicLink(path) && Files.notExists(path))) {
-                for (Path link : links) {
-                    if (Utils.sameOutputFile(link, report)) {
-                        throw new IllegalArgumentException(source + ": " + report + " is the target of " + link
-                                + " and would be read as a config on the next run");
-                    }
-                }
-            }
+            rejectReportVisibleThroughConfigLink(report, configDirectory, source);
         }
         Set<Path> visited = new HashSet<>();
         Path candidate = report;
@@ -300,6 +292,34 @@ final class ExclusionRules {
         }
         throw new IllegalArgumentException(source + ": " + report
                 + " is inside the configuration directory and would be read as a config on the next run");
+    }
+
+    private static void rejectReportVisibleThroughConfigLink(Path report, Path configDirectory, String source)
+            throws IOException {
+        Path destination = Utils.resolveOutputPath(report);
+        Set<Path> futureDirectories = new HashSet<>();
+        for (Path parent = destination.getParent(); parent != null && Files.notExists(parent);
+             parent = parent.getParent()) {
+            futureDirectories.add(parent);
+        }
+
+        // A JSON link may point to the future report, including through a directory the writer will create.
+        try (DirectoryStream<Path> links = Files.newDirectoryStream(configDirectory,
+                path -> isConfigFileName(path.toFile()) && Files.isSymbolicLink(path) && Files.notExists(path))) {
+            for (Path link : links) {
+                Path target;
+                try {
+                    target = Utils.resolveOutputPath(link, futureDirectories);
+                } catch (NoSuchFileException unrelated) {
+                    // This link would still require a directory that the writer will not create.
+                    continue;
+                }
+                if (Utils.sameOutputFile(target, destination)) {
+                    throw new IllegalArgumentException(source + ": " + report + " is the target of " + link
+                            + " and would be read as a config on the next run");
+                }
+            }
+        }
     }
 
     private static boolean isJsonInConfigDirectory(Path report, Path configDirectory) throws IOException {

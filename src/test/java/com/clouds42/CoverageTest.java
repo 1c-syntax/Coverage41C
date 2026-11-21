@@ -34,8 +34,8 @@ import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -117,30 +117,28 @@ class CoverageTest {
     }
 
     @Test
-    void testConfigurator() throws InterruptedException, ExecutionException, IOException {
+    void testConfigurator() throws Exception {
         File configurationSourceDir = new File("src/test/resources/configuration");
         String expectedXmlFileName = "src/test/resources/coverage/configuration.xml";
         testCoverage(configurationSourceDir, expectedXmlFileName);
     }
 
     @Test
-    void testEDT() throws InterruptedException, ExecutionException, IOException {
+    void testEDT() throws Exception {
         File edtSourceDir = new File("src/test/resources/edt/pc");
         String expectedEdtXmlFileName = "src/test/resources/coverage/edt.xml";
         testCoverage(edtSourceDir, expectedEdtXmlFileName);
     }
 
     @Test
-    void testInternal() throws InterruptedException, ExecutionException, IOException {
+    void testInternal() throws Exception {
         String expectedRawXmlFileName = "src/test/resources/coverage/start-raw.xml";
         testCoverage(null, expectedRawXmlFileName);
     }
 
-    void testCoverage(
-            File sourceDir,
-            String expectedXmlFileName) throws IOException, InterruptedException, ExecutionException {
-
-        CompletableFuture<Integer> mainAppThread = CompletableFuture.supplyAsync(() -> {
+    void testCoverage(File sourceDir, String expectedXmlFileName) throws Exception {
+        var executor = Executors.newSingleThreadExecutor();
+        var collector = executor.submit(() -> {
             String[] argsArray = {
                     PipeMessages.START_COMMAND,
                     "-i", fileIbName,
@@ -159,59 +157,46 @@ class CoverageTest {
             return mainAppReturnCode;
         });
 
-        Thread.sleep(1500); // wait for socket server
+        int stopResult;
+        int collectorResult;
+        try {
+            Thread.sleep(1500); // wait for socket server
+            assertEquals(0, send(PipeMessages.CHECK_COMMAND));
+            assertEquals(0, send(PipeMessages.CLEAN_COMMAND));
 
-        String[] mainAppCheckArguments = {
-                PipeMessages.CHECK_COMMAND,
-                "-i", fileIbName,
-                "-u", dbgsUrlString};
-        int mainAppCheckResult = Coverage41C.getCommandLine().execute(mainAppCheckArguments);
-        assertEquals(0, mainAppCheckResult);
+            ProcessBuilder vrunnerVanessaProcessBuilder = new ProcessBuilder();
+            vrunnerVanessaProcessBuilder.command(vrunnerExecutable, "vanessa",
+                    "--root", bddRootDir.getAbsolutePath(),
+                    "--path", featuresDir.getAbsolutePath(),
+                    "--ibconnection", ibConnection,
+                    "--db-user", ibUser,
+                    "--db-pwd", ibPassword,
+                    "--v8version", v8version,
+                    "--additional", additionalTestManagerArguments,
+                    "--vanessasettings", vbParamsFile.getAbsolutePath());
+            Process vrunnerVanessaProcess = vrunnerVanessaProcessBuilder.inheritIO().start();
+            vrunnerVanessaProcess.waitFor();
 
-        String[] mainAppCleanArguments = {
-                PipeMessages.CLEAN_COMMAND,
-                "-i", fileIbName,
-                "-u", dbgsUrlString};
-        int mainAppCleanResult = Coverage41C.getCommandLine().execute(mainAppCleanArguments);
-        assertEquals(0, mainAppCleanResult);
+            Thread.sleep(1500); // wait for measure results
+            assertEquals(0, send(PipeMessages.DUMP_COMMAND));
+            var coverage = Utils.newInputXmlBuilder().parse(new File(outputXmlFileName)).getDocumentElement();
+            assertEquals("coverage", coverage.getTagName());
+            assertEquals("1", coverage.getAttribute("version"));
+        } finally {
+            try {
+                stopResult = send(PipeMessages.EXIT_COMMAND);
+                collectorResult = collector.get(30, TimeUnit.SECONDS);
+            } finally {
+                executor.shutdownNow();
+            }
+        }
 
-        ProcessBuilder vrunnerVanessaProcessBuilder = new ProcessBuilder();
-        vrunnerVanessaProcessBuilder.command(vrunnerExecutable, "vanessa",
-                "--root", bddRootDir.getAbsolutePath(),
-                "--path", featuresDir.getAbsolutePath(),
-                "--ibconnection", ibConnection,
-                "--db-user", ibUser,
-                "--db-pwd", ibPassword,
-                "--v8version", v8version,
-                "--additional", additionalTestManagerArguments,
-                "--vanessasettings", vbParamsFile.getAbsolutePath());
-        Process vrunnerVanessaProcess = vrunnerVanessaProcessBuilder.inheritIO().start();
-        vrunnerVanessaProcess.waitFor();
-
-        Thread.sleep(1500); // wait for measure results
-
-        String[] mainAppDumpArguments = {
-                PipeMessages.DUMP_COMMAND,
-                "-i", fileIbName,
-                "-u", dbgsUrlString};
-        int mainAppDumpResult = Coverage41C.getCommandLine().execute(mainAppDumpArguments);
-        assertEquals(0, mainAppDumpResult);
-
+        assertEquals(0, stopResult);
+        assertEquals(0, collectorResult);
         TestUtils.assertCoverageEqual(expectedXmlFileName, outputXmlFileName);
-
-        String[] mainAppStopArguments = {
-                PipeMessages.EXIT_COMMAND,
-                "-i", fileIbName,
-                "-u", dbgsUrlString};
-        int mainAppStopResult = Coverage41C.getCommandLine().execute(mainAppStopArguments);
-        assertEquals(0, mainAppStopResult);
-
-        assertEquals(0, mainAppThread.get());
-
-        TestUtils.assertCoverageEqual(expectedXmlFileName, outputXmlFileName);
-
     }
 
-
-
+    private int send(String command) {
+        return Coverage41C.getCommandLine().execute(command, "-i", fileIbName, "-u", dbgsUrlString);
+    }
 }

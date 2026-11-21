@@ -33,6 +33,7 @@ import picocli.CommandLine;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -44,6 +45,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -89,8 +91,7 @@ class StandardOutputConversionTest {
     @EnabledOnOs({OS.LINUX, OS.MAC})
     void rejectsJsonAndCoverageSharingTheStandardOutputPipe() throws Exception {
         Process process = convert("--exclusion-report", "/dev/stdout").start();
-        byte[] bytes = process.getInputStream().readAllBytes();
-        checkExit(process, 1);
+        byte[] bytes = readOutput(process, 1);
         assertTrue(log().contains("different files"), log());
         assertEquals(0, bytes.length);
     }
@@ -100,8 +101,7 @@ class StandardOutputConversionTest {
     void validateCanWriteJsonDirectlyToStandardOutputPipe() throws Exception {
         Process process = cli("validate", "-s", "src/test/resources/configuration",
                 "--exclusion-report", "/dev/stdout").start();
-        byte[] bytes = process.getInputStream().readAllBytes();
-        checkExit(process, 0);
+        byte[] bytes = readOutput(process, 0);
         assertTrue(new ObjectMapper().readTree(bytes).has("totalLines"));
     }
 
@@ -112,8 +112,7 @@ class StandardOutputConversionTest {
             Path coverage = directory.resolve("coverage-" + reader + ".xml");
             Process process = javaMain(LegacyReports.class, reader,
                     "/dev/stdout", coverage.toString()).start();
-            byte[] json = process.getInputStream().readAllBytes();
-            checkExit(process, 0);
+            byte[] json = readOutput(process, 0);
             assertTrue(new ObjectMapper().readTree(json).has("totalLines"));
             assertCoverage(Files.readAllBytes(coverage));
         }
@@ -124,8 +123,7 @@ class StandardOutputConversionTest {
     void legacyDumpWritesAnExplicitDescriptorWhenSystemOutIsReplaced() throws Exception {
         Path report = directory.resolve("exclusions.json");
         Process process = javaMain(LegacyReports.class, "measuring", report.toString(), "/dev/stdout").start();
-        byte[] xml = process.getInputStream().readAllBytes();
-        checkExit(process, 0);
+        byte[] xml = readOutput(process, 0);
         assertCoverage(xml);
         assertTrue(new ObjectMapper().readTree(report.toFile()).has("totalLines"));
     }
@@ -186,8 +184,7 @@ class StandardOutputConversionTest {
     void writesCoverageToPipeAndJsonToSeparateFile() throws Exception {
         Path report = directory.resolve("exclusions.json");
         Process process = convert("--exclusion-report", report.toString()).start();
-        assertCoverage(process.getInputStream().readAllBytes());
-        checkExit(process, 0);
+        assertCoverage(readOutput(process, 0));
         assertTrue(new ObjectMapper().readTree(report.toFile()).has("totalLines"));
     }
 
@@ -257,8 +254,7 @@ class StandardOutputConversionTest {
             ProcessBuilder builder = convert("-f", format);
             builder.command().add(1, "-Djava.io.tmpdir=" + blocked);
             Process process = builder.start();
-            byte[] bytes = process.getInputStream().readAllBytes();
-            checkExit(process, 0);
+            byte[] bytes = readOutput(process, 0);
             if (format.equals("LCOV")) {
                 assertTrue(new String(bytes, StandardCharsets.UTF_8).contains("end_of_record"));
             } else {
@@ -303,14 +299,12 @@ class StandardOutputConversionTest {
         Path alias = Files.createSymbolicLink(directory.resolve("pipe"), Path.of("/dev/stdout"));
         for (String target : List.of("/dev/stdout", "/dev/fd/1", alias.toString())) {
             Process process = convert("-o", target).start();
-            assertCoverage(process.getInputStream().readAllBytes());
-            checkExit(process, 0);
+            assertCoverage(readOutput(process, 0));
         }
 
         Path xml = directory.resolve("coverage.xml");
         Process process = convert("-o", xml.toString(), "--exclusion-report", alias.toString()).start();
-        byte[] output = process.getInputStream().readAllBytes();
-        checkExit(process, 0);
+        byte[] output = readOutput(process, 0);
         assertTrue(new ObjectMapper().readTree(output).has("totalLines"));
         assertCoverage(Files.readAllBytes(xml));
     }
@@ -319,8 +313,7 @@ class StandardOutputConversionTest {
     @EnabledOnOs({OS.LINUX, OS.MAC})
     void twoExplicitStdoutAliasesCannotShareThePipe() throws Exception {
         Process process = convert("-o", "/dev/fd/1", "--exclusion-report", "/dev/stdout").start();
-        byte[] output = process.getInputStream().readAllBytes();
-        checkExit(process, 1);
+        byte[] output = readOutput(process, 1);
         assertEquals(0, output.length);
         assertTrue(log().contains("different files"), log());
     }
@@ -363,6 +356,23 @@ class StandardOutputConversionTest {
 
     private String log() throws Exception {
         return Files.readString(directory.resolve("errors.log"));
+    }
+
+    private byte[] readOutput(Process process, int expected) throws Exception {
+        CompletableFuture<byte[]> output = CompletableFuture.supplyAsync(() -> {
+            try (var stream = process.getInputStream()) {
+                return stream.readAllBytes();
+            } catch (java.io.IOException error) {
+                throw new UncheckedIOException(error);
+            }
+        });
+        try {
+            byte[] bytes = output.get(60, TimeUnit.SECONDS);
+            checkExit(process, expected);
+            return bytes;
+        } finally {
+            process.destroyForcibly();
+        }
     }
 
     private void checkExit(Process process, int expected) throws Exception {

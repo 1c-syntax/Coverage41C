@@ -33,17 +33,24 @@ import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.PrintWriter;
+import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.net.ServerSocket;
 import java.net.URI;
+import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -116,6 +123,23 @@ class CoverServerTest {
 
     @Test
     @EnabledOnOs({OS.LINUX, OS.MAC})
+    void unixCommandsUseTheSameNormalizedAliasAsTheListener() throws Exception {
+        String alias = "socket-test-" + UUID.randomUUID();
+        String nestedAlias = "unused/../" + alias;
+        Path path = socketPath(alias);
+        Server server = socketServer(nestedAlias);
+        try {
+            server.start();
+            assertEquals(CommandLine.ExitCode.OK, Coverage41C.getCommandLine().execute("check",
+                    "-i", nestedAlias));
+        } finally {
+            server.stop();
+            Files.deleteIfExists(lockPath(path));
+        }
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
     void unixLockAllowsOnlyOwnerAccessEvenWithPermissiveUmask() throws Exception {
         String alias = "socket-test-" + UUID.randomUUID();
         Path socket = socketPath(alias);
@@ -163,22 +187,27 @@ class CoverServerTest {
     @EnabledOnOs(OS.LINUX)
     void nativeStderrRecoversAfterBrokenPipeDespiteStickyPrintStreamError() throws Exception {
         Path fifo = tempDir.resolve("statistics.fifo");
-        assertEquals(0, new ProcessBuilder("mkfifo", fifo.toString()).start().waitFor());
-        var opening = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
-            try {
-                return Files.newInputStream(fifo);
-            } catch (IOException e) {
-                throw new java.io.UncheckedIOException(e);
-            }
-        });
-        String alias = "statistics-" + UUID.randomUUID();
-        Process child = new ProcessBuilder(
-                Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-                "-Dorg.slf4j.simpleLogger.defaultLogLevel=off", "-cp",
-                System.getProperty("coverage41c.testClasspath", System.getProperty("java.class.path")),
-                NativeStatisticsProbe.class.getName(), alias).redirectError(fifo.toFile()).start();
-        java.io.InputStream errors = opening.get(10, TimeUnit.SECONDS);
+        Process mkfifo = new ProcessBuilder("mkfifo", fifo.toString()).start();
         try {
+            assertTrue(mkfifo.waitFor(10, TimeUnit.SECONDS), "mkfifo did not finish");
+            assertEquals(0, mkfifo.exitValue());
+        } finally {
+            mkfifo.destroyForcibly();
+        }
+        String alias = "statistics-" + UUID.randomUUID();
+        Path socket = socketPath(alias);
+        Process child = null;
+        InputStream errors = null;
+        try {
+            // Linux permits a read/write FIFO open without a peer. The temporary descriptor
+            // makes both the child redirection and the reader open safe even if startup fails.
+            try (var startup = FileChannel.open(fifo, StandardOpenOption.READ, StandardOpenOption.WRITE)) {
+                child = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                        "-Dorg.slf4j.simpleLogger.defaultLogLevel=off", "-cp",
+                        System.getProperty("coverage41c.testClasspath", System.getProperty("java.class.path")),
+                        NativeStatisticsProbe.class.getName(), alias).redirectError(fifo.toFile()).start();
+                errors = Files.newInputStream(fifo);
+            }
             var replies = new java.io.BufferedReader(new java.io.InputStreamReader(child.getInputStream()));
             var commands = new PrintWriter(child.getOutputStream(), true);
             assertEquals("READY", reply(replies));
@@ -193,7 +222,9 @@ class CoverServerTest {
             assertEquals("ER", reply(replies));
             commands.println("taint");
             assertEquals("true", reply(replies));
-            errors = Files.newInputStream(fifo);
+            try (var reopening = FileChannel.open(fifo, StandardOpenOption.READ, StandardOpenOption.WRITE)) {
+                errors = Files.newInputStream(fifo);
+            }
             commands.println("descriptors");
             String descriptorsBefore = reply(replies);
             for (int i = 0; i < 50; i++) {
@@ -209,28 +240,44 @@ class CoverServerTest {
             assertTrue(child.waitFor(10, TimeUnit.SECONDS));
             assertEquals(0, child.exitValue());
         } finally {
-            if (errors != null) {
-                errors.close();
+            try {
+                // Closing the writer unblocks any report read left pending after a timeout.
+                if (child != null) {
+                    child.destroyForcibly();
+                    child.waitFor(10, TimeUnit.SECONDS);
+                }
+            } finally {
+                try (InputStream reader = errors) {
+                    Files.deleteIfExists(socket);
+                    Files.deleteIfExists(lockPath(socket));
+                }
             }
-            child.destroyForcibly();
-            child.waitFor(10, TimeUnit.SECONDS);
-            Files.deleteIfExists(socketPath(alias));
-            Files.deleteIfExists(lockPath(socketPath(alias)));
         }
     }
 
-    private static String readReport(java.io.InputStream errors) throws IOException {
-        byte[] buffer = new byte[8192];
-        int count = errors.read(buffer);
-        return count < 0 ? "" : new String(buffer, 0, count);
+    private static String readReport(InputStream errors) throws Exception {
+        var report = CompletableFuture.supplyAsync(() -> {
+            try {
+                byte[] buffer = new byte[8192];
+                int count = errors.read(buffer);
+                return count < 0 ? "" : new String(buffer, 0, count, StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        });
+        try {
+            return report.get(10, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            return fail("stats returned OK without writing a report to stderr", e);
+        }
     }
 
     private static String reply(java.io.BufferedReader replies) throws Exception {
-        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+        return CompletableFuture.supplyAsync(() -> {
             try {
                 return replies.readLine();
             } catch (IOException e) {
-                throw new java.io.UncheckedIOException(e);
+                throw new UncheckedIOException(e);
             }
         }).get(10, TimeUnit.SECONDS);
     }

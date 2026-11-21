@@ -133,12 +133,12 @@ elif command -v ring >/dev/null 2>&1; then
         fi
     }
     edt_select() (
-        # Parse launcher options as data, without evaluating them in the selector.
-        edt_script_opts=\$(printf '%s\\n' "\$DEFAULT_JVM_OPTS \$JAVA_OPTS \$COVERAGE41_C_OPTS" | xargs -n1) || exit \$?
+        # Pass the original quoting to the selector without shell evaluation.
+        edt_script_opts="\$DEFAULT_JVM_OPTS \$JAVA_OPTS \$${optsEnvironmentVar}"
         edt_tool_opts=\$JAVA_TOOL_OPTIONS
         edt_launcher_opts=\$JDK_JAVA_OPTIONS
         edt_vm_opts=\$_JAVA_OPTIONS
-        unset JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS JAVA_OPTS COVERAGE41_C_OPTS
+        unset JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS JAVA_OPTS ${optsEnvironmentVar}
         # Options can contain credentials and newlines. Use stdin, ahead of the ring paths.
         edt_output=\$(
             {

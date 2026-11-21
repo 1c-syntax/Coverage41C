@@ -39,6 +39,7 @@ import com._1c.g5.v8.dt.debug.model.rdbg.request.response.MiscRDbgGetAPIVerRespo
 import com._1c.g5.v8.dt.debug.model.rdbg.request.response.RDBGAttachDebugUIResponse;
 import com._1c.g5.v8.dt.debug.model.rdbg.request.response.RDBGDetachDebugUIResponse;
 import com._1c.g5.v8.dt.debug.model.rdbg.request.response.RDBGPingDebugUIResponse;
+import com._1c.g5.v8.dt.debug.model.rdbg.request.response.RDBGSGetDbgTargetsRequest;
 import com._1c.g5.v8.dt.debug.model.rdbg.request.response.RDBGSGetDbgTargetsResponse;
 import com._1c.g5.v8.dt.debug.model.rdbg.request.response.ResponseFactory;
 import com.sun.net.httpserver.HttpExchange;
@@ -86,6 +87,7 @@ class FakeDebugServer implements AutoCloseable {
     private final BlockingQueue<DBGUIExtCmdInfoBase> events = new LinkedBlockingQueue<>();
     private final List<DBGUIExtCmdInfoBase> eventsOnMeasureOff = new CopyOnWriteArrayList<>();
     private final BlockingQueue<List<DBGUIExtCmdInfoBase>> finalPolls = new LinkedBlockingQueue<>();
+    private volatile CountDownLatch finalPollsProcessed = new CountDownLatch(0);
     private volatile boolean profilingDisabled;
     private final AtomicReference<FinalPingReply> nextFinalPingReply = new AtomicReference<>();
     private volatile UnaryOperator<String> finalPingXml = UnaryOperator.identity();
@@ -258,7 +260,14 @@ class FakeDebugServer implements AutoCloseable {
     }
 
     void deliverAcrossFinalPolls(List<List<DBGUIExtCmdInfoBase>> polls) {
+        finalPollsProcessed = new CountDownLatch(1);
         finalPolls.addAll(polls);
+    }
+
+    void awaitFinalPollProcessing() throws InterruptedException {
+        if (!finalPollsProcessed.await(10, TimeUnit.SECONDS)) {
+            throw new IllegalStateException("Coverage41C stopped polling before processing all scripted final replies");
+        }
     }
 
     // Отдаёт события в очередной ping и ждёт, пока Coverage41C их обработает и придёт за следующими.
@@ -472,7 +481,7 @@ class FakeDebugServer implements AutoCloseable {
         }
     }
 
-    private EObject response(String command, String body) throws InterruptedException {
+    private EObject response(String command, String body) throws IOException, InterruptedException {
         switch (command) {
             case "attachDebugUI":
                 RDBGAttachDebugUIResponse attach = ResponseFactory.eINSTANCE.createRDBGAttachDebugUIResponse();
@@ -488,9 +497,10 @@ class FakeDebugServer implements AutoCloseable {
                 return version;
             case "getDbgTargets":
                 RDBGSGetDbgTargetsResponse list = ResponseFactory.eINSTANCE.createRDBGSGetDbgTargetsResponse();
-                List<DebugTargetId> requestedTargets = targetsByArea.entrySet().stream()
-                        .filter(entry -> body.contains(entry.getKey()))
-                        .map(Map.Entry::getValue).findFirst().orElse(targets);
+                RDBGSGetDbgTargetsRequest request = serializer.deserialize(body, RDBGSGetDbgTargetsRequest.class,
+                        "request", "response:RDBGSGetDbgTargetsRequest");
+                String area = request.getDegugAreaName();
+                List<DebugTargetId> requestedTargets = area == null ? targets : targetsByArea.getOrDefault(area, targets);
                 requestedTargets.forEach(target -> list.getId().add(EcoreUtil.copy(target)));
                 return list;
             case "pingDebugUIParams":
@@ -508,6 +518,10 @@ class FakeDebugServer implements AutoCloseable {
             Thread.sleep(40);
             ping.getResult().addAll(finalPoll);
             return ping;
+        }
+        if (profilingDisabled) {
+            // This request can only arrive after the client processed the last scripted reply.
+            finalPollsProcessed.countDown();
         }
         DBGUIExtCmdInfoBase event = events.poll(20, TimeUnit.MILLISECONDS);
         if (event != null) {
