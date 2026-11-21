@@ -56,6 +56,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 /** Serialize both reports before publishing either. Keep the original inodes, links and access rights. */
@@ -92,8 +93,17 @@ final class ConversionOutput {
         void write(Path file) throws IOException;
     }
 
+    @FunctionalInterface
+    interface DestinationCheck {
+        void verify(Path path, Object fileIdentity) throws IOException;
+    }
+
     static void writeFile(Path destination, Writer writer) throws IOException {
-        write(destination, null, writer, null, null);
+        writeFile(destination, writer, null);
+    }
+
+    static void writeFile(Path destination, Writer writer, DestinationCheck check) throws IOException {
+        write(destination, null, writer, null, null, false, check);
     }
 
     static void writeNewFile(Path file, Writer writer) throws IOException {
@@ -107,6 +117,11 @@ final class ConversionOutput {
 
     static void write(Path coverage, Path report, Writer writeCoverage, Writer writeReport, OutputStream stdout,
                       boolean createOnly) throws IOException {
+        write(coverage, report, writeCoverage, writeReport, stdout, createOnly, null);
+    }
+
+    static void write(Path coverage, Path report, Writer writeCoverage, Writer writeReport, OutputStream stdout,
+                      boolean createOnly, DestinationCheck check) throws IOException {
         OutputStream stream = coverage == null ? Utils.reportStdout(stdout) : null;
         try (Temporary coverageStage = Temporary.create(coverage);
              Temporary reportStage = report == null ? null : Temporary.create(report)) {
@@ -115,12 +130,15 @@ final class ConversionOutput {
                 writeReport.write(reportStage.path);
             }
 
+            if (coverage == null && check != null && (stdout == null || StandardOutputFile.isProcessOutput(stdout))) {
+                check.verify(null, StandardOutputFile.regularFileKey());
+            }
             // Java cannot identify the destination of a caller's PrintStream or arbitrary OutputStream.
             Path verifyReport = stream != null && reportStage != null && needsFileVerification(stdout)
                     ? reportStage.path : null;
             publish(coverage, report, output -> Files.copy(coverageStage.path, output),
                     reportStage == null ? null : output -> Files.copy(reportStage.path, output),
-                    stream, createOnly, SYSTEM_FILE_KEYS, verifyReport);
+                    stream, createOnly, SYSTEM_FILE_KEYS, verifyReport, check);
         }
     }
 
@@ -226,26 +244,30 @@ final class ConversionOutput {
         }
 
         void write(Path path, Writer writer) throws IOException {
-            write(path, writer, true);
+            write(path, writer, true, null);
         }
 
-        void write(Path path, Writer writer, boolean guardChanges) throws IOException {
+        void write(Path path, Writer writer, boolean guardChanges, DestinationCheck check) throws IOException {
             try (Temporary staged = Temporary.create(path)) {
                 writer.write(staged.path);
-                try (Destination output = Destination.open(path, false, SYSTEM_FILE_KEYS)) {
+                try (Destination output = Destination.open(path, false, SYSTEM_FILE_KEYS);
+                     ReportIdentity identity = ReportIdentity.retain(output)) {
+                    if (check != null && identity != null) {
+                        check.verify(path, identity.key);
+                    }
                     writeResult(path, output, stream -> Files.copy(staged.path, stream), null);
                     if (output != null) {
                         output.installNewOutput(null);
                         output.committed = true;
-                        if (output.fileKey != null) {
-                            outputIdentity = StandardOutputFile.regularFileKey(path);
+                        if (identity != null) {
+                            outputIdentity = identity.key;
                             if (guardChanges || File.separatorChar == '\\') {
                                 fileKey = output.fileKey;
                                 channel = output.channel;
                                 readable = output.access != Access.WRITE_ONLY;
                                 output.keepChannel = true;
                             } else {
-                                identityPin = PosixFiles.pinOnLinux(path);
+                                identityPin = identity.takePin();
                             }
                         }
                     }
@@ -271,6 +293,57 @@ final class ConversionOutput {
         return new IOException("Exclusion report and coverage output must use different files: " + path);
     }
 
+    private static final class ReportIdentity implements Closeable {
+        private final Object key;
+        private PosixFiles.Pin pin;
+
+        private ReportIdentity(Object key, PosixFiles.Pin pin) {
+            this.key = key;
+            this.pin = pin;
+        }
+
+        private static ReportIdentity retain(Destination output) throws IOException {
+            if (output == null || output.fileKey == null) {
+                return null;
+            }
+            // Use the reserved file before its public name can be replaced.
+            Path path = output.privateName == null ? output.path : output.privateName.path;
+            PosixFiles.Pin pin = PosixFiles.pinOnLinux(path);
+            Path descriptor = pin == null ? null : pin.descriptorPath();
+            Path source = descriptor == null ? path : descriptor;
+            try {
+                Object key = StandardOutputFile.regularFileKey(source);
+                var attributes = Files.readAttributes(source, BasicFileAttributes.class);
+                if (key == null || !output.fileKey.equals(SYSTEM_FILE_KEYS.read(source, attributes))) {
+                    throw new IOException("Report destination changed during publication: " + output.path);
+                }
+                return new ReportIdentity(key, pin);
+            } catch (IOException | RuntimeException error) {
+                if (pin != null) {
+                    try {
+                        pin.close();
+                    } catch (IOException cleanup) {
+                        error.addSuppressed(cleanup);
+                    }
+                }
+                throw error;
+            }
+        }
+
+        private Closeable takePin() {
+            PosixFiles.Pin retained = pin;
+            pin = null;
+            return retained;
+        }
+
+        @Override
+        public void close() throws IOException {
+            if (pin != null) {
+                pin.close();
+            }
+        }
+    }
+
     private static IOException unverifiableReport(Path path) {
         return new IOException("Cannot verify separate outputs for " + path
                 + " and an unknown stream. Use separate file paths or pass a ByteArrayOutputStream.");
@@ -283,15 +356,20 @@ final class ConversionOutput {
 
     static void publish(Path coverage, Path report, Content coverageContent, Content reportContent,
                         OutputStream stdout, FileKeys keys) throws IOException {
-        publish(coverage, report, coverageContent, reportContent, stdout, false, keys, null);
+        publish(coverage, report, coverageContent, reportContent, stdout, false, keys, null, null);
     }
 
     private static void publish(Path coverage, Path report, Content coverageContent, Content reportContent,
-                                OutputStream stdout, boolean createOnly, FileKeys keys, Path verifyReport) throws IOException {
+                                OutputStream stdout, boolean createOnly, FileKeys keys, Path verifyReport,
+                                DestinationCheck check) throws IOException {
         boolean newPair = coverage != null && report != null && Files.notExists(coverage, LinkOption.NOFOLLOW_LINKS)
                 && Files.notExists(report, LinkOption.NOFOLLOW_LINKS);
         try (Destination coverageFile = Destination.open(coverage, createOnly, keys, newPair, report);
              Destination reportFile = Destination.open(report, createOnly, keys, newPair, coverage)) {
+            if (check != null) {
+                checkExistingDestination(coverageFile, check);
+                checkExistingDestination(reportFile, check);
+            }
             if (coverageFile != null && reportFile != null
                     && coverageFile.access == Access.CREATED && reportFile.access == Access.CREATED
                     && (coverageFile.claim == null || reportFile.claim == null)) {
@@ -335,6 +413,16 @@ final class ConversionOutput {
             }
             if (reportFile != null) {
                 reportFile.committed = true;
+            }
+        }
+    }
+
+    private static void checkExistingDestination(Destination destination, DestinationCheck check) throws IOException {
+        if (destination != null && destination.access != Access.CREATED) {
+            try (ReportIdentity identity = ReportIdentity.retain(destination)) {
+                if (identity != null) {
+                    check.verify(destination.path, identity.key);
+                }
             }
         }
     }
@@ -438,6 +526,7 @@ final class ConversionOutput {
         // A publication can name up to two outputs in the same directory.
         private static final List<String> NAMESPACES =
                 List.of(".coverage41c-creating", ".coverage41c-creating-1", ".coverage41c-creating-2");
+        private static final long NAMESPACE_RELEASE_NANOS = TimeUnit.SECONDS.toNanos(2);
         private static final byte[] OWNERSHIP_STAMP =
                 "Coverage41C creation claims\n".getBytes(StandardCharsets.UTF_8);
         private final Path marker;
@@ -543,7 +632,6 @@ final class ConversionOutput {
                 }
                 try {
                     Files.createDirectory(marker);
-                    return new CreationClaim(marker);
                 } catch (FileAlreadyExistsException busy) {
                     throw inProgress(path, marker);
                 } catch (AccessDeniedException denied) {
@@ -560,6 +648,47 @@ final class ConversionOutput {
                     if (!(failure instanceof NoSuchFileException) || !Files.isDirectory(namespace.getParent())) {
                         throw failure;
                     }
+                    continue;
+                }
+                CreationClaim acquired = new CreationClaim(marker);
+                try {
+                    // The directory can have appeared after another process reserved this exact filename.
+                    if (findClaim(namespace, null) == null) {
+                        return acquired;
+                    }
+                } catch (RuntimeException failure) {
+                    try {
+                        acquired.close();
+                    } catch (IOException cleanup) {
+                        failure.addSuppressed(cleanup);
+                    }
+                    throw failure;
+                }
+                acquired.close();
+                return null;
+            }
+        }
+
+        private static boolean isNamespaceName(Path path) throws IOException {
+            for (String name : NAMESPACES) {
+                if (Utils.sameOutputFile(path, path.resolveSibling(name))) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // A namespace creator that sees our filename claim releases its marker before writing any report.
+        private static void awaitNamespaceRelease(Path path, long deadline) throws IOException {
+            while (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+                if (System.nanoTime() - deadline >= 0) {
+                    throw new FileAlreadyExistsException(path.toString());
+                }
+                try {
+                    Thread.sleep(10);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("Interrupted while waiting to publish " + path, interrupted);
                 }
             }
         }
@@ -915,7 +1044,12 @@ final class ConversionOutput {
 
         private void checkNewName() throws IOException {
             if (privateName != null && Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
-                throw new FileAlreadyExistsException(path.toString());
+                if (claim != null && Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS) && CreationClaim.isNamespaceName(path)) {
+                    CreationClaim.awaitNamespaceRelease(path, System.nanoTime() + CreationClaim.NAMESPACE_RELEASE_NANOS);
+                }
+                if (Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+                    throw new FileAlreadyExistsException(path.toString());
+                }
             }
         }
 
@@ -925,10 +1059,24 @@ final class ConversionOutput {
             }
             // A single-file publisher also cooperates with claims held for a pair of new reports.
             try (CreationClaim publication = claim == null ? CreationClaim.acquire(path, peer) : null) {
-                if (useHardLink) {
-                    linkOrMove();
-                } else {
-                    PosixFiles.moveNewFile(privateName.path, path);
+                long deadline = System.nanoTime() + CreationClaim.NAMESPACE_RELEASE_NANOS;
+                while (true) {
+                    try {
+                        if (useHardLink) {
+                            linkOrMove();
+                        } else {
+                            PosixFiles.moveNewFile(privateName.path, path);
+                        }
+                        return;
+                    } catch (FileAlreadyExistsException conflict) {
+                        if ((claim == null && publication == null)
+                                || System.nanoTime() - deadline >= 0 || !CreationClaim.isNamespaceName(path)
+                                || !Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)
+                                && !Files.notExists(path, LinkOption.NOFOLLOW_LINKS)) {
+                            throw conflict;
+                        }
+                        CreationClaim.awaitNamespaceRelease(path, deadline);
+                    }
                 }
             }
         }

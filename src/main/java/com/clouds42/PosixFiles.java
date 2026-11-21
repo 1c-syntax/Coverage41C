@@ -29,13 +29,14 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.FileSystemException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 
 final class PosixFiles {
     private PosixFiles() { }
 
-    static Closeable pinOnLinux(Path path) throws IOException {
+    static Pin pinOnLinux(Path path) throws IOException {
         if (!Platform.isLinux()) {
             return null;
         }
@@ -45,12 +46,35 @@ final class PosixFiles {
             throw new FileSystemException(path.toString(), null, "Cannot retain report identity (errno "
                     + Native.getLastError() + ")");
         }
-        return () -> {
+        return new Pin(descriptor, path);
+    }
+
+    static final class Pin implements Closeable {
+        private final int descriptor;
+        private final Path path;
+
+        private Pin(int descriptor, Path path) {
+            this.descriptor = descriptor;
+            this.path = path;
+        }
+
+        Path descriptorPath() {
+            String number = Integer.toString(descriptor);
+            Path proc = Path.of("/proc/self/fd", number);
+            if (Files.exists(proc)) {
+                return proc;
+            }
+            Path dev = Path.of("/dev/fd", number);
+            return Files.exists(dev) ? dev : null;
+        }
+
+        @Override
+        public void close() throws IOException {
             if (LibC.INSTANCE.close(descriptor) != 0) {
                 throw new FileSystemException(path.toString(), null, "Cannot release report identity (errno "
                         + Native.getLastError() + ")");
             }
-        };
+        }
     }
 
     static void moveNewFile(Path source, Path target) throws IOException {

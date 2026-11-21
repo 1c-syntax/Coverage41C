@@ -209,6 +209,36 @@ class ExternalDataProcessorTest {
 
     @Test
     @EnabledOnOs({OS.LINUX, OS.MAC})
+    void freshConversionRejectsChangedOutputNameBeforeWriting() throws Exception {
+        Path descriptor = tempDir.resolve("ExternalReport.xml");
+        writeConfiguratorExternalSource(descriptor, "ExternalReport");
+        Path forms = tempDir.resolve("ExternalReport/Forms");
+        Path prepared = tempDir.resolve("prepared.xml");
+        Path requested = tempDir.resolve("requested.xml");
+        var metadata = CommandLine.populateCommand(new MetadataOptions(), "-s", descriptor.toString());
+        var output = CommandLine.populateCommand(new OutputOptions(), "-o", requested.toString());
+        Map<URI, Map<BigDecimal, Integer>> coverage = new HashMap<>();
+        var permissions = Files.getPosixFilePermissions(forms);
+        try {
+            Files.setPosixFilePermissions(forms, PosixFilePermissions.fromString("---------"));
+            assumeTrue(!Files.isReadable(forms), "Forms permissions are ineffective for the current user");
+
+            var stdout = new ByteArrayOutputStream();
+            var stdoutOptions = CommandLine.populateCommand(new OutputOptions(), "-f", "GENERIC_COVERAGE");
+            try (var conversion = Utils.prepareConversion(metadata, "", "", coverage, null, prepared.toFile(), stdout)) {
+                assertThrows(IOException.class, () -> conversion.writeConversion(coverage, metadata, output));
+                assertThrows(IOException.class, () -> conversion.writeConversion(coverage, metadata, stdoutOptions));
+            }
+            assertEquals(0, stdout.size());
+            assertFalse(Files.exists(prepared));
+            assertFalse(Files.exists(requested));
+        } finally {
+            Files.setPosixFilePermissions(forms, permissions);
+        }
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
     void freshConversionCannotWriteThroughAParentRetargetedIntoTheExport() throws Exception {
         Path descriptor = tempDir.resolve("ExternalReport.xml");
         writeConfiguratorExternalSource(descriptor, "ExternalReport");

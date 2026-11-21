@@ -48,13 +48,17 @@ public final class IncludeUsers {
     }
 
     public static IncludeUsers load(File configPath, List<String> commandLine) throws IOException {
+        return load(configPath, commandLine, ExclusionRules::read);
+    }
+
+    static IncludeUsers load(File configPath, List<String> commandLine, ExclusionRules.ConfigReader reader) throws IOException {
         List<String> fromCommandLine = parseCommandLine(commandLine);
         Set<String> users = new LinkedHashSet<>();
         List<String> sources = new ArrayList<>();
         List<String> fileNames = new ArrayList<>();
         if (configPath != null) {
             for (File file : ExclusionRules.configFiles(configPath)) {
-                CoverageConfig config = ExclusionRules.read(file);
+                CoverageConfig config = reader.read(file);
                 if (config.getIncludeUsers() == null) {
                     continue;
                 }

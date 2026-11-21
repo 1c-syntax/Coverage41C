@@ -265,15 +265,16 @@ public class ConvertCommand implements Callable<Integer> {
         metadataOptions.validateSourceFilters(convertOptions.getExtensionName(), convertOptions.getExternalDataProcessorUrl());
         Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<>();
 
-        Utils.Metadata metadata;
         File rawInput = convertOptions.getInputRawXmlFile();
+        Element coverage;
         try (FileInputStream fileIS = new FileInputStream(rawInput)) {
             DocumentBuilder builder = Utils.newInputXmlBuilder();
-            Element coverage = validateRawReport(builder.parse(fileIS));
+            coverage = validateRawReport(builder.parse(fileIS));
+        }
 
-            metadata = Utils.prepareConversion(metadataOptions,
-                    convertOptions.getExtensionName(), convertOptions.getExternalDataProcessorUrl(),
-                    coverageData, rawInput, outputOptions.getOutputFile(), reportOutput);
+        try (Utils.Metadata metadata = Utils.prepareConversion(metadataOptions,
+                convertOptions.getExtensionName(), convertOptions.getExternalDataProcessorUrl(),
+                coverageData, rawInput, outputOptions.getOutputFile(), reportOutput)) {
             Map<String, URI> uriListByKey = metadata.getModuleUris();
             legacySources.clear();
             ambiguousLegacyKeys.clear();
@@ -338,8 +339,8 @@ public class ConvertCommand implements Callable<Integer> {
                     }
                 }
             }
+            metadata.writeConversion(coverageData, metadataOptions, outputOptions);
         }
-        metadata.writeConversion(coverageData, metadataOptions, outputOptions);
         logger.info("Convert done");
 
         return CommandLine.ExitCode.OK;

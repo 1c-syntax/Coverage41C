@@ -220,7 +220,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     private int collect() throws Exception {
         int result = CommandLine.ExitCode.OK;
         metadataOptions.validateSourceFilters(filterOptions.getExtensionName(), filterOptions.getExternalDataProcessorUrl());
-        IncludeUsers includeUsers = IncludeUsers.load(metadataOptions.getConfigFile(), includeUserNames);
+        IncludeUsers includeUsers = measurementReports.loadIncludeUsers(metadataOptions.getConfigFile(), includeUserNames);
         targets = new UserTargets(includeUsers, targetLookupClock);
         if (includeUsers.isActive()) {
             logger.info(includeUsers.describe());

@@ -21,12 +21,20 @@
  */
 package com.clouds42;
 
+import com.clouds42.CommandLineOptions.MetadataOptions;
+import com.clouds42.CommandLineOptions.OutputOptions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
+import picocli.CommandLine;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.io.UncheckedIOException;
+import java.math.BigDecimal;
+import java.net.URI;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.charset.StandardCharsets;
@@ -37,13 +45,17 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -867,6 +879,117 @@ class ConversionOutputTest {
             assertArrayEquals(original, Files.readAllBytes(archive));
             assertEquals("{}", Files.readString(report));
         }
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void collectorDoesNotPublishJsonOverTheRulesItLoaded() throws Exception {
+        assertInitialJsonProtectsLoadedRules(false);
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void directMeasurementMetadataCallProtectsLoadedRules() throws Exception {
+        assertInitialJsonProtectsLoadedRules(true);
+    }
+
+    private void assertInitialJsonProtectsLoadedRules(boolean usePublicMetadataMethod) throws Exception {
+        String config = "{\"exclude\":{\"objects\":[\"Catalog.Справочник1\"]}}";
+        Path rules = Files.writeString(directory.resolve("rules.json"), config);
+        Path archive = directory.resolve("archive.json");
+        Path report = Files.createSymbolicLink(directory.resolve("exclusions.json"), directory.resolve("safe.json"));
+        var options = CommandLine.populateCommand(new MetadataOptions(), "-s", "src/test/resources/configuration",
+                "--config", rules.toString(), "--exclusion-report", report.toString());
+        Supplier<OutputStream> stdout = () -> {
+            try {
+                Files.move(rules, archive);
+                Files.writeString(rules, config);
+                Files.delete(report);
+                Files.createSymbolicLink(report, archive);
+            } catch (IOException failure) {
+                throw new UncheckedIOException(failure);
+            }
+            return new ByteArrayOutputStream();
+        };
+        var coverage = new HashMap<URI, Map<BigDecimal, Integer>>();
+        if (usePublicMetadataMethod) {
+            assertThrows(IOException.class, () -> Utils.readMeasurementMetadata(options, coverage, false, null, stdout));
+        } else {
+            try (var collector = new Utils.MeasurementReports()) {
+                assertThrows(IOException.class, () -> collector.readMetadata(options, "", "", coverage, false, null, stdout));
+            }
+        }
+        assertEquals(config, Files.readString(archive));
+        assertEquals(config, Files.readString(rules));
+    }
+
+    @Test
+    void collectorProtectsRulesReadForTheUserFilter() throws Exception {
+        String config = "{\"includeUsers\":[\"test-user\"]}";
+        Path rules = Files.writeString(directory.resolve("rules.json"), config);
+        Path archive = directory.resolve("archive.json");
+        Path report = directory.resolve("exclusions.json");
+        var options = CommandLine.populateCommand(new MetadataOptions(), "-s", "src/test/resources/configuration",
+                "--config", rules.toString(), "--exclusion-report", report.toString());
+        try (var collector = new Utils.MeasurementReports()) {
+            assertTrue(collector.loadIncludeUsers(rules.toFile(), List.of()).isActive());
+            Files.move(rules, archive);
+            Files.writeString(rules, config);
+            Files.createLink(report, archive);
+
+            var coverage = new HashMap<URI, Map<BigDecimal, Integer>>();
+            assertThrows(IOException.class, () -> collector.readMetadata(options, "", "", coverage, true,
+                    directory.resolve("coverage.xml").toFile(), () -> null));
+        }
+        assertEquals(config, Files.readString(archive));
+        assertEquals(config, Files.readString(rules));
+    }
+
+    @Test
+    void conversionDoesNotPublishCoverageOverTheRulesItLoaded() throws Exception {
+        assertConversionProtectsLoadedRules(false);
+    }
+
+    @Test
+    void conversionProtectsLoadedRulesWhenOutputChangesDuringStaging() throws Exception {
+        assertConversionProtectsLoadedRules(true);
+    }
+
+    private void assertConversionProtectsLoadedRules(boolean retargetWhilePreparingXml) throws Exception {
+        String config = "{\"exclude\":{\"objects\":[\"Catalog.Справочник1\"]}}";
+        Path rules = Files.writeString(directory.resolve("rules.json"), config);
+        Path archive = directory.resolve("archive.json");
+        Path report = directory.resolve("exclusions.json");
+        Path coveragePath = directory.resolve("coverage.xml");
+        var metadata = CommandLine.populateCommand(new MetadataOptions(), "-s", "src/test/resources/configuration",
+                "--config", rules.toString(), "--exclusion-report", report.toString());
+        var output = CommandLine.populateCommand(new OutputOptions(), "-o", coveragePath.toString());
+        var coverage = new HashMap<URI, Map<BigDecimal, Integer>>();
+        try (var conversion = Utils.prepareConversion(metadata, "", "", coverage, null, coveragePath.toFile())) {
+            Files.move(rules, archive);
+            Files.writeString(rules, config);
+            if (retargetWhilePreparingXml) {
+                var stagingCoverage = new HashMap<URI, Map<BigDecimal, Integer>>(coverage) {
+                    @Override
+                    public void forEach(BiConsumer<? super URI, ? super Map<BigDecimal, Integer>> action) {
+                        try {
+                            Files.createLink(coveragePath, archive);
+                        } catch (IOException failure) {
+                            throw new UncheckedIOException(failure);
+                        }
+                        super.forEach(action);
+                    }
+                };
+                assertThrows(IOException.class, () -> conversion.writeConversion(stagingCoverage, metadata, output));
+            } else {
+                Files.createLink(coveragePath, archive);
+                assertThrows(IOException.class, () -> conversion.writeConversion(coverage, metadata, output));
+            }
+        }
+
+        assertEquals(config, Files.readString(archive));
+        assertEquals(config, Files.readString(rules));
+        assertFalse(Files.exists(report));
     }
 
     @Test
