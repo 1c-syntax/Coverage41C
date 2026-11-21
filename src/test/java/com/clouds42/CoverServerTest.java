@@ -90,6 +90,26 @@ class CoverServerTest {
 
     @Test
     @EnabledOnOs({OS.LINUX, OS.MAC})
+    void existingServerSubclassHandlesCleanAndStop() throws Exception {
+        String alias = "socket-test-" + UUID.randomUUID();
+        Path path = socketPath(alias);
+        var hits = new HashMap<>(Map.of(BigDecimal.ONE, 5));
+        var server = new Server(Map.of(tempDir.resolve("Module.bsl").toUri(), hits),
+                tempDir.resolve("coverage.xml"));
+        server.connectionOptions = CommandLine.populateCommand(new ConnectionOptions(), "-i", alias);
+        try {
+            server.start();
+            assertEquals(CommandLine.ExitCode.OK, Coverage41C.getCommandLine().execute("clean", "-i", alias));
+            assertEquals(Map.of(BigDecimal.ONE, 0), hits);
+            assertEquals(CommandLine.ExitCode.OK, Coverage41C.getCommandLine().execute("stop", "-i", alias));
+        } finally {
+            server.stop();
+            Files.deleteIfExists(lockPath(path));
+        }
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
     void closingTheReturnedSocketReleasesTheListenerAndAllowsRestart() throws Exception {
         String alias = "socket-test-" + UUID.randomUUID();
         Path path = socketPath(alias);
@@ -382,16 +402,13 @@ class CoverServerTest {
         }
 
         @Override
-        protected void cleanCoverageData() {
-        }
-
-        @Override
         protected boolean getSystemStarted() {
             return true;
         }
 
         @Override
-        protected void gracefulShutdown(PrintWriter out) {
+        protected void gracefulShutdown(PrintWriter out) throws IOException {
+            out.println(PipeMessages.OK_RESULT);
         }
 
         @Override

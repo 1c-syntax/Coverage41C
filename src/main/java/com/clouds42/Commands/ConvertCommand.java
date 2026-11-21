@@ -85,9 +85,6 @@ public class ConvertCommand implements Callable<Integer> {
     @Mixin
     private LoggingOptions loggingOptions;
 
-    @Mixin
-    private FilterOptions filterOptions;
-
     private final Map<String, URI> legacySources = new HashMap<>();
     private final Set<String> ambiguousLegacyKeys = new HashSet<>();
 
@@ -107,12 +104,12 @@ public class ConvertCommand implements Callable<Integer> {
     }
 
     private Map<String, String> selectedSourceUrls() throws IOException {
-        String url = filterOptions.getExternalDataProcessorUrl();
+        String url = convertOptions.getExternalDataProcessorUrl();
         if (!metadataOptions.hasMultipleSources()) {
-            return Map.of(filterOptions.getExtensionName(), url);
+            return Map.of(convertOptions.getExtensionName(), url);
         }
         Map<String, String> selected = new HashMap<>();
-        metadataOptions.getSourceDirectories(filterOptions.getExtensionName()).forEach((extension, path) ->
+        metadataOptions.getSourceDirectories(convertOptions.getExtensionName()).forEach((extension, path) ->
                 selected.put(extension, Files.isRegularFile(path) ? url : ""));
         return selected;
     }
@@ -129,7 +126,7 @@ public class ConvertCommand implements Callable<Integer> {
         }
 
         boolean multipleSources = metadataOptions.hasMultipleSources();
-        String selectedExtension = filterOptions.getExtensionName();
+        String selectedExtension = convertOptions.getExtensionName();
         if (!includesExtensionAttributes && multipleSources && !metadataOptions.usesNamedSources()) {
             // Historical RAW files without extension attributes belong to the tree passed via -s.
             extension = selectedExtension;
@@ -138,7 +135,7 @@ public class ConvertCommand implements Callable<Integer> {
             return key;
         }
 
-        String selectedUrl = filterOptions.getExternalDataProcessorUrl();
+        String selectedUrl = convertOptions.getExternalDataProcessorUrl();
         if (!selectedUrl.isEmpty() && extension.equals(selectedExtension)) {
             // Legacy RAW omitted processor URLs. Recover only an exact key of the selected descriptor.
             String selectedKey = SourceKey.qualify(key, extension, selectedUrl);
@@ -265,7 +262,7 @@ public class ConvertCommand implements Callable<Integer> {
     @Override
     public Integer call() throws Exception {
 
-        metadataOptions.validateSourceFilters(filterOptions.getExtensionName(), filterOptions.getExternalDataProcessorUrl());
+        metadataOptions.validateSourceFilters(convertOptions.getExtensionName(), convertOptions.getExternalDataProcessorUrl());
         Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<>();
 
         Utils.Metadata metadata;
@@ -275,7 +272,7 @@ public class ConvertCommand implements Callable<Integer> {
             Element coverage = validateRawReport(builder.parse(fileIS));
 
             metadata = Utils.prepareConversion(metadataOptions,
-                    filterOptions.getExtensionName(), filterOptions.getExternalDataProcessorUrl(),
+                    convertOptions.getExtensionName(), convertOptions.getExternalDataProcessorUrl(),
                     coverageData, rawInput, outputOptions.getOutputFile(), reportOutput);
             Map<String, URI> uriListByKey = metadata.getModuleUris();
             legacySources.clear();
@@ -293,7 +290,7 @@ public class ConvertCommand implements Callable<Integer> {
             boolean includesExtensions = includesExtensionAttributes(fileNodeList);
             boolean sourceIdentity = "true".equals(coverage.getAttribute("sourceIdentity"));
             boolean singleProcessorSelected = !metadataOptions.hasMultipleSources()
-                    && !filterOptions.getExternalDataProcessorUrl().isEmpty()
+                    && !convertOptions.getExternalDataProcessorUrl().isEmpty()
                     && Files.isRegularFile(Paths.get(metadataOptions.getProjectDirName())
                     .resolve(metadataOptions.getSrcDirName()));
             Map<String, String> selectedUrls = selectedSourceUrls();

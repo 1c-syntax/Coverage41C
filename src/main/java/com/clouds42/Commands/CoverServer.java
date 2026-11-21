@@ -497,7 +497,7 @@ public abstract class CoverServer {
         }
     }
 
-    private void executeCommand(String command, PrintWriter out) throws InterruptedException {
+    private void executeCommand(String command, PrintWriter out) throws IOException, InterruptedException {
         if (!getSystemStarted() && (PipeMessages.DUMP_COMMAND.equals(command)
                 || PipeMessages.CLEAN_COMMAND.equals(command) || PipeMessages.EXIT_COMMAND.equals(command))) {
             out.println(PipeMessages.FAIL_RESULT);
@@ -607,11 +607,16 @@ public abstract class CoverServer {
         }
     }
 
-    protected abstract void cleanCoverageData();
+    protected void cleanCoverageData() {
+        Map<URI, Map<BigDecimal, Integer>> coverageData = getCoverageData();
+        synchronized (coverageData) {
+            coverageData.values().forEach(lines -> lines.replaceAll((line, hits) -> 0));
+        }
+    }
 
     protected abstract boolean getSystemStarted();
 
-    protected abstract void gracefulShutdown(PrintWriter out);
+    protected abstract void gracefulShutdown(PrintWriter out) throws IOException;
 
     protected abstract MetadataOptions getMetadataOptions();
 

@@ -77,27 +77,34 @@ public class MetadataOptions {
     }
 
     public boolean hasExtensionSources(String extensionName) {
-        return extensionSources.stream().anyMatch(source -> source.getName().equals(extensionName));
+        return getExtensionSources().stream().anyMatch(source -> source.getName().equals(extensionName));
     }
 
     public boolean hasMultipleSources() {
-        return usesNamedSources() || !extensionSources.isEmpty();
+        return usesNamedSources() || !getExtensionSources().isEmpty();
     }
 
     public void validateSourceFilters(String extension, String url) {
         if (usesNamedSources() && (!extension.isEmpty() || !url.isEmpty())) {
             throw new IllegalArgumentException("--source cannot be combined with -e or -x");
         }
-        if (!extensionSources.isEmpty()) {
-            if (usesNamedSources()) {
-                throw new IllegalArgumentException("--source cannot be combined with --extension");
-            }
+        if (usesNamedSources() && !getExtensionSources().isEmpty()) {
+            throw new IllegalArgumentException("--source cannot be combined with --extension");
+        }
+        validate(extension);
+    }
+
+    public void validate(String extension) {
+        List<ExtensionSource> sources = getExtensionSources();
+        if (!sources.isEmpty()) {
             if (projectDirName.isEmpty()) {
                 throw new ParameterException(spec.commandLine(), "--extension requires --projectDir");
             }
             Set<String> names = new HashSet<>();
-            names.add(extension);
-            for (ExtensionSource source : extensionSources) {
+            if (!extension.isEmpty()) {
+                names.add(extension);
+            }
+            for (ExtensionSource source : sources) {
                 if (!names.add(source.getName())) {
                     throw new ParameterException(spec.commandLine(), "Sources of extension '" + source.getName()
                             + "' are specified more than once");
@@ -111,10 +118,10 @@ public class MetadataOptions {
             Path project = Path.of(getProjectDirName());
             Map<String, Path> directories = new LinkedHashMap<>();
             directories.put(mainExtension, project.resolve(getSrcDirName()));
-            for (ExtensionSource extension : extensionSources) {
+            for (ExtensionSource extension : getExtensionSources()) {
                 directories.put(extension.getName(), project.resolve(extension.getPath()));
             }
-            if (!extensionSources.isEmpty()) {
+            if (!getExtensionSources().isEmpty()) {
                 List<Path> physicalSources = new ArrayList<>();
                 for (Map.Entry<String, Path> source : directories.entrySet()) {
                     Path path = source.getValue();
@@ -234,6 +241,10 @@ public class MetadataOptions {
 
     public void setRemoveSupport(SupportVariant removeSupport) {
         this.removeSupport = removeSupport;
+    }
+
+    public List<ExtensionSource> getExtensionSources() {
+        return extensionSources == null ? List.of() : extensionSources;
     }
 
     public void setExtensionSources(List<ExtensionSource> extensionSources) {

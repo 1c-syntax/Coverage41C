@@ -28,7 +28,7 @@ import picocli.CommandLine.Option;
 import java.io.File;
 import java.lang.invoke.MethodHandles;
 
-public class ConvertOptions {
+public class ConvertOptions extends FilterOptions {
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -37,5 +37,9 @@ public class ConvertOptions {
 
     public File getInputRawXmlFile() {
         return inputRawXmlFile;
+    }
+
+    public void setInputRawXmlFile(File inputRawXmlFile) {
+        this.inputRawXmlFile = inputRawXmlFile;
     }
 }

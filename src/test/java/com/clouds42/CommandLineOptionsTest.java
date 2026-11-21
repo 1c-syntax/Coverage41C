@@ -23,12 +23,16 @@ package com.clouds42;
 
 import com._1c.g5.v8.dt.debug.model.base.data.DebugTargetType;
 import com.clouds42.CommandLineOptions.ConnectionOptions;
+import com.clouds42.CommandLineOptions.ConvertOptions;
 import com.clouds42.CommandLineOptions.DebuggerOptions;
+import com.clouds42.CommandLineOptions.ExtensionSource;
+import com.clouds42.CommandLineOptions.MetadataOptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
 
+import java.io.File;
 import java.lang.module.ModuleDescriptor;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -85,6 +89,29 @@ class CommandLineOptionsTest {
     @Test
     void pingTimeoutDefaultsToOneSecond() {
         assertEquals(1000, debuggerOptions().getPingTimeout());
+    }
+
+    @Test
+    void convertOptionsCanBeConfiguredThroughTheExistingJavaApi() {
+        ConvertOptions options = new ConvertOptions();
+        File raw = new File("raw.xml");
+
+        options.setInputRawXmlFile(raw);
+        options.setExtensionName("Demo");
+
+        assertEquals(raw, options.getInputRawXmlFile());
+        assertEquals("Demo", options.getExtensionName());
+    }
+
+    @Test
+    void metadataOptionsCanBeConfiguredThroughTheExistingJavaApi() {
+        MetadataOptions options = new MetadataOptions();
+        var sources = List.of(new ExtensionSource("Demo", "src/demo"));
+        options.setProjectDirName(".");
+        options.setExtensionSources(sources);
+
+        options.validate("");
+        assertEquals(sources, options.getExtensionSources());
     }
 
     @Test
