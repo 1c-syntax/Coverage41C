@@ -116,18 +116,19 @@ class CoverServerTest {
 
     @Test
     @EnabledOnOs({OS.LINUX, OS.MAC})
-    void unixLockStaysReadableUnderRestrictiveUmask() throws Exception {
+    void unixLockAllowsOnlyOwnerAccessEvenWithPermissiveUmask() throws Exception {
         String alias = "socket-test-" + UUID.randomUUID();
         Path socket = socketPath(alias);
         Path lock = lockPath(socket);
-        Process child = new ProcessBuilder("/bin/sh", "-c", "umask 077 && exec \"$@\"", "socket-test",
+        Process child = new ProcessBuilder("/bin/sh", "-c", "umask 000 && exec \"$@\"", "socket-test",
                 Path.of(System.getProperty("java.home"), "bin", "java").toString(), "-cp",
                 System.getProperty("coverage41c.testClasspath", System.getProperty("java.class.path")),
                 SocketProbe.class.getName(), alias).redirectErrorStream(true).start();
         try {
             assertTrue(child.waitFor(20, TimeUnit.SECONDS));
             assertEquals(0, child.exitValue(), new String(child.getInputStream().readAllBytes()));
-            assertTrue(Files.getPosixFilePermissions(lock).contains(PosixFilePermission.OTHERS_READ));
+            assertEquals(java.util.Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE),
+                    Files.getPosixFilePermissions(lock));
             assertFalse(Files.exists(socket));
         } finally {
             child.destroyForcibly();

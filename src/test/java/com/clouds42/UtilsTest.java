@@ -28,12 +28,16 @@ import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
 import javax.xml.parsers.DocumentBuilderFactory;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.OutputStream;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -165,6 +169,32 @@ class UtilsTest {
         } finally {
             System.setErr(original);
         }
+    }
+
+    @Test
+    void statisticsWritesDoNotAcquireTheCallersStreamMonitor() throws Exception {
+        var bytes = new ByteArrayOutputStream();
+        OutputStream output = new OutputStream() {
+            @Override
+            public void write(int value) {
+                bytes.write(value);
+            }
+        };
+        MetadataOptions metadata = new MetadataOptions();
+        metadata.setSrcDirName("");
+        metadata.setProjectDirName(new File(".").getAbsolutePath());
+
+        try (var worker = Executors.newSingleThreadExecutor()) {
+            synchronized (output) {
+                worker.submit(() -> {
+                    Utils.writeCoverageStats(Map.of(), output);
+                    Utils.writeCoverageStats(Map.of(), metadata, output);
+                    return null;
+                }).get(5, TimeUnit.SECONDS);
+            }
+        }
+        assertTrue(bytes.toString().contains("Covered lines"));
+        assertTrue(bytes.toString().contains("Total"));
     }
 
     @Test

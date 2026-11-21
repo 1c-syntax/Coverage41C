@@ -255,10 +255,9 @@ public abstract class CoverServer {
             if (Files.exists(lockPath, LinkOption.NOFOLLOW_LINKS)) {
                 return;
             }
-            Path temporary = Files.createTempFile(lockPath.getParent(), ".coverage41c-", ".lock");
+            Path temporary = Files.createTempFile(lockPath.getParent(), ".coverage41c-", ".lock",
+                    PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
             try {
-                // Publish the empty marker only after applying read permissions independent of umask.
-                Files.setPosixFilePermissions(temporary, PosixFilePermissions.fromString("rw-r--r--"));
                 Files.createLink(lockPath, temporary);
             } catch (FileAlreadyExistsException ignored) {
                 // Another process published its marker first. Both processes will lock that inode.

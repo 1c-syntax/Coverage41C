@@ -35,6 +35,9 @@ import com.github._1c_syntax.bsl.types.MDOType;
 import com.github._1c_syntax.bsl.types.MdoReference;
 import com.github._1c_syntax.bsl.types.ModuleType;
 import com.github._1c_syntax.bsl.support.SupportVariant;
+import com.google.common.base.Equivalence;
+import com.google.common.collect.Interner;
+import com.google.common.collect.Interners;
 import de.vandermeer.asciitable.AsciiTable;
 import de.vandermeer.asciitable.CWC_LongestLine;
 import org.slf4j.Logger;
@@ -82,6 +85,8 @@ import java.util.regex.Pattern;
 public class Utils {
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+
+    private static final Interner<Equivalence.Wrapper<OutputStream>> STATISTICS_OUTPUT_LOCKS = Interners.newWeakInterner();
 
     private static final String EDT_METADATA_NS = "http://g5.1c.ru/v8/dt/metadata/mdclass";
     private static final String EDT_FORM_NS = "http://g5.1c.ru/v8/dt/form";
@@ -1919,14 +1924,20 @@ public class Utils {
         try (PrintStream rendered = new PrintStream(report)) {
             printCoverageStats(coverageData, rendered);
         }
-        synchronized (output) {
-            output.write(report.toByteArray());
-            output.flush();
-        }
+        writeStatisticsReport(report, output);
     }
 
     public static void printCoverageStats(Map<URI, Map<BigDecimal, Integer>> coverageData, PrintStream output) {
         writeCoverageStats(coverageData, output::println);
+    }
+
+    private static void writeStatisticsReport(ByteArrayOutputStream report, OutputStream output) throws IOException {
+        // Keep each report and flush together for the same sink, using a lock private to Coverage41C.
+        var lock = STATISTICS_OUTPUT_LOCKS.intern(Equivalence.identity().wrap(output));
+        synchronized (lock) {
+            output.write(report.toByteArray());
+            output.flush();
+        }
     }
 
     private static void writeCoverageStats(Map<URI, Map<BigDecimal, Integer>> coverageData, Consumer<String> output) {
@@ -2148,10 +2159,7 @@ public class Utils {
         try (PrintStream rendered = new PrintStream(report, false, System.err.charset())) {
             printCoverageStats(coverageData, metadataOptions, rendered);
         }
-        synchronized (output) {
-            output.write(report.toByteArray());
-            output.flush();
-        }
+        writeStatisticsReport(report, output);
     }
 
     public static void printCoverageStats(Map<URI, Map<BigDecimal, Integer>> coverageData,
