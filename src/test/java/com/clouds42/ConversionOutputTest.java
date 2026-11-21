@@ -50,6 +50,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -658,16 +659,15 @@ class ConversionOutputTest {
                 assertNotNull(lease);
                 leases.add(lease);
             }
-            var started = new java.util.concurrent.CountDownLatch(1);
+            var publisher = new CompletableFuture<Thread>();
             Path coverage = directory.resolve("coverage.xml");
             Path report = directory.resolve("exclusions.json");
             var publication = workers.submit(() -> {
-                started.countDown();
+                publisher.complete(Thread.currentThread());
                 ConversionOutput.publish(coverage, report, xml -> xml.write('x'), json -> json.write('j'), null);
                 return null;
             });
-            assertTrue(started.await(15, TimeUnit.SECONDS));
-            assertThrows(java.util.concurrent.TimeoutException.class, () -> publication.get(200, TimeUnit.MILLISECONDS));
+            awaitCreationClaimWait(publisher.get(15, TimeUnit.SECONDS), publication);
             Path unrelated = Files.writeString(Files.createDirectory(directory.resolve("unrelated"))
                     .resolve("coverage.xml"), "old report");
             var independent = workers.submit(() -> {
@@ -676,6 +676,7 @@ class ConversionOutputTest {
             });
             independent.get(5, TimeUnit.SECONDS);
             assertEquals("y", Files.readString(unrelated));
+            assertFalse(publication.isDone(), "The pair must still be waiting for a service directory");
 
             leases.remove(0).close();
             publication.get(15, TimeUnit.SECONDS);
@@ -687,6 +688,23 @@ class ConversionOutputTest {
             }
             workers.shutdownNow();
         }
+    }
+
+    private static void awaitCreationClaimWait(Thread publisher, Future<?> publication) throws Exception {
+        String creationClaim = ConversionOutput.class.getName() + "$CreationClaim";
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+        while (System.nanoTime() - deadline < 0) {
+            if (Stream.of(publisher.getStackTrace()).anyMatch(frame ->
+                    frame.getClassName().equals(creationClaim) && frame.getMethodName().equals("waitForCreator"))) {
+                return;
+            }
+            if (publication.isDone()) {
+                publication.get();
+                fail("Publication finished before waiting for a service directory");
+            }
+            TimeUnit.MILLISECONDS.sleep(10);
+        }
+        fail("Timed out waiting for publication to reach the service directory wait");
     }
 
     public static final class SuspendedNamespaceCreator {
