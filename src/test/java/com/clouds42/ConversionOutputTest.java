@@ -64,6 +64,83 @@ class ConversionOutputTest {
     @TempDir Path directory;
 
     @Test
+    void measurementOutputKeepsOriginalInputsWhenItsNameBecomesAHardLink() throws IOException {
+        Path report = Files.writeString(directory.resolve("coverage.xml"), "existing report");
+        Path alternate = directory.resolve("old-coverage.xml");
+        Path input = Files.writeString(directory.resolve("rules.json"), "rules");
+        Object checkedIdentity = StandardOutputFile.regularFileKey(report);
+        Files.move(report, alternate);
+        Files.createLink(report, input);
+
+        assertThrows(IOException.class, () -> ConversionOutput.writeMeasurementOutput(report, checkedIdentity, false,
+                output -> output.write('x')));
+
+        assertEquals("rules", Files.readString(input));
+        assertEquals("existing report", Files.readString(alternate));
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void measurementOutputRejectsASymlinkInsertedAfterValidation() throws IOException {
+        Path report = directory.resolve("coverage.xml");
+        Path input = Files.writeString(directory.resolve("rules.json"), "rules");
+        Object checkedIdentity = StandardOutputFile.regularFileKey(report);
+        Files.createSymbolicLink(report, input);
+
+        assertThrows(IOException.class, () -> ConversionOutput.writeMeasurementOutput(report, checkedIdentity, true,
+                output -> output.write('x')));
+
+        assertTrue(Files.isSymbolicLink(report));
+        assertEquals("rules", Files.readString(input));
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void measurementOutputRejectsLateSymlinkEvenIfItPointsToTheExpectedFile() throws IOException {
+        Path report = Files.writeString(directory.resolve("coverage.xml"), "existing report");
+        Object checkedIdentity = StandardOutputFile.regularFileKey(report);
+        Path original = Files.move(report, directory.resolve("original.xml"));
+        Files.createSymbolicLink(report, original);
+
+        assertThrows(IOException.class, () -> ConversionOutput.writeMeasurementOutput(report, checkedIdentity, false,
+                output -> output.write('x')));
+
+        assertTrue(Files.isSymbolicLink(report));
+        assertEquals("existing report", Files.readString(original));
+    }
+
+    @Test
+    void measurementOutputPreservesAnExistingHardLinkAndTruncatesTheOldBytes() throws IOException {
+        Path report = Files.writeString(directory.resolve("coverage.xml"), "existing report");
+        Path peer = Files.createLink(directory.resolve("linked-report.xml"), report);
+        Object identity = StandardOutputFile.regularFileKey(report);
+
+        ConversionOutput.writeMeasurementOutput(report, identity, false, output -> output.write('x'));
+
+        assertTrue(Files.isSameFile(report, peer));
+        assertEquals("x", Files.readString(peer));
+    }
+
+    @Test
+    void measurementOutputCanUpdateAnExistingWriteOnlyReport() throws IOException {
+        org.junit.jupiter.api.Assumptions.assumeTrue(directory.getFileSystem().supportedFileAttributeViews().contains("posix"));
+        Path report = Files.writeString(directory.resolve("coverage.xml"), "existing report");
+        var permissions = Files.getPosixFilePermissions(report);
+        var directoryPermissions = Files.getPosixFilePermissions(directory);
+        try {
+            Files.setPosixFilePermissions(report, PosixFilePermissions.fromString("-w-------"));
+            Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("r-x------"));
+            org.junit.jupiter.api.Assumptions.assumeFalse(Files.isReadable(report) || Files.isWritable(directory));
+            ConversionOutput.writeMeasurementOutput(report, StandardOutputFile.regularFileKey(report), false,
+                    output -> output.write('x'));
+        } finally {
+            Files.setPosixFilePermissions(directory, directoryPermissions);
+            Files.setPosixFilePermissions(report, permissions);
+        }
+        assertEquals("x", Files.readString(report));
+    }
+
+    @Test
     void movingThePublishedReportDoesNotExposeEitherInodeToAnEmbeddedDump() throws Exception {
         Path named = directory.resolve("report.json");
         Path moved = directory.resolve("moved.json");
@@ -493,6 +570,106 @@ class ConversionOutputTest {
         assertEquals("a", Files.readString(first));
         assertEquals("b", Files.readString(second));
         assertDirectorySize(4);
+    }
+
+    @Test
+    void suspendedNamespaceCreatorCannotSplitAReservedPair() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(PosixFiles.supportsNamespaceLeases(directory));
+        Path coordination = Files.createDirectory(directory.resolve("coordination"));
+        Path outputs = Files.createDirectory(directory.resolve("outputs"));
+        var original = Files.getPosixFilePermissions(outputs);
+        Files.setPosixFilePermissions(outputs, PosixFilePermissions.fromString("-wx------"));
+        Path namespace = outputs.resolve(".coverage41c-creating");
+        Path report = outputs.resolve(".coverage41c-creating-1");
+        Path expose = coordination.resolve("expose");
+        Path ready = coordination.resolve("ready");
+        Path release = coordination.resolve("release");
+        String classpath = System.getProperty("coverage41c.testClasspath", System.getProperty("java.class.path"));
+        Path executable = Path.of(System.getProperty("java.home"), "bin", "java");
+        Process creator = new ProcessBuilder(executable.toString(), "-cp", classpath, SuspendedNamespaceCreator.class.getName(),
+                namespace.toString(), coordination.toString()).redirectErrorStream(true).start();
+        var workers = java.util.concurrent.Executors.newSingleThreadExecutor();
+        try {
+            var publication = workers.submit(() -> {
+                ConversionOutput.publish(namespace, report, xml -> {
+                    Files.createFile(expose);
+                    awaitMarkerSignal(ready);
+                    xml.write('x');
+                }, json -> json.write('j'), null);
+                return null;
+            });
+            awaitMarkerSignal(ready);
+            assertThrows(java.util.concurrent.TimeoutException.class, () -> publication.get(2500, TimeUnit.MILLISECONDS));
+            Files.createFile(release);
+            publication.get(15, TimeUnit.SECONDS);
+            assertEquals(0, creator.onExit().orTimeout(15, TimeUnit.SECONDS).join().exitValue(),
+                    new String(creator.getInputStream().readAllBytes(), StandardCharsets.UTF_8));
+            assertEquals("x", Files.readString(namespace));
+            assertEquals("j", Files.readString(report));
+        } finally {
+            creator.destroyForcibly();
+            assertTrue(creator.waitFor(15, TimeUnit.SECONDS));
+            workers.shutdownNow();
+            Files.setPosixFilePermissions(outputs, original);
+        }
+    }
+
+    @Test
+    void ordinaryPairCanReserveNamesWhenThreeInitialCreatorsAreBusy() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(PosixFiles.supportsNamespaceLeases(directory));
+        var leases = new java.util.ArrayList<PosixFiles.Pin>();
+        var workers = java.util.concurrent.Executors.newSingleThreadExecutor();
+        try {
+            for (String name : List.of(".coverage41c-creating", ".coverage41c-creating-1", ".coverage41c-creating-2")) {
+                Path namespace = Files.createDirectory(directory.resolve(name));
+                Path stamp = Files.writeString(namespace.resolve(name), "Coverage41C creation claims\n");
+                var lease = PosixFiles.tryNamespaceStampLock(stamp, true);
+                assertNotNull(lease);
+                leases.add(lease);
+            }
+            var started = new java.util.concurrent.CountDownLatch(1);
+            Path coverage = directory.resolve("coverage.xml");
+            Path report = directory.resolve("exclusions.json");
+            var publication = workers.submit(() -> {
+                started.countDown();
+                ConversionOutput.publish(coverage, report, xml -> xml.write('x'), json -> json.write('j'), null);
+                return null;
+            });
+            assertTrue(started.await(15, TimeUnit.SECONDS));
+            assertThrows(java.util.concurrent.TimeoutException.class, () -> publication.get(200, TimeUnit.MILLISECONDS));
+            leases.remove(0).close();
+            publication.get(15, TimeUnit.SECONDS);
+            assertEquals("x", Files.readString(coverage));
+            assertEquals("j", Files.readString(report));
+        } finally {
+            for (var lease : leases) {
+                lease.close();
+            }
+            workers.shutdownNow();
+        }
+    }
+
+    public static final class SuspendedNamespaceCreator {
+        public static void main(String[] args) throws IOException {
+            Path namespace = Path.of(args[0]);
+            Path signals = Path.of(args[1]);
+            Path staged = Files.createDirectory(signals.resolve("staged"));
+            Path stamp = Files.writeString(staged.resolve(namespace.getFileName()), "Coverage41C creation claims\n");
+            try (var lease = PosixFiles.tryNamespaceStampLock(stamp, true)) {
+                if (lease == null) {
+                    throw new IOException("Could not reserve private namespace");
+                }
+                awaitMarkerSignal(signals.resolve("expose"));
+                PosixFiles.moveNewFile(staged, namespace);
+                Files.createFile(signals.resolve("ready"));
+                awaitMarkerSignal(signals.resolve("release"));
+                Files.createDirectory(staged);
+                Files.move(namespace, staged, java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                Files.delete(stamp);
+                Files.delete(staged);
+            }
+        }
     }
 
     @Test
@@ -990,6 +1167,43 @@ class ConversionOutputTest {
         assertEquals(config, Files.readString(archive));
         assertEquals(config, Files.readString(rules));
         assertFalse(Files.exists(report));
+    }
+
+    @Test
+    void conversionProtectsRawAndExportFilesWhenAnOutputAppearsDuringSerialization() throws Exception {
+        Path project = TestUtils.copyConfiguration(directory).resolve("configuration");
+        Path sourceModule = project.resolve("CommonModules/ПростойОбщийМодуль/Ext/Module.bsl");
+        Path raw = Files.writeString(directory.resolve("input.xml"), "<coverage version=\"1\"/>");
+        for (Path input : List.of(raw, sourceModule)) {
+            byte[] original = Files.readAllBytes(input);
+            Path xml = directory.resolve("coverage.xml");
+            Path json = directory.resolve("exclusions.json");
+            Path changed = input.equals(raw) ? xml : json;
+            var metadata = CommandLine.populateCommand(new MetadataOptions(), "-s", project.toString(),
+                    "--exclusion-report", json.toString());
+            var output = CommandLine.populateCommand(new OutputOptions(), "-o", xml.toString());
+            var coverage = new HashMap<URI, Map<BigDecimal, Integer>>();
+            try (var conversion = Utils.prepareConversion(metadata, "", "", coverage, raw.toFile(), xml.toFile())) {
+                var stagingCoverage = new HashMap<URI, Map<BigDecimal, Integer>>(coverage) {
+                    @Override
+                    public void forEach(BiConsumer<? super URI, ? super Map<BigDecimal, Integer>> action) {
+                        try {
+                            Files.createLink(changed, input);
+                        } catch (IOException failure) {
+                            throw new UncheckedIOException(failure);
+                        }
+                        super.forEach(action);
+                    }
+                };
+                IOException failure = assertThrows(IOException.class,
+                        () -> conversion.writeConversion(stagingCoverage, metadata, output));
+                assertTrue(failure.getMessage().contains("would overwrite input file"), failure.toString());
+            }
+            assertArrayEquals(original, Files.readAllBytes(input));
+            assertTrue(Files.isSameFile(changed, input));
+            assertFalse(Files.exists(input.equals(raw) ? json : xml));
+            Files.delete(changed);
+        }
     }
 
     @Test

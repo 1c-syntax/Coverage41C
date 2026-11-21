@@ -36,6 +36,7 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -51,6 +52,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -209,6 +211,86 @@ class ExternalDataProcessorTest {
 
     @Test
     @EnabledOnOs({OS.LINUX, OS.MAC})
+    void freshConversionWritesBothRelativeBasenames() throws Exception {
+        Path descriptor = tempDir.resolve("ExternalReport.xml");
+        writeConfiguratorExternalSource(descriptor, "ExternalReport");
+        Path forms = tempDir.resolve("ExternalReport/Forms");
+        var permissions = Files.getPosixFilePermissions(forms);
+        Path raw = Files.writeString(tempDir.resolve("raw.xml"), "<coverage version=\"1\"/>");
+        Path coverage = Path.of(tempDir.getFileName() + "-coverage.xml");
+        Path report = Path.of(tempDir.getFileName() + "-exclusions.json");
+        try {
+            Files.setPosixFilePermissions(forms, PosixFilePermissions.fromString("---------"));
+            assumeTrue(!Files.isReadable(forms), "Forms permissions are ineffective for the current user");
+            StringWriter stderr = new StringWriter();
+            assertEquals(CommandLine.ExitCode.OK, execute(stderr, PipeMessages.CONVERT_COMMAND,
+                    "-P", tempDir.toString(), "-s", descriptor.toString(), "-c", raw.toString(),
+                    "-o", coverage.toString(), "--exclusion-report", report.toString()), stderr.toString());
+            assertTrue(MultipleSourcesTest.coverage(coverage).containsKey("ExternalReport/Ext/ObjectModule.bsl"));
+            assertEquals(1, new ObjectMapper().readTree(report.toFile()).path("warnings").size());
+        } finally {
+            Files.setPosixFilePermissions(forms, permissions);
+            Files.deleteIfExists(coverage);
+            Files.deleteIfExists(report);
+        }
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    void freshConversionBindsTheExistingAncestorsOfBothOutputs() throws Exception {
+        Path descriptor = tempDir.resolve("ExternalReport.xml");
+        writeConfiguratorExternalSource(descriptor, "ExternalReport");
+        Path forms = tempDir.resolve("ExternalReport/Forms");
+        Path coverageDir = Files.createDirectory(tempDir.resolve("coverage"));
+        Path alias = Files.createSymbolicLink(tempDir.resolve("alias"), coverageDir);
+        Path coverageFile = alias.resolve("coverage.xml");
+        Path reportDir = Files.createDirectory(tempDir.resolve("reports"));
+        Path reportFile = reportDir.resolve("new/nested/exclusions.json");
+        var metadata = CommandLine.populateCommand(new MetadataOptions(), "-s", descriptor.toString(),
+                "--exclusion-report", reportFile.toString());
+        var output = CommandLine.populateCommand(new OutputOptions(), "-o", coverageFile.toString());
+        Map<URI, Map<BigDecimal, Integer>> coverage = new HashMap<>();
+        var permissions = Files.getPosixFilePermissions(forms);
+        try {
+            Files.setPosixFilePermissions(forms, PosixFilePermissions.fromString("---------"));
+            assumeTrue(!Files.isReadable(forms), "Forms permissions are ineffective for the current user");
+            try (var conversion = Utils.prepareConversion(metadata, "", "", coverage, null, coverageFile.toFile())) {
+                for (Path directory : List.of(coverageDir, reportDir)) {
+                    Path original = Files.move(directory, tempDir.resolve("original"));
+                    Files.createDirectory(directory);
+                    assertThrows(IOException.class, () -> conversion.writeConversion(coverage, metadata, output));
+                    assertFalse(Files.exists(coverageFile));
+                    assertFalse(Files.exists(reportDir.resolve("new")));
+                    Files.delete(directory);
+                    Files.move(original, directory);
+                }
+                Path elsewhere = Files.createDirectory(tempDir.resolve("elsewhere"));
+                Path newDirectory = Files.createSymbolicLink(reportDir.resolve("new"), elsewhere);
+                assertThrows(IOException.class, () -> conversion.writeConversion(coverage, metadata, output));
+                assertFalse(Files.exists(coverageFile));
+                assertFalse(Files.exists(elsewhere.resolve("nested")));
+                Files.delete(newDirectory);
+                Files.createDirectory(reportDir.resolve("new"));
+                conversion.writeConversion(coverage, metadata, output);
+                assertTrue(Files.size(coverageFile) > 0);
+                assertEquals(1, new ObjectMapper().readTree(reportFile.toFile()).path("warnings").size());
+            }
+            Files.delete(coverageFile);
+            Files.delete(reportFile);
+            try (var conversion = Utils.prepareConversion(metadata, "", "", coverage, null, coverageFile.toFile())) {
+                Files.delete(coverageDir);
+                Files.createDirectory(coverageDir);
+                assertThrows(IOException.class, () -> conversion.writeConversion(coverage, metadata, output));
+                assertFalse(Files.exists(coverageFile));
+                assertFalse(Files.exists(reportFile));
+            }
+        } finally {
+            Files.setPosixFilePermissions(forms, permissions);
+        }
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
     void freshConversionRejectsChangedOutputNameBeforeWriting() throws Exception {
         Path descriptor = tempDir.resolve("ExternalReport.xml");
         writeConfiguratorExternalSource(descriptor, "ExternalReport");
@@ -232,6 +314,51 @@ class ExternalDataProcessorTest {
             assertEquals(0, stdout.size());
             assertFalse(Files.exists(prepared));
             assertFalse(Files.exists(requested));
+        } finally {
+            Files.setPosixFilePermissions(forms, permissions);
+        }
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    void freshConversionRejectsReplacementOfTheReportParentDuringSerialization() throws Exception {
+        Path descriptor = tempDir.resolve("ExternalReport.xml");
+        writeConfiguratorExternalSource(descriptor, "ExternalReport");
+        Path forms = tempDir.resolve("ExternalReport/Forms");
+        Path reportDirectory = Files.createDirectory(tempDir.resolve("reports"));
+        Path movedDirectory = tempDir.resolve("moved");
+        Path report = reportDirectory.resolve("exclusions.json");
+        Path coverageFile = tempDir.resolve("coverage.xml");
+        var metadata = CommandLine.populateCommand(new MetadataOptions(), "-s", descriptor.toString(),
+                "--exclusion-report", report.toString());
+        var output = CommandLine.populateCommand(new OutputOptions(), "-o", coverageFile.toString());
+        Map<URI, Map<BigDecimal, Integer>> coverage = new HashMap<>();
+        var permissions = Files.getPosixFilePermissions(forms);
+        try {
+            Files.setPosixFilePermissions(forms, PosixFilePermissions.fromString("---------"));
+            assumeTrue(!Files.isReadable(forms), "Forms permissions are ineffective for the current user");
+            try (var conversion = Utils.prepareConversion(metadata, "", "", coverage, null, coverageFile.toFile())) {
+                var stagingCoverage = new HashMap<URI, Map<BigDecimal, Integer>>(coverage) {
+                    @Override
+                    public void forEach(BiConsumer<? super URI, ? super Map<BigDecimal, Integer>> action) {
+                        try {
+                            Files.move(reportDirectory, movedDirectory);
+                            Files.createDirectory(reportDirectory);
+                        } catch (IOException failure) {
+                            throw new UncheckedIOException(failure);
+                        }
+                        super.forEach(action);
+                    }
+                };
+                IOException failure = assertThrows(IOException.class,
+                        () -> conversion.writeConversion(stagingCoverage, metadata, output));
+                assertTrue(failure.getMessage().contains("Report directory changed after preparation"), failure.toString());
+            }
+            assertFalse(Files.exists(coverageFile));
+            try (var moved = Files.list(movedDirectory); var replacement = Files.list(reportDirectory)) {
+                assertEquals(0, moved.count());
+                assertEquals(0, replacement.count());
+            }
         } finally {
             Files.setPosixFilePermissions(forms, permissions);
         }

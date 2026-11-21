@@ -390,36 +390,46 @@ public class Utils {
                 return;
             }
             OutputPaths target = new OutputPaths(output);
+            boolean createOnly = Files.notExists(target.destination, LinkOption.NOFOLLOW_LINKS);
+            StandardOutputFile.NamedFile targetFile = createOnly ? null
+                    : StandardOutputFile.inspectNamedFile(target.destination);
+            Object identity = targetFile == null ? null : targetFile.key();
             Set<Path> unreadableForms = new HashSet<>();
-            if (Files.notExists(target.destination, LinkOption.NOFOLLOW_LINKS)) {
+            if (createOnly) {
                 for (Path forms : inputs.externalForms) {
                     if (Files.isDirectory(forms) && !Files.isReadable(forms)) {
                         unreadableForms.add(forms);
                     }
                 }
             }
-            rejectOutputOverwritingInputs(target, inputs.files, inputs.trees, "Coverage output", unreadableForms);
-            Object identity = StandardOutputFile.regularFileKey(target.destination);
+            rejectOutputOverwritingInputs(target, inputs.files, inputs.trees, "Coverage output",
+                    unreadableForms, targetFile);
             loadedConfigs.reject(identity, "Coverage output " + output);
             if (published.matches(identity)) {
                 throw new IOException("Coverage output would overwrite the published exclusion report: " + output);
             }
             ExclusionRules.rejectReportInsideConfigDirectory(inputs.config, output, "-o");
             if (StandardOutputFile.isAlias(report)) {
-                if (StandardOutputFile.matches(target.destination)) {
+                if ((identity != null && identity.equals(StandardOutputFile.regularFileKey()))
+                        || StandardOutputFile.matches(target.destination)) {
                     throw new IOException("Exclusion report and coverage output must use different files: " + output);
                 }
             } else if (report != null) {
-                rejectOverlappingOutputs(target, new OutputPaths(report));
+                OutputPaths peer = new OutputPaths(report);
+                if (identity != null) {
+                    StandardOutputFile.NamedFile peerFile = StandardOutputFile.inspectNamedFile(peer.destination);
+                    if (peerFile != null && identity.equals(peerFile.key())) {
+                        throw new IOException("Exclusion report and coverage output must use different files: " + output);
+                    }
+                }
+                rejectOverlappingOutputs(target, peer);
             }
             if (!unreadableForms.isEmpty()) {
                 ConversionOutput.writeNewFile(target.destination, staged -> writeCoverageFile(coverage, metadata, options,
                         staged.toFile()));
             } else {
-                try (OutputStream stream = Files.newOutputStream(target.destination, StandardOpenOption.CREATE,
-                        StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)) {
-                    writeCoverage(coverage, metadata, options, stream);
-                }
+                ConversionOutput.writeMeasurementOutput(target.destination, identity, createOnly,
+                        stream -> writeCoverage(coverage, metadata, options, stream));
             }
             logCoverageStats(coverage);
         }
@@ -435,6 +445,7 @@ public class Utils {
 
     private static final class LoadedConfigs implements Closeable {
         private final Map<Object, Closeable> pins = new HashMap<>();
+        private final List<Closeable> outputDirectoryPins = new ArrayList<>();
 
         private CoverageConfig read(File file) throws IOException {
             Object identity = retain(file.toPath());
@@ -491,11 +502,6 @@ public class Utils {
             }
         }
 
-        private ConversionOutput.DestinationCheck destinationCheck() {
-            return pins.isEmpty() ? null : (path, key) -> reject(key,
-                    path == null ? "Standard output" : "Report destination " + path);
-        }
-
         private void closeQuietly() {
             try {
                 close();
@@ -507,12 +513,14 @@ public class Utils {
         @Override
         public synchronized void close() throws IOException {
             IOException failure = null;
-            for (Closeable config : pins.values()) {
-                if (config == null) {
+            List<Closeable> retained = new ArrayList<>(pins.values());
+            retained.addAll(outputDirectoryPins);
+            for (Closeable pin : retained) {
+                if (pin == null) {
                     continue;
                 }
                 try {
-                    config.close();
+                    pin.close();
                 } catch (IOException error) {
                     if (failure == null) {
                         failure = error;
@@ -522,6 +530,7 @@ public class Utils {
                 }
             }
             pins.clear();
+            outputDirectoryPins.clear();
             if (failure != null) {
                 throw failure;
             }
@@ -558,8 +567,13 @@ public class Utils {
                                              File rawInput, File coverageOutput, OutputStream reportOutput) throws Exception {
         var configs = new LoadedConfigs();
         try {
-            return loadMetadata(metadataOptions, mainExtension, mainSourceUrl, coverageData, new ExclusionReport(),
+            Metadata metadata = loadMetadata(metadataOptions, mainExtension, mainSourceUrl, coverageData, new ExclusionReport(),
                     false, false, rawInput, coverageOutput, true, () -> reportOutput, configs);
+            if (metadata.freshOutputs != null) {
+                metadata.freshOutputs.retainParent(metadata.freshOutputs.coverage, configs);
+                metadata.freshOutputs.retainParent(metadata.freshOutputs.report, configs);
+            }
+            return metadata;
         } catch (Exception | Error error) {
             try {
                 configs.close();
@@ -580,8 +594,10 @@ public class Utils {
         }
         ExclusionReport report = new ExclusionReport();
         metadataOptions.validateSourceFilters("", "");
-        Metadata metadata = loadMetadata(metadataOptions, "", "", new HashMap<>(), report, false, false, null, null, true, () -> stdout, null);
-        metadata.writeExclusionReport();
+        try (LoadedConfigs configs = new LoadedConfigs()) {
+            Metadata metadata = loadMetadata(metadataOptions, "", "", new HashMap<>(), report, false, false, null, null, true, () -> stdout, configs);
+            metadata.writeExclusionReport();
+        }
         return report.getWarnings();
     }
 
@@ -650,7 +666,7 @@ public class Utils {
 
         private void writeExclusionReport(ConversionOutput.PublishedReport published, boolean guardChanges) throws IOException {
             if (reportFile != null) {
-                ConversionOutput.DestinationCheck check = loadedConfigs == null ? null : loadedConfigs.destinationCheck();
+                ConversionOutput.DestinationCheck check = this::checkDestination;
                 if (loadedConfigs != null) {
                     loadedConfigs.reject(reportFile, reportOutput, "Exclusion report");
                 }
@@ -704,17 +720,43 @@ public class Utils {
             ConversionOutput.Writer writeCoverage =
                     file -> writeCoverageFile(coverage, metadataOptions, outputOptions, file.toFile());
             ConversionOutput.Writer writeReport = file -> report.writeJson(file.toFile());
-            ConversionOutput.DestinationCheck check = loadedConfigs == null ? null : loadedConfigs.destinationCheck();
+            ConversionOutput.DestinationCheck check = this::checkDestination;
+            ConversionOutput.PublicationCheck prepared = freshOutputs == null ? null : freshOutputs::verifyParents;
             if (reportToStdout) {
                 // Publish the named coverage file first so it can be restored if stdout fails.
-                ConversionOutput.write(null, coveragePath, writeReport, writeCoverage, reportOutput, freshOutputs != null, check);
+                ConversionOutput.write(null, coveragePath, writeReport, writeCoverage, reportOutput, freshOutputs != null, check, prepared);
             } else {
                 Path reportPath = reportFile == null ? null : reportPath();
-                ConversionOutput.write(coveragePath, reportPath, writeCoverage, writeReport, reportOutput, freshOutputs != null, check);
+                ConversionOutput.write(coveragePath, reportPath, writeCoverage, writeReport, reportOutput, freshOutputs != null, check, prepared);
             }
             logCoverageStats(coverage);
             if (reportFile != null) {
                 logger.info("Exclusion report written to {}", reportFile.getAbsolutePath());
+            }
+        }
+
+        private Set<Path> protectedInputFiles() {
+            Set<Path> files = new LinkedHashSet<>(inputs.files);
+            moduleUris.values().stream().map(Path::of).filter(Files::isRegularFile).forEach(files::add);
+            return files;
+        }
+
+        private void checkDestination(Path path, Object key) throws IOException {
+            if (loadedConfigs != null) {
+                loadedConfigs.reject(key, path == null ? "Standard output" : "Report destination " + path);
+            }
+            if (path != null && key != null) {
+                // Check the reserved file identity before writing. It can have appeared while serializing the reports.
+                StandardOutputFile.NamedFile target = StandardOutputFile.inspectNamedFile(path);
+                if (target == null || !key.equals(target.key())) {
+                    throw new IOException("Report destination changed during publication: " + path);
+                }
+                try {
+                    rejectOutputOverwritingInputs(new OutputPaths(path.toFile()), protectedInputFiles(), inputs.trees,
+                            "Report destination", null, target);
+                } catch (IllegalArgumentException conflict) {
+                    throw new IOException(conflict.getMessage(), conflict);
+                }
             }
         }
 
@@ -735,8 +777,7 @@ public class Utils {
                 throw new IllegalArgumentException("Exclusion report and coverage output must use different files: "
                         + reportFile + " and " + (coverageToStdout ? "standard output" : output));
             }
-            Set<Path> files = new LinkedHashSet<>(inputs.files);
-            moduleUris.values().stream().map(Path::of).filter(Files::isRegularFile).forEach(files::add);
+            Set<Path> files = protectedInputFiles();
             if (writesToStdout && (reportOutput == null || processStdout)) {
                 StandardOutputFile.FileIdentity stdout = StandardOutputFile.regularFile();
                 if (stdout != null) {
@@ -746,9 +787,12 @@ public class Utils {
             ExclusionRules.rejectReportInsideConfigDirectory(inputs.config, namedReport, "--exclusion-report");
             validateOutputFiles(namedCoverage, namedReport, inputs.config, files, inputs.trees,
                     freshOutputs == null ? null : freshOutputs.unreadableForms);
-            if (freshOutputs != null && ((namedCoverage != null && !sameOutputFile(output.toPath(), namedCoverage.toPath()))
-                    || (namedReport != null && !sameOutputFile(reportFile.toPath(), namedReport.toPath())))) {
-                throw new IOException("Report destination changed after preparation");
+            if (freshOutputs != null) {
+                if (namedCoverage != null && !sameOutputFile(output.toPath().toAbsolutePath(), namedCoverage.toPath())
+                        || namedReport != null && !sameOutputFile(reportFile.toPath().toAbsolutePath(), namedReport.toPath())) {
+                    throw new IOException("Report destination changed after preparation");
+                }
+                freshOutputs.verifyParents();
             }
             if (loadedConfigs != null) {
                 loadedConfigs.reject(namedCoverage, reportOutput, "Coverage output");
@@ -1351,21 +1395,69 @@ public class Utils {
         Set<Object> visited = new HashSet<>();
         for (Path tree : trees) {
             if (Files.isDirectory(tree)) {
-                checkExportTree(tree, null, (file, attributes) -> stdout.matches(file), Set.of(), Set.of(), visited,
+                checkExportTree(tree, null, (file, attributes) -> StandardOutputFile.mayNameRegularFile(attributes)
+                        && stdout.matches(file),
+                        Set.of(), Set.of(), visited,
                         "Standard output", Set.of());
             }
         }
     }
 
     private static final class FreshOutputs {
+        private record PreparedParent(Path path, Path existingAncestor, Object identity) {}
+
         private final Path coverage;
         private final Path report;
         private final Path unreadableForms;
+        private final List<PreparedParent> parents = new ArrayList<>();
 
         private FreshOutputs(Path coverage, Path report, Path unreadableForms) {
             this.coverage = coverage;
             this.report = report;
             this.unreadableForms = unreadableForms;
+        }
+
+        private void retainParent(Path destination, LoadedConfigs configs) throws IOException {
+            if (destination == null) {
+                return;
+            }
+            Path parent = existingOutputDirectory(destination.getParent());
+            if (parent == null) {
+                throw new IOException("Cannot find existing report directory for " + destination);
+            }
+            Object identity = parentIdentity(parent);
+            // Keep the inode alive on Linux, where removing and recreating an empty directory can reuse its key.
+            PosixFiles.Pin pin = PosixFiles.pinOnLinux(parent);
+            if (pin != null) {
+                configs.outputDirectoryPins.add(pin);
+                Path descriptor = pin.descriptorPath();
+                if (!identity.equals(parentIdentity(descriptor == null ? parent : descriptor))) {
+                    throw new IOException("Report directory changed during preparation: " + parent);
+                }
+            }
+            parents.add(new PreparedParent(destination.getParent(), parent, identity));
+        }
+
+        private static Object parentIdentity(Path directory) throws IOException {
+            Object key = File.separatorChar == '\\' ? WindowsFiles.key(directory, false)
+                    : Files.readAttributes(directory, BasicFileAttributes.class).fileKey();
+            if (key == null) {
+                throw new IOException("Cannot identify report directory: " + directory);
+            }
+            return key;
+        }
+
+        private void verifyParents() throws IOException {
+            for (PreparedParent parent : parents) {
+                if (!parent.identity.equals(parentIdentity(parent.existingAncestor))) {
+                    throw new IOException("Report directory changed after preparation: " + parent.existingAncestor);
+                }
+                for (Path dir = parent.path; !dir.equals(parent.existingAncestor); dir = dir.getParent()) {
+                    if (Files.isSymbolicLink(dir)) {
+                        throw new IOException("Report directory changed after preparation: " + dir);
+                    }
+                }
+            }
         }
     }
 
@@ -1433,12 +1525,24 @@ public class Utils {
     private static void rejectOutputOverwritingInputs(OutputPaths output, Set<Path> inputs, Set<Path> trees,
                                                        String outputLabel, Set<Path> toleratedUnreadableForms)
             throws IOException {
+        rejectOutputOverwritingInputs(output, inputs, trees, outputLabel, toleratedUnreadableForms, null);
+    }
+
+    private static void rejectOutputOverwritingInputs(OutputPaths output, Set<Path> inputs, Set<Path> trees,
+                                                       String outputLabel, Set<Path> toleratedUnreadableForms,
+                                                       StandardOutputFile.NamedFile targetFile)
+            throws IOException {
         boolean outputExists = Files.exists(output.destination);
         for (Path input : inputs) {
             Path inputPath = input.toAbsolutePath();
             boolean inputMissing = Files.notExists(inputPath);
-            boolean sameInput = outputExists ? Files.exists(inputPath) && sameExistingFile(output.destination, inputPath)
-                    : inputMissing && sameOutputFile(output.destination, inputPath);
+            boolean sameInput;
+            if (targetFile != null && Files.exists(inputPath)) {
+                sameInput = targetFile.matches(inputPath, Files.readAttributes(inputPath, BasicFileAttributes.class));
+            } else {
+                sameInput = outputExists ? Files.exists(inputPath) && sameExistingFile(output.destination, inputPath)
+                        : inputMissing && sameOutputFile(output.destination, inputPath);
+            }
             if (sameInput) {
                 throw new IllegalArgumentException(outputLabel + " would overwrite input file: " + inputPath);
             }
@@ -1447,12 +1551,13 @@ public class Utils {
             }
         }
         if (!trees.isEmpty()) {
-            rejectOutputInExportTrees(output, trees, outputLabel, toleratedUnreadableForms);
+            rejectOutputInExportTrees(output, trees, outputLabel, toleratedUnreadableForms, targetFile);
         }
     }
 
     private static void rejectOutputInExportTrees(OutputPaths paths, Set<Path> trees, String label,
-                                                   Set<Path> toleratedUnreadableForms) throws IOException {
+                                                   Set<Path> toleratedUnreadableForms,
+                                                   StandardOutputFile.NamedFile targetFile) throws IOException {
         Path output = paths.requested;
         Path destination = paths.destination;
         Set<Object> parents = new HashSet<>();
@@ -1461,11 +1566,19 @@ public class Utils {
                 parents.add(directoryKey(parent));
             }
         }
-        BasicFileAttributes target = Files.isRegularFile(destination)
-                ? Files.readAttributes(destination, BasicFileAttributes.class) : null;
-        ExportFileIdentity identity = target == null ? null : (file, attributes) ->
-                target.fileKey() == null || attributes.fileKey() == null ? sameExistingFile(file, destination)
-                        : target.fileKey().equals(attributes.fileKey());
+        if (targetFile == null && File.separatorChar == '\\') {
+            targetFile = StandardOutputFile.inspectNamedFile(destination);
+        }
+        ExportFileIdentity identity;
+        if (targetFile != null) {
+            identity = targetFile::matches;
+        } else {
+            BasicFileAttributes target = Files.isRegularFile(destination)
+                    ? Files.readAttributes(destination, BasicFileAttributes.class) : null;
+            identity = target == null ? null : (file, attributes) -> attributes.isRegularFile()
+                    && (target.fileKey() == null || attributes.fileKey() == null ? sameExistingFile(file, destination)
+                            : target.fileKey().equals(attributes.fileKey()));
+        }
         Set<Path> missing = new LinkedHashSet<>();
         for (Path path = destination; path != null && Files.notExists(path);
              path = path.getParent()) {
@@ -1577,7 +1690,7 @@ public class Utils {
                 if (attrs.isSymbolicLink() && Files.notExists(file) && matchesOutputPath(file, missing)) {
                     throw new IllegalArgumentException(label + " would activate a link in a source directory: " + file);
                 }
-                if (identity != null && attrs.isRegularFile() && identity.matches(file, attrs)) {
+                if (identity != null && identity.matches(file, attrs)) {
                     throw new IllegalArgumentException(label + " would overwrite input file: " + file);
                 }
                 return FileVisitResult.CONTINUE;

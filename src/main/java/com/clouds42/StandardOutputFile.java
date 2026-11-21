@@ -94,13 +94,64 @@ final class StandardOutputFile {
         boolean matches(Path destination) throws IOException;
     }
 
-    static Object regularFileKey(Path path) throws IOException {
-        if (!Files.isRegularFile(path)) {
-            return null;
+    static final class NamedFile {
+        private final Object key;
+        private final Object basicKey;
+
+        private NamedFile(Object key, Object basicKey) {
+            this.key = key;
+            this.basicKey = basicKey;
         }
+
+        Object key() {
+            return key;
+        }
+
+        boolean matches(Path path, BasicFileAttributes attributes) throws IOException {
+            return mayNameRegularFile(attributes) && (basicKey != null && attributes.fileKey() != null
+                    ? basicKey.equals(attributes.fileKey()) : key.equals(regularFileKey(path)));
+        }
+    }
+
+    static boolean mayNameRegularFile(BasicFileAttributes attributes) {
+        return attributes.isRegularFile() || File.separatorChar == '\\' && attributes.isOther();
+    }
+
+    static NamedFile inspectNamedFile(Path path) throws IOException {
+        if (isDarwin() && Path.of("/dev/fd").equals(path.getParent())) {
+            try {
+                Object key = darwinOpenFileKey(Integer.parseInt(path.getFileName().toString()), path);
+                return key == null ? null : new NamedFile(key, null);
+            } catch (NumberFormatException notADescriptor) {
+                // Continue with the ordinary path lookup.
+            }
+        }
+        if (File.separatorChar != '\\' && path.getFileSystem().supportedFileAttributeViews().contains("unix")) {
+            try {
+                Map<String, Object> attributes = Files.readAttributes(path, "unix:dev,ino,fileKey,isRegularFile");
+                return Boolean.TRUE.equals(attributes.get("isRegularFile"))
+                        ? new NamedFile(fileKey(((Number) attributes.get("dev")).longValue(),
+                                ((Number) attributes.get("ino")).longValue()), attributes.get("fileKey")) : null;
+            } catch (NoSuchFileException absent) {
+                return null;
+            }
+        }
+        Object key = regularFileKey(path);
+        return key == null ? null : new NamedFile(key, null);
+    }
+
+    static Object regularFileKey(Path path) throws IOException {
         try {
             if (File.separatorChar == '\\') {
-                return WindowsFiles.key(path, false);
+                BasicFileAttributes attributes = Files.readAttributes(path, BasicFileAttributes.class);
+                if (attributes.isRegularFile()) {
+                    return WindowsFiles.key(path, false);
+                }
+                // The JDK also classifies ordinary files with a non-name-surrogate tag as "other".
+                return attributes.isOther() ? WindowsFiles.reparseReportKey(path) : null;
+            }
+            if (!Files.isRegularFile(path)) {
+                return null;
             }
             if (path.getFileSystem().supportedFileAttributeViews().contains("unix")) {
                 Map<String, Object> attributes = Files.readAttributes(path, "unix:dev,ino");
@@ -121,7 +172,7 @@ final class StandardOutputFile {
         return isDarwin() ? darwinKey(descriptor) : regularFileKey(descriptor);
     }
 
-    private static Object fileKey(long device, long inode) {
+    static Object fileKey(long device, long inode) {
         return Map.of("dev", device, "ino", inode);
     }
 
@@ -190,8 +241,28 @@ final class StandardOutputFile {
         return fileKey(result.getInt(4), result.getLong(8));
     }
 
+    static Object darwinOpenFileKey(int descriptor, Path path) throws IOException {
+        byte[] attributes = ByteBuffer.allocate(24).order(ByteOrder.nativeOrder())
+                .putShort((short) 5).putShort((short) 0)
+                .putInt(Darwin.ATTR_CMN_DEVID | Darwin.ATTR_CMN_OBJTYPE | Darwin.ATTR_CMN_FILEID).array();
+        ByteBuffer result = ByteBuffer.allocate(20).order(ByteOrder.nativeOrder());
+        if (Native.load("c", Darwin.class).fgetattrlist(descriptor, attributes, result.array(), result.capacity(), 0) != 0) {
+            int error = Native.getLastError();
+            if (error == Darwin.EINVAL && !Files.readAttributes(Path.of("/dev/fd", Integer.toString(descriptor)),
+                    BasicFileAttributes.class).isRegularFile()) {
+                return null;
+            }
+            throw new IOException("Cannot identify the open report " + path + " (errno " + error + ")");
+        }
+        if (result.getInt(0) != result.capacity()) {
+            throw new IOException("Incomplete file identity for " + path);
+        }
+        return result.getInt(8) == 1 ? fileKey(result.getInt(4), result.getLong(12)) : null; // VREG
+    }
+
     private interface Darwin extends Library {
         int ATTR_CMN_DEVID = 0x00000002;
+        int ATTR_CMN_OBJTYPE = 0x00000008;
         int ATTR_CMN_FILEID = 0x02000000;
         int EBADF = 9;
         int EINVAL = 22;

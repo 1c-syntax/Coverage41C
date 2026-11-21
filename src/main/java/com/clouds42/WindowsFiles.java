@@ -25,17 +25,25 @@ import com.sun.jna.Native;
 import com.sun.jna.Pointer;
 import com.sun.jna.Structure;
 import com.sun.jna.WString;
+import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.PointerByReference;
 import com.sun.jna.win32.StdCallLibrary;
 
+import java.io.BufferedOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 
 final class WindowsFiles {
     private static final int OPEN_DIRECTORY = 0x02000000;
@@ -113,6 +121,106 @@ final class WindowsFiles {
             Kernel.INSTANCE.CloseHandle(file);
         } finally {
             Kernel.INSTANCE.LocalFree(security);
+        }
+    }
+
+    static void writeCheckedReport(Path path, Object expected, ConversionOutput.Content writer) throws IOException {
+        // Open the logical data of a regular reparse-backed file (for example, with deduplication).
+        // OPEN_EXISTING never truncates; any replacement must still match the verified file ID.
+        int flags = expected != null && Files.readAttributes(path, BasicFileAttributes.class,
+                LinkOption.NOFOLLOW_LINKS).isOther() ? 0 : OPEN_REPARSE_POINT;
+        Pointer handle = Kernel.INSTANCE.CreateFileW(name(path), 0x40000080, 7, null, 3, flags, null);
+        if (invalid(handle)) {
+            throw failure(path.toString(), Native.getLastError());
+        }
+        try (OutputStream output = new OpenReport(handle, path)) {
+            Object actual = null;
+            int type = Kernel.INSTANCE.GetFileType(handle);
+            if (type == 1) { // FILE_TYPE_DISK
+                actual = diskReportKey(handle, path);
+                if (actual == null) {
+                    throw new IOException("Coverage output must name an identifiable file: " + path);
+                }
+            } else if (type != 2 && type != 3) { // FILE_TYPE_CHAR or FILE_TYPE_PIPE
+                throw failure(path.toString(), Native.getLastError());
+            }
+            if (!Objects.equals(expected, actual)) {
+                throw new IOException("Coverage output changed before it could be written: " + path);
+            }
+            if (actual != null && Kernel.INSTANCE.SetEndOfFile(handle) == 0) {
+                throw failure(path.toString(), Native.getLastError());
+            }
+            OutputStream buffered = new BufferedOutputStream(output);
+            writer.copyTo(buffered);
+            buffered.flush();
+        }
+    }
+
+    static Object reparseReportKey(Path path) throws IOException {
+        Pointer handle = open(path, OPEN_DIRECTORY | OPEN_REPARSE_POINT);
+        try {
+            return Kernel.INSTANCE.GetFileType(handle) == 1 ? diskReportKey(handle, path) : null;
+        } finally {
+            Kernel.INSTANCE.CloseHandle(handle);
+        }
+    }
+
+    private static Object diskReportKey(Pointer handle, Path path) throws IOException {
+        byte[] info = new byte[52];
+        if (Kernel.INSTANCE.GetFileInformationByHandle(handle, info) == 0) {
+            throw failure(path.toString(), Native.getLastError());
+        }
+        int attributes = ByteBuffer.wrap(info).order(ByteOrder.LITTLE_ENDIAN).getInt();
+        if ((attributes & 0x10) != 0 || (attributes & 0x400) != 0 && isNameSurrogate(handle, path)) {
+            return null;
+        }
+        return identity(handle, path.toString());
+    }
+
+    private static boolean isNameSurrogate(Pointer handle, Path path) throws IOException {
+        byte[] tag = new byte[8]; // FILE_ATTRIBUTE_TAG_INFO
+        if (Kernel.INSTANCE.GetFileInformationByHandleEx(handle, 9, tag, tag.length) == 0) {
+            throw failure(path.toString(), Native.getLastError());
+        }
+        return (ByteBuffer.wrap(tag).order(ByteOrder.LITTLE_ENDIAN).getInt(4) & 0x20000000) != 0;
+    }
+
+    private static final class OpenReport extends OutputStream {
+        private final Pointer handle;
+        private final Path path;
+
+        private OpenReport(Pointer handle, Path path) {
+            this.handle = handle;
+            this.path = path;
+        }
+
+        @Override
+        public void write(int value) throws IOException {
+            write(new byte[]{(byte) value}, 0, 1);
+        }
+
+        @Override
+        public void write(byte[] bytes, int offset, int length) throws IOException {
+            Objects.checkFromIndexSize(offset, length, bytes.length);
+            int end = offset + length;
+            IntByReference written = new IntByReference();
+            while (offset < end) {
+                byte[] buffer = offset == 0 ? bytes : Arrays.copyOfRange(bytes, offset, end);
+                if (Kernel.INSTANCE.WriteFile(handle, buffer, end - offset, written, null) == 0) {
+                    throw failure(path.toString(), Native.getLastError());
+                }
+                if (written.getValue() == 0) {
+                    throw new IOException("Cannot finish writing report " + path);
+                }
+                offset += written.getValue();
+            }
+        }
+
+        @Override
+        public void close() throws IOException {
+            if (Kernel.INSTANCE.CloseHandle(handle) == 0) {
+                throw failure(path.toString(), Native.getLastError());
+            }
         }
     }
 
@@ -239,6 +347,8 @@ final class WindowsFiles {
         int GetFileInformationByHandleEx(Pointer handle, int infoClass, byte[] info, int size);
         int GetFileInformationByHandle(Pointer handle, byte[] info);
         int SetFileInformationByHandle(Pointer handle, int infoClass, byte[] info, int size);
+        int SetEndOfFile(Pointer handle);
+        int WriteFile(Pointer handle, byte[] buffer, int count, IntByReference written, Pointer overlapped);
         int CloseHandle(Pointer handle);
         Pointer LocalFree(Pointer memory);
     }
