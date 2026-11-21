@@ -21,6 +21,8 @@
  */
 package com.clouds42;
 
+import com.sun.nio.file.ExtendedOpenOption;
+
 
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
@@ -32,7 +34,11 @@ import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.AccessDeniedException;
+import java.nio.file.DirectoryIteratorException;
+import java.nio.file.DirectoryNotEmptyException;
+import java.nio.file.DirectoryStream;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
@@ -246,6 +252,11 @@ final class ConversionOutput {
                 && Files.notExists(report, LinkOption.NOFOLLOW_LINKS);
         try (Destination coverageFile = Destination.open(coverage, createOnly, keys, newPair, report);
              Destination reportFile = Destination.open(report, createOnly, keys, newPair, coverage)) {
+            if (coverageFile != null && reportFile != null
+                    && coverageFile.access == Access.CREATED && reportFile.access == Access.CREATED
+                    && (coverageFile.claim == null || reportFile.claim == null)) {
+                throw new IOException("Cannot reserve both new reports: " + coverage + " and " + report);
+            }
             if (reportFile != null && reportFile.access == Access.WRITE_ONLY) {
                 if (verifyReport != null) {
                     throw new IOException("Cannot verify separate outputs for a write-only report and an unknown stream: "
@@ -387,12 +398,12 @@ final class ConversionOutput {
         // A publication can name up to two outputs in the same directory.
         private static final List<String> NAMESPACES =
                 List.of(".coverage41c-creating", ".coverage41c-creating-1", ".coverage41c-creating-2");
+        private static final byte[] OWNERSHIP_STAMP =
+                "Coverage41C creation claims\n".getBytes(StandardCharsets.UTF_8);
         private final Path marker;
-        private final boolean createdNamespace;
 
-        private CreationClaim(Path marker, boolean createdNamespace) {
+        private CreationClaim(Path marker) {
             this.marker = marker;
-            this.createdNamespace = createdNamespace;
         }
 
         private static Path destinationFor(Path path) throws IOException {
@@ -455,7 +466,7 @@ final class ConversionOutput {
                     throw error;
                 }
             }
-            // POSIX can still install the staged file atomically without replacing an existing entry.
+            // A single new POSIX output can be installed atomically without a claim.
             if (path.getFileSystem().supportedFileAttributeViews().contains("posix")) {
                 return null;
             }
@@ -465,10 +476,8 @@ final class ConversionOutput {
         private static CreationClaim acquireInNamespace(Path path, Path marker) throws IOException {
             Path namespace = marker.getParent();
             while (true) {
-                boolean createdNamespace = false;
                 try {
-                    Files.createDirectory(namespace);
-                    createdNamespace = true;
+                    createNamespace(namespace);
                 } catch (FileAlreadyExistsException occupied) {
                     try {
                         BasicFileAttributes attributes = Files.readAttributes(namespace, BasicFileAttributes.class,
@@ -485,7 +494,7 @@ final class ConversionOutput {
                 }
                 try {
                     Files.createDirectory(marker);
-                    return new CreationClaim(marker, createdNamespace);
+                    return new CreationClaim(marker);
                 } catch (FileAlreadyExistsException busy) {
                     throw inProgress(path, marker);
                 } catch (IOException failure) {
@@ -500,15 +509,78 @@ final class ConversionOutput {
             }
         }
 
+        private static void createNamespace(Path namespace) throws IOException {
+            Files.createDirectory(namespace);
+            try {
+                writeOwnershipStamp(ownershipPath(namespace));
+            } catch (IOException failure) {
+                try {
+                    Files.delete(namespace);
+                } catch (IOException cleanup) {
+                    failure.addSuppressed(cleanup);
+                }
+                throw failure;
+            }
+        }
+
+        private static Path ownershipPath(Path namespace) {
+            // acquire excludes the namespace's own name from the report names it can reserve.
+            return namespace.resolve(namespace.getFileName());
+        }
+
+        private static void writeOwnershipStamp(Path owner) throws IOException {
+            Files.write(owner, OWNERSHIP_STAMP, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+        }
+
+        private static boolean isOwned(Path owner) throws IOException {
+            if (!Files.isRegularFile(owner, LinkOption.NOFOLLOW_LINKS)) {
+                return false;
+            }
+            // Windows must not leave the stamp delete-pending while another closer is reading it.
+            OpenOption[] options = File.separatorChar == '\\'
+                    ? new OpenOption[]{LinkOption.NOFOLLOW_LINKS, ExtendedOpenOption.NOSHARE_DELETE}
+                    : new OpenOption[]{LinkOption.NOFOLLOW_LINKS};
+            try (InputStream input = Files.newInputStream(owner, options)) {
+                return Arrays.equals(OWNERSHIP_STAMP, input.readNBytes(OWNERSHIP_STAMP.length + 1));
+            }
+        }
+
+        private static void removeEmptyNamespace(Path namespace) throws IOException {
+            Path owner = ownershipPath(namespace);
+            while (Files.isDirectory(namespace, LinkOption.NOFOLLOW_LINKS) && isOwned(owner)) {
+                try (DirectoryStream<Path> claims = Files.newDirectoryStream(namespace, entry -> !entry.equals(owner))) {
+                    if (claims.iterator().hasNext()) {
+                        return;
+                    }
+                }
+                if (!Files.deleteIfExists(owner)) {
+                    return;
+                }
+                try {
+                    Files.deleteIfExists(namespace);
+                    return;
+                } catch (IOException failure) {
+                    // A publisher arrived during cleanup. Restore ownership and check again in case it already left.
+                    try {
+                        writeOwnershipStamp(owner);
+                    } catch (IOException restore) {
+                        failure.addSuppressed(restore);
+                        throw failure;
+                    }
+                    if (!(failure instanceof DirectoryNotEmptyException)) {
+                        throw failure;
+                    }
+                }
+            }
+        }
+
         @Override
         public void close() throws IOException {
             Files.delete(marker);
-            if (createdNamespace) {
-                try {
-                    Files.deleteIfExists(marker.getParent());
-                } catch (IOException cleanup) {
-                    // Another creator can hold a claim here. An empty namespace can also be reused.
-                }
+            try {
+                removeEmptyNamespace(marker.getParent());
+            } catch (IOException | DirectoryIteratorException cleanup) {
+                // Cleanup is best effort. An existing marker directory can be reused.
             }
         }
     }

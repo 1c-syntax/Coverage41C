@@ -343,6 +343,57 @@ class ConversionOutputTest {
     }
 
     @Test
+    void pairFailsBeforeWritingWhenOneNewNameCannotBeReserved() throws IOException {
+        org.junit.jupiter.api.Assumptions.assumeTrue(directory.getFileSystem().supportedFileAttributeViews().contains("posix"));
+        Path first = Files.createDirectory(directory.resolve("first"));
+        Path second = Files.createDirectory(directory.resolve("second"));
+        for (String name : List.of(".coverage41c-creating", ".coverage41c-creating-1", ".coverage41c-creating-2")) {
+            Files.writeString(second.resolve(name), name);
+        }
+        Path coverage = first.resolve("coverage.xml");
+        Path report = second.resolve("exclusions.json");
+        IOException failure = assertThrows(IOException.class, () -> ConversionOutput.publish(coverage, report,
+                output -> fail("Coverage was prepared without both reservations"),
+                output -> fail("Exclusions were prepared without both reservations"), OutputStream.nullOutputStream()));
+        assertTrue(failure.getMessage().contains("reserve both new reports"), failure.toString());
+        assertFalse(Files.exists(coverage));
+        assertFalse(Files.exists(report));
+        try (Stream<Path> entries = Files.list(first)) {
+            assertEquals(0, entries.count());
+        }
+    }
+
+    @Test
+    void lastPublisherRemovesNamespaceCreatedByAnotherJvm() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(directory.getFileSystem().supportedFileAttributeViews().contains("unix"));
+        Path namespace = directory.resolve(".coverage41c-creating");
+        Path childOutput = directory.resolve("child.xml");
+        Path ready = directory.resolve("ready");
+        Path release = directory.resolve("release");
+        String classpath = System.getProperty("coverage41c.testClasspath", System.getProperty("java.class.path"));
+        Path java = Path.of(System.getProperty("java.home"), "bin", "java");
+        Process holder = new ProcessBuilder(java.toString(), "-cp", classpath, ExternalCreationHolder.class.getName(),
+                childOutput.toString(), ready.toString(), release.toString()).redirectErrorStream(true).start();
+        try {
+            awaitMarkerSignal(ready);
+            assertTrue(Files.isDirectory(namespace));
+            ConversionOutput.publish(directory.resolve("coverage.xml"), directory.resolve("exclusions.json"), output -> {
+                Files.createFile(release);
+                assertEquals(0, holder.onExit().orTimeout(15, TimeUnit.SECONDS).join().exitValue());
+                output.write('x');
+            }, output -> output.write('j'), OutputStream.nullOutputStream());
+
+            assertEquals("x", Files.readString(childOutput));
+            assertFalse(Files.exists(namespace), "The last publisher must remove its empty service directory");
+            ConversionOutput.writeNewFile(namespace, staged -> Files.writeString(staged, "<coverage/>"));
+            assertEquals("<coverage/>", Files.readString(namespace));
+        } finally {
+            holder.destroyForcibly();
+            assertTrue(holder.waitFor(15, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
     void pairClaimInAlternateNamespaceExcludesOtherPublishers() throws IOException {
         Path coverage = directory.resolve(".coverage41c-creating");
         Path report = directory.resolve("report.json");
