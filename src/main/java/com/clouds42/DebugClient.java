@@ -21,6 +21,7 @@
  */
 package com.clouds42;
 
+
 import com._1c.g5.v8.dt.debug.core.model.BslModuleReference;
 import com._1c.g5.v8.dt.debug.core.model.values.BslValuePath;
 import com._1c.g5.v8.dt.debug.core.model.values.BslValuePathItem;
@@ -196,62 +197,9 @@ public class DebugClient extends AbstractDebugClient{
     /** A present result acknowledges the poll, even if dbgs sent no commands. */
     public Optional<List<? extends DBGUIExtCmdInfoBase>> pollDebugServer() throws RuntimeDebugClientException {
         Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl)
-                .param("cmd", "pingDebugUIParams")
-                .param("dbgui", this.debugServerUuid.toString());
-        DebugResponse<RDBGPingDebugUIResponse> response = requestResponse(request, RDBGPingDebugUIResponse.class);
-        if (response.status() == HttpStatus.NO_CONTENT_204) {
-            return Optional.of(List.of());
-        }
-        return Optional.ofNullable(response.model()).map(RDBGPingDebugUIResponse::getResult);
-    }
-
-    public void setLineBreakpoints(Map<BslModuleInformation, List<BslLineBreakpointInformation>> modulesBreakpoints) throws RuntimeDebugClientException {
-        RDBGSetBreakpointsRequest requestContent = ResponseFactory.eINSTANCE.createRDBGSetBreakpointsRequest();
-        BPWorkspaceInternal breakpointsWorkspace = BreakpointsFactory.eINSTANCE.createBPWorkspaceInternal();
-
-        for (Map.Entry<BslModuleInformation, List<BslLineBreakpointInformation>> bslModuleInformationListEntry : modulesBreakpoints.entrySet()) {
-
-            BslModuleReference reference = bslModuleInformationListEntry.getKey().getReference();
-            ModuleBPInfoInternal breakpointsModuleInfo = BreakpointsFactory.eINSTANCE.createModuleBPInfoInternal();
-            breakpointsModuleInfo.setId(this.createBslModuleId(bslModuleInformationListEntry.getKey(), reference));
-
-            BreakpointInfo breakpointInfoModel;
-            for (Iterator<BslLineBreakpointInformation> var9 = bslModuleInformationListEntry.getValue().iterator();
-                 var9.hasNext(); breakpointsModuleInfo.getBpInfo().add(breakpointInfoModel)) {
-                BslLineBreakpointInformation breakpointInfo = var9.next();
-                breakpointInfoModel = BreakpointsFactory.eINSTANCE.createBreakpointInfo();
-                breakpointInfoModel.setLine(new BigDecimal(breakpointInfo.getLineNumber()));
-                if (breakpointInfo.getCondition() != null) {
-                    breakpointInfoModel.setCondition(breakpointInfo.getCondition());
-                }
-            }
-
-            breakpointsWorkspace.getModuleBPInfo().add(breakpointsModuleInfo);
-        }
-
-        requestContent.setBpWorkspace(breakpointsWorkspace);
-        Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "setBreakpoints");
-        this.performRuntimeHttpRequest(request, this.initRequest(requestContent));
-    }
-
-    public void setExceptionBreakpoints(boolean enabled, Iterable<String> exceptions) throws RuntimeDebugClientException {
-        RDBGSetRunTimeErrorProcessingRequest requestContent = ResponseFactory.eINSTANCE.createRDBGSetRunTimeErrorProcessingRequest();
-        RteFilterStorage filter = FilterFactory.eINSTANCE.createRteFilterStorage();
-        filter.setStopOnErrors(enabled);
-        filter.setAnalyzeErrorStr(exceptions != null);
-        if (exceptions != null) {
-
-            for (String errorTemplate : exceptions) {
-                RteFilterItem item = FilterFactory.eINSTANCE.createRteFilterItem();
-                item.setInclude(true);
-                item.setStr(errorTemplate);
-                filter.getStrTemplate().add(item);
-            }
-        }
-
-        requestContent.setState(filter);
-        Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "setBreakOnRTE");
-        this.performRuntimeHttpRequest(request, this.initRequest(requestContent));
+                .param("cmd", "pingDebugUIParams").param("dbgui", this.debugServerUuid.toString());
+        RDBGPingDebugUIResponse responseContent = this.performRuntimeHttpRequest(request, RDBGPingDebugUIResponse.class);
+        return Optional.ofNullable(responseContent).map(RDBGPingDebugUIResponse::getResult);
     }
 
     public List<DebugTargetId> getRuntimeDebugTargets(String debugAreaName) throws RuntimeDebugClientException {
@@ -261,7 +209,8 @@ public class DebugClient extends AbstractDebugClient{
         }
 
         Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "getDbgTargets");
-        RDBGSGetDbgTargetsResponse responseContent = AbstractDebugClient.performRuntimeHttpRequest(this, request, this.initRequest(requestContent), RDBGSGetDbgTargetsResponse.class);
+        RDBGSGetDbgTargetsResponse responseContent = requestCompleteXml(
+                request, this.initRequest(requestContent), RDBGSGetDbgTargetsResponse.class).model();
         if (responseContent == null) {
             throw new RuntimeDebugClientException("Missing XML response to getDbgTargets");
         }
@@ -359,11 +308,79 @@ public class DebugClient extends AbstractDebugClient{
         }
 
         Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "setMeasureMode");
-        var response = requestResponse(request, this.initRequest(requestContent));
-        if (response.hasBody()) {
-            throw new RuntimeDebugClientException("Unexpected response body to setMeasureMode (HTTP "
-                    + response.status() + ")");
+        this.performRuntimeHttpRequest(request, this.initRequest(requestContent));
+    }
+
+    @Override
+    protected <T extends EObject> T performRuntimeHttpRequest(Request request, Class<T> responseClass)
+            throws RuntimeDebugClientException {
+        if (responseClass == RDBGPingDebugUIResponse.class) {
+            DebugResponse<T> response = requestCompleteXml(request, null, responseClass);
+            return response.status() == HttpStatus.NO_CONTENT_204
+                    ? responseClass.cast(ResponseFactory.eINSTANCE.createRDBGPingDebugUIResponse())
+                    : response.model();
         }
+        return super.performRuntimeHttpRequest(request, responseClass);
+    }
+
+    @Override
+    protected void performRuntimeHttpRequest(Request request, EObject requestContent) throws RuntimeDebugClientException {
+        if (requestContent instanceof RDBGSetMeasureModeRequest) {
+            requireEmptyAcknowledgement(request, requestContent, "setMeasureMode");
+        } else if (requestContent instanceof RDBGAttachDetachDebugTargetsRequest targets && targets.isAttach()) {
+            requireEmptyAcknowledgement(request, requestContent, "attachDetachDbgTargets");
+        } else {
+            super.performRuntimeHttpRequest(request, requestContent);
+        }
+    }
+
+    public void setLineBreakpoints(Map<BslModuleInformation, List<BslLineBreakpointInformation>> modulesBreakpoints) throws RuntimeDebugClientException {
+        RDBGSetBreakpointsRequest requestContent = ResponseFactory.eINSTANCE.createRDBGSetBreakpointsRequest();
+        BPWorkspaceInternal breakpointsWorkspace = BreakpointsFactory.eINSTANCE.createBPWorkspaceInternal();
+
+        for (Map.Entry<BslModuleInformation, List<BslLineBreakpointInformation>> bslModuleInformationListEntry : modulesBreakpoints.entrySet()) {
+
+            BslModuleReference reference = bslModuleInformationListEntry.getKey().getReference();
+            ModuleBPInfoInternal breakpointsModuleInfo = BreakpointsFactory.eINSTANCE.createModuleBPInfoInternal();
+            breakpointsModuleInfo.setId(this.createBslModuleId(bslModuleInformationListEntry.getKey(), reference));
+
+            BreakpointInfo breakpointInfoModel;
+            for (Iterator<BslLineBreakpointInformation> var9 = bslModuleInformationListEntry.getValue().iterator();
+                 var9.hasNext(); breakpointsModuleInfo.getBpInfo().add(breakpointInfoModel)) {
+                BslLineBreakpointInformation breakpointInfo = var9.next();
+                breakpointInfoModel = BreakpointsFactory.eINSTANCE.createBreakpointInfo();
+                breakpointInfoModel.setLine(new BigDecimal(breakpointInfo.getLineNumber()));
+                if (breakpointInfo.getCondition() != null) {
+                    breakpointInfoModel.setCondition(breakpointInfo.getCondition());
+                }
+            }
+
+            breakpointsWorkspace.getModuleBPInfo().add(breakpointsModuleInfo);
+        }
+
+        requestContent.setBpWorkspace(breakpointsWorkspace);
+        Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "setBreakpoints");
+        this.performRuntimeHttpRequest(request, this.initRequest(requestContent));
+    }
+
+    public void setExceptionBreakpoints(boolean enabled, Iterable<String> exceptions) throws RuntimeDebugClientException {
+        RDBGSetRunTimeErrorProcessingRequest requestContent = ResponseFactory.eINSTANCE.createRDBGSetRunTimeErrorProcessingRequest();
+        RteFilterStorage filter = FilterFactory.eINSTANCE.createRteFilterStorage();
+        filter.setStopOnErrors(enabled);
+        filter.setAnalyzeErrorStr(exceptions != null);
+        if (exceptions != null) {
+
+            for (String errorTemplate : exceptions) {
+                RteFilterItem item = FilterFactory.eINSTANCE.createRteFilterItem();
+                item.setInclude(true);
+                item.setStr(errorTemplate);
+                filter.getStrTemplate().add(item);
+            }
+        }
+
+        requestContent.setState(filter);
+        Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "setBreakOnRTE");
+        this.performRuntimeHttpRequest(request, this.initRequest(requestContent));
     }
 
     public boolean notifyInfobaseUpdateStart() throws RuntimeDebugClientException {
@@ -417,6 +434,19 @@ public class DebugClient extends AbstractDebugClient{
         }));
         Request request = this.buildRequest(HttpMethod.POST, this.debugComponentUrl).param("cmd", "attachDetachDbgTargets");
         this.performRuntimeHttpRequest(request, this.initRequest(requestContent));
+    }
+
+    public Optional<List<? extends DBGUIExtCmdInfoBase>> pingResponse() throws RuntimeDebugClientException {
+        return pollDebugServer();
+    }
+
+    private void requireEmptyAcknowledgement(Request request, EObject content, String command)
+            throws RuntimeDebugClientException {
+        var response = requestAcknowledgement(request, content);
+        if (response.hasBody()) {
+            throw new RuntimeDebugClientException("Unexpected response body to " + command + " (HTTP "
+                    + response.status() + ")");
+        }
     }
 
     protected SourceCalculationDataInfo buildExpressionPath(BslValuePath expressionPath, UUID expressionUuid, UUID evaluationUuid) {

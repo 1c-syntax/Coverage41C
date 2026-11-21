@@ -29,6 +29,7 @@ import org.slf4j.LoggerFactory;
 
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -130,6 +131,28 @@ public final class UserTargets {
         return id != null && (usersById.containsKey(id) || unknownIds.containsKey(id));
     }
 
+    public static Map<String, String> listedUsersById(List<DebugTargetId> targets) {
+        Map<String, String> names = new HashMap<>();
+        for (DebugTargetId target : targets) {
+            if (target != null && isValidTargetUuid(target.getId())) {
+                String user = userOf(target);
+                if (user != null) {
+                    names.putIfAbsent(Utils.normalizeUuid(target.getId()), user);
+                }
+            }
+        }
+        return names;
+    }
+
+    // The unscoped response supplies a name for this packet. It does not make other targets eligible to attach.
+    public void rememberListedUser(String targetId, Map<String, String> names) {
+        String id = Utils.normalizeUuid(targetId);
+        String user = names.get(id);
+        if (user != null) {
+            usersById.compute(id, (key, known) -> known == null || known.isEmpty() ? user : known);
+        }
+    }
+
     // A successful lookup found no user. Give dbgs time to learn the name before trying again.
     public void markUnknown(String targetId) {
         String id = Utils.normalizeUuid(targetId);
@@ -162,6 +185,17 @@ public final class UserTargets {
                 logger.info("Target {}: user '{}' known from its measures", describe(target), user);
             }
         }
+        return recordVerdict(id, user, verbose);
+    }
+
+    // A deferred packet had no known user at its position in the batch. Use the actual lookup
+    // result, not a later packet's or target announcement's name for the same UUID.
+    public Verdict verdictFromLookup(String targetId, Map<String, String> listedUsers, boolean verbose) {
+        String id = Utils.normalizeUuid(targetId);
+        return recordVerdict(id, id == null || listedUsers == null ? null : listedUsers.get(id), verbose);
+    }
+
+    private Verdict recordVerdict(String id, String user, boolean verbose) {
         Verdict verdict = user == null ? Verdict.UNKNOWN : users.accepts(user) ? Verdict.ACCEPTED : Verdict.REJECTED;
         if (verdict == Verdict.ACCEPTED) {
             matchedUser = true;
@@ -180,6 +214,11 @@ public final class UserTargets {
     // True without a filter; with a filter, true once a target of an allowed user has been seen.
     public boolean matchedAnyTarget() {
         return !isActive() || matchedUser;
+    }
+
+    public boolean hasAcceptedAttachment() {
+        // Eligibility was checked before attach. Later packets can update user information for filtering.
+        return !attachedIds.isEmpty();
     }
 
     public List<String> summary() {

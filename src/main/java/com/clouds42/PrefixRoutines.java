@@ -117,6 +117,10 @@ final class PrefixRoutines {
         return routineAt(line) != null;
     }
 
+    boolean intersects(int firstLine, int lastLine) {
+        return routines.stream().anyMatch(routine -> routine.beginLine <= lastLine && firstLine <= routine.endLine);
+    }
+
     Routine routineAt(int line) {
         for (Routine routine : routines) {
             if (routine.beginLine <= line && line <= routine.endLine) {

@@ -42,6 +42,7 @@ import javax.xml.parsers.DocumentBuilder;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.lang.invoke.MethodHandles;
 import java.math.BigDecimal;
 import java.net.URI;
@@ -59,6 +60,16 @@ import java.util.stream.Stream;
         description = "Convert results from internal uuid-based format",
         sortOptions = false)
 public class ConvertCommand implements Callable<Integer> {
+    private final OutputStream reportOutput;
+
+    public ConvertCommand() {
+        this(null);
+    }
+
+    public ConvertCommand(OutputStream reportOutput) {
+        this.reportOutput = reportOutput;
+    }
+
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -157,22 +168,26 @@ public class ConvertCommand implements Callable<Integer> {
         return false;
     }
 
-    // A mixed RAW file can contain other sources. Check every record before rejecting the selection.
+    private static boolean hasRecordedLines(Element file) {
+        return file.getElementsByTagName("lineToCover").getLength() > 0;
+    }
+
+    // Source selection is based on recorded lines. Empty file entries carry no measurements.
     private void verifySelectedSource(NodeList files, Map<String, URI> sources,
                                       boolean sourceIdentity, boolean includesExtensionAttributes,
                                       boolean singleProcessorSelected, Map<String, String> selectedUrls) {
         boolean selectedSourceFound = false;
         Set<String> otherSources = new TreeSet<>();
         for (int index = 0; index < files.getLength(); index++) {
-            String key = rawFileKey(files.item(index), sourceIdentity, includesExtensionAttributes,
-                    singleProcessorSelected, sources);
-            if (SourceKey.isQualified(key)) {
-                if (SourceKey.matchesSource(key, selectedUrls)) {
-                    selectedSourceFound = true;
-                } else {
-                    otherSources.add(SourceKey.selectionHint(key, metadataOptions.usesNamedSources()));
-                }
-            } else if (resolveFileKey(key, sources) != null) {
+            Element file = (Element) files.item(index);
+            if (!hasRecordedLines(file)) {
+                continue;
+            }
+            String key = rawFileKey(file, sourceIdentity, includesExtensionAttributes, singleProcessorSelected, sources);
+            boolean qualified = SourceKey.isQualified(key);
+            if (qualified && !SourceKey.matchesSource(key, selectedUrls)) {
+                otherSources.add(SourceKey.selectionHint(key, metadataOptions.usesNamedSources()));
+            } else if (qualified || resolveFileKey(key, sources) != null) {
                 selectedSourceFound = true;
             }
         }
@@ -184,9 +199,14 @@ public class ConvertCommand implements Callable<Integer> {
                 + "To convert that source use {} with its sources directory", hint));
     }
 
+    private static boolean isRawElement(Element element, String tag) {
+        // RAW has no default namespace. Empty namespaces on enclosing elements are checked first.
+        return tag.equals(element.getTagName()) && element.getAttribute("xmlns").isEmpty();
+    }
+
     private static Element validateRawReport(Document document) {
         Element coverage = document.getDocumentElement();
-        if (!"coverage".equals(coverage.getTagName())) {
+        if (!isRawElement(coverage, "coverage")) {
             throw new IllegalArgumentException("Expected a RAW coverage XML report");
         }
         boolean sourceIdentity = "true".equals(coverage.getAttribute("sourceIdentity"));
@@ -197,7 +217,7 @@ public class ConvertCommand implements Callable<Integer> {
             if (!(node instanceof Element file)) {
                 continue;
             }
-            if (!"file".equals(file.getTagName()) || file.getAttribute("path").isBlank()) {
+            if (!isRawElement(file, "file") || file.getAttribute("path").isBlank()) {
                 throw new IllegalArgumentException("Expected a file with a path in the RAW coverage report");
             }
             String moduleKey = SourceKey.normalizeRawKey(rawPath(file),
@@ -211,7 +231,7 @@ public class ConvertCommand implements Callable<Integer> {
                     continue;
                 }
                 String covered = line.getAttribute("covered");
-                if (!"lineToCover".equals(line.getTagName()) || !("true".equals(covered) || "false".equals(covered))) {
+                if (!isRawElement(line, "lineToCover") || !("true".equals(covered) || "false".equals(covered))) {
                     throw new IllegalArgumentException("Invalid line entry in the RAW coverage report");
                 }
                 for (Node content = line.getFirstChild(); content != null; content = content.getNextSibling()) {
@@ -251,7 +271,7 @@ public class ConvertCommand implements Callable<Integer> {
 
             metadata = Utils.prepareConversion(metadataOptions,
                     filterOptions.getExtensionName(), filterOptions.getExternalDataProcessorUrl(),
-                    coverageData, rawInput, outputOptions.getOutputFile());
+                    coverageData, rawInput, outputOptions.getOutputFile(), reportOutput);
             Map<String, URI> uriListByKey = metadata.getModuleUris();
             legacySources.clear();
             ambiguousLegacyKeys.clear();
@@ -279,6 +299,10 @@ public class ConvertCommand implements Callable<Integer> {
                 String fileKey = rawFileKey(fileNode, sourceIdentity, includesExtensions,
                         singleProcessorSelected, uriListByKey);
                 if (SourceKey.isQualified(fileKey) && !SourceKey.matchesSource(fileKey, selectedUrls)) {
+                    continue;
+                }
+                // Empty legacy records need no source attribution, even if their key is ambiguous.
+                if (ambiguousLegacyKeys.contains(fileKey) && !hasRecordedLines((Element) fileNode)) {
                     continue;
                 }
                 URI fileUri = resolveFileKey(fileKey, uriListByKey);

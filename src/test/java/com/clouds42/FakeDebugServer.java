@@ -65,10 +65,13 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
+import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 import java.util.zip.Deflater;
 import java.util.zip.DeflaterOutputStream;
+import java.util.zip.GZIPOutputStream;
 
 // Имитация сервера отладки 1С (dbgs): отвечает на команды rdbg, которые шлёт Coverage41C,
 // и отдаёт в ping заранее поставленные события — замеры и старт предметов отладки.
@@ -84,11 +87,17 @@ class FakeDebugServer implements AutoCloseable {
     private final List<DBGUIExtCmdInfoBase> eventsOnMeasureOff = new CopyOnWriteArrayList<>();
     private final BlockingQueue<List<DBGUIExtCmdInfoBase>> finalPolls = new LinkedBlockingQueue<>();
     private volatile boolean profilingDisabled;
+    private final AtomicReference<FinalPingReply> nextFinalPingReply = new AtomicReference<>();
+    private volatile UnaryOperator<String> finalPingXml = UnaryOperator.identity();
     private final AtomicInteger pings = new AtomicInteger();
     private volatile boolean proxyPings;
     private final AtomicBoolean proxyNextPing = new AtomicBoolean();
+    private final AtomicBoolean concatenateNextPing = new AtomicBoolean();
     private final AtomicInteger nextPingFailure = new AtomicInteger();
     private volatile boolean proxyProfilingDisable;
+    private volatile String missingCompressedProfilingDisableReply;
+    private volatile boolean proxyProfilingEnable;
+    private volatile boolean proxyTargetAttachment;
     private volatile AttachDebugUIResult attachResult = AttachDebugUIResult.REGISTERED;
     private volatile String apiVersion = "8.3.24";
     private volatile boolean compressResponses;
@@ -97,6 +106,11 @@ class FakeDebugServer implements AutoCloseable {
     private final Map<String, String> exceptions = new ConcurrentHashMap<>();
     // Что отдаёт getDbgTargets: по умолчанию один серверный предмет без имени пользователя, как раньше.
     private volatile List<DebugTargetId> targets = List.of(target(UUID.randomUUID()));
+    private final Map<String, List<DebugTargetId>> targetsByArea = new ConcurrentHashMap<>();
+
+    enum FinalPingReply {
+        UNAVAILABLE, GZIP, CORRUPT_GZIP
+    }
 
     private static class PausedCommand {
         private final CountDownLatch arrived = new CountDownLatch(1);
@@ -178,12 +192,20 @@ class FakeDebugServer implements AutoCloseable {
         }
     }
 
+    void transformFinalPingXml(UnaryOperator<String> transform) {
+        finalPingXml = transform;
+    }
+
     void sendProxyPings() {
         proxyPings = true;
     }
 
     void sendProxyReplyOnNextPing() {
         proxyNextPing.set(true);
+    }
+
+    void sendConcatenatedXmlOnNextPing() {
+        concatenateNextPing.set(true);
     }
 
     void failNextPing(int status) {
@@ -194,8 +216,32 @@ class FakeDebugServer implements AutoCloseable {
         proxyProfilingDisable = true;
     }
 
+    void sendMissingCompressedReplyWhenProfilingIsDisabled(String encoding) {
+        missingCompressedProfilingDisableReply = encoding;
+    }
+
+    void replyToFirstFinalPingWith(FinalPingReply reply) {
+        nextFinalPingReply.set(reply);
+    }
+
+    void rejectProfilingEnableAcknowledgement() {
+        proxyProfilingEnable = true;
+    }
+
+    void sendProxyReplyForTargetAttachment() {
+        proxyTargetAttachment = true;
+    }
+
+    boolean isProfilingDisabled() {
+        return profilingDisabled;
+    }
+
     void setTargets(DebugTargetId... newTargets) {
         targets = List.of(newTargets);
+    }
+
+    void setTargetsForArea(String area, DebugTargetId... newTargets) {
+        targetsByArea.put(area, List.of(newTargets));
     }
 
     List<String> commands() {
@@ -356,21 +402,60 @@ class FakeDebugServer implements AutoCloseable {
                 exchange.sendResponseHeaders(failure, -1);
                 return;
             }
+            if (profilingDisabled && command.equals("pingDebugUIParams")) {
+                FinalPingReply reply = nextFinalPingReply.getAndSet(null);
+                if (reply != null) {
+                    writeFinalPingReply(exchange, reply);
+                    return;
+                }
+            }
+            if (command.equals("pingDebugUIParams") && concatenateNextPing.getAndSet(false)) {
+                var empty = ResponseFactory.eINSTANCE.createRDBGPingDebugUIResponse();
+                byte[] content = (toDbgsXml(empty) + toDbgsXml(ping())).getBytes(StandardCharsets.UTF_8);
+                exchange.getResponseHeaders().set("Content-Type", "application/xml; charset=UTF-8");
+                exchange.sendResponseHeaders(200, content.length);
+                exchange.getResponseBody().write(content);
+                return;
+            }
+            String missingEncoding = missingCompressedProfilingDisableReply;
+            if (turningProfilingOff && missingEncoding != null) {
+                exchange.getResponseHeaders().set("Content-Encoding", missingEncoding);
+                exchange.sendResponseHeaders(200, -1);
+                return;
+            }
+            boolean invalidEnableAcknowledgement = proxyProfilingEnable && command.equals("setMeasureMode")
+                    && !turningProfilingOff;
             if ((command.equals("pingDebugUIParams") && (proxyPings || proxyNextPing.getAndSet(false)))
-                    || (proxyProfilingDisable && turningProfilingOff)) {
+                    || (proxyProfilingDisable && turningProfilingOff) || invalidEnableAcknowledgement
+                    || (proxyTargetAttachment && command.equals("attachDetachDbgTargets"))) {
                 Thread.sleep(20);
                 byte[] message = "Upstream unavailable".getBytes(StandardCharsets.UTF_8);
+                if (invalidEnableAcknowledgement && compressResponses) {
+                    message = deflate(message);
+                    exchange.getResponseHeaders().set("Content-Encoding", "deflate");
+                }
                 exchange.getResponseHeaders().set("Content-Type", "text/plain");
                 exchange.sendResponseHeaders(200, message.length);
                 exchange.getResponseBody().write(message);
                 return;
             }
-            EObject response = response(command);
+            EObject response = response(command, body);
             if (response == null) {
-                exchange.sendResponseHeaders(200, -1);
+                if (compressResponses && command.equals("setMeasureMode")) {
+                    byte[] compressed = deflate(new byte[0]);
+                    exchange.getResponseHeaders().set("Content-Encoding", "deflate");
+                    exchange.sendResponseHeaders(200, compressed.length);
+                    exchange.getResponseBody().write(compressed);
+                } else {
+                    exchange.sendResponseHeaders(200, -1);
+                }
                 return;
             }
-            byte[] content = toDbgsXml(response).getBytes(StandardCharsets.UTF_8);
+            String xml = toDbgsXml(response);
+            if (profilingDisabled && command.equals("pingDebugUIParams")) {
+                xml = finalPingXml.apply(xml);
+            }
+            byte[] content = xml.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "application/xml; charset=UTF-8");
             if (compressResponses) {
                 content = deflate(content);
@@ -387,7 +472,7 @@ class FakeDebugServer implements AutoCloseable {
         }
     }
 
-    private EObject response(String command) throws InterruptedException {
+    private EObject response(String command, String body) throws InterruptedException {
         switch (command) {
             case "attachDebugUI":
                 RDBGAttachDebugUIResponse attach = ResponseFactory.eINSTANCE.createRDBGAttachDebugUIResponse();
@@ -403,7 +488,10 @@ class FakeDebugServer implements AutoCloseable {
                 return version;
             case "getDbgTargets":
                 RDBGSGetDbgTargetsResponse list = ResponseFactory.eINSTANCE.createRDBGSGetDbgTargetsResponse();
-                targets.forEach(target -> list.getId().add(EcoreUtil.copy(target)));
+                List<DebugTargetId> requestedTargets = targetsByArea.entrySet().stream()
+                        .filter(entry -> body.contains(entry.getKey()))
+                        .map(Map.Entry::getValue).findFirst().orElse(targets);
+                requestedTargets.forEach(target -> list.getId().add(EcoreUtil.copy(target)));
                 return list;
             case "pingDebugUIParams":
                 return ping();
@@ -438,7 +526,27 @@ class FakeDebugServer implements AutoCloseable {
         return serializer.convertToXml(exception).trim();
     }
 
-    private static byte[] deflate(byte[] content) throws IOException {
+    private void writeFinalPingReply(HttpExchange exchange, FinalPingReply reply) throws IOException {
+        if (reply == FinalPingReply.UNAVAILABLE) {
+            exchange.sendResponseHeaders(503, -1);
+            return;
+        }
+        var empty = ResponseFactory.eINSTANCE.createRDBGPingDebugUIResponse();
+        ByteArrayOutputStream compressed = new ByteArrayOutputStream();
+        try (GZIPOutputStream output = new GZIPOutputStream(compressed)) {
+            output.write(toDbgsXml(empty).getBytes(StandardCharsets.UTF_8));
+        }
+        byte[] content = compressed.toByteArray();
+        if (reply == FinalPingReply.CORRUPT_GZIP) {
+            content[content.length - 8] ^= 1; // Corrupt the CRC32 in the gzip trailer.
+        }
+        exchange.getResponseHeaders().set("Content-Type", "application/xml; charset=UTF-8");
+        exchange.getResponseHeaders().set("Content-Encoding", "gzip");
+        exchange.sendResponseHeaders(200, content.length);
+        exchange.getResponseBody().write(content);
+    }
+
+    static byte[] deflate(byte[] content) throws IOException {
         ByteArrayOutputStream compressed = new ByteArrayOutputStream();
         Deflater deflater = new Deflater(Deflater.DEFAULT_COMPRESSION, true);
         try (DeflaterOutputStream output = new DeflaterOutputStream(compressed, deflater)) {

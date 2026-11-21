@@ -1,3 +1,5 @@
+import java.util.spi.ToolProvider
+
 plugins {
     id 'java'
     id 'application'
@@ -124,6 +126,15 @@ startScripts {
   windowsStartScriptGenerator.template = resources.text.fromFile(project.getRootDir().getAbsolutePath() + '/scripts/windowsStartScript.txt')
 }
 
+def testEdtDiscovery = tasks.register('testEdtDiscovery', Exec) {
+    dependsOn tasks.named('installDist')
+    onlyIf { File.separator == '/' }
+    commandLine 'sh', file('src/test/sh/edt-discovery.sh'),
+            layout.buildDirectory.file('install/Coverage41C/bin/Coverage41C').get().asFile
+    doFirst { args(configurations.providedCompile.files) }
+}
+tasks.named('check') { dependsOn testEdtDiscovery }
+
 application {
     mainClass = 'com.clouds42.Coverage41C'
     applicationDefaultJvmArgs = ['--add-opens=java.base/java.net=ALL-UNNAMED']
@@ -131,6 +142,102 @@ application {
 
 jacocoTestReport {
     dependsOn test
+}
+
+// Derive the debugger API required by this build from compiled classes (including method bodies).
+def edtClassList = tasks.register('generateEdtClassList') {
+    def classes = tasks.named('compileJava', JavaCompile).flatMap { it.destinationDirectory }
+    def manifest = layout.buildDirectory.file('generated/edt/required-classes.txt')
+    def factoryManifest = layout.buildDirectory.file('generated/edt/required-factory-methods.txt')
+    def memberManifest = layout.buildDirectory.file('generated/edt/required-members.txt')
+    inputs.dir(classes)
+    inputs.property('jdepsVersion', Runtime.version().toString())
+    outputs.files(manifest, factoryManifest, memberManifest)
+    doLast {
+        def jdeps = ToolProvider.findFirst('jdeps').orElseThrow {
+            new GradleException('Building the EDT class list requires jdeps from a JDK')
+        }
+        def listing = new StringWriter()
+        def diagnostic = new StringWriter()
+        int status = jdeps.run(new PrintWriter(listing), new PrintWriter(diagnostic),
+                '-verbose:class', '-filter:none', classes.get().asFile.absolutePath)
+        if (status != 0) {
+            throw new GradleException("Cannot determine required EDT classes: ${diagnostic}")
+        }
+        def required = new TreeSet<String>()
+        listing.toString().eachLine { line ->
+            def match = line =~ /^\s*\S+\s+->\s+(com\._1c\.g5\.v8\.dt\.(?:internal\.)?debug\.[\w.$]+)\s/
+            if (match.find()) {
+                required.add(match.group(1))
+            }
+        }
+        if (required.empty) {
+            throw new GradleException('No EDT references found in the compiled application classes')
+        }
+        File output = manifest.get().asFile
+        output.parentFile.mkdirs()
+        output.setText(required.join('\n') + '\n', 'UTF-8')
+        // Exact calls avoid resolving optional SDK methods while still rejecting missing used APIs.
+        def javap = ToolProvider.findFirst('javap').orElseThrow {
+            new GradleException('Building the EDT factory method list requires javap from a JDK')
+        }
+        def bytecode = new StringWriter()
+        def javapErrors = new StringWriter()
+        def arguments = ['-c', '-p', '-v'] + fileTree(classes.get().asFile) { include '**/*.class' }
+                .files.collect { it.absolutePath }.sort()
+        int javapStatus = javap.run(new PrintWriter(bytecode), new PrintWriter(javapErrors),
+                arguments as String[])
+        if (javapStatus != 0) {
+            throw new GradleException("Cannot determine required EDT factory methods: ${javapErrors}")
+        }
+        def factories = new TreeSet<String>()
+        def members = new TreeSet<String>()
+        def handleInstructions = [getField: 'getfield', getStatic: 'getstatic', putField: 'putfield',
+                                  putStatic: 'putstatic', invokeVirtual: 'invokevirtual',
+                                  invokeInterface: 'invokeinterface', invokeStatic: 'invokestatic',
+                                  invokeSpecial: 'invokespecial', newInvokeSpecial: 'invokespecial']
+        String caller
+        bytecode.toString().eachLine { line ->
+            if (line.startsWith('Classfile ')) {
+                def file = new File(line.substring('Classfile '.length()))
+                caller = classes.get().asFile.toPath().relativize(file.toPath()).toString()
+                        .replaceAll(/\.class$/, '').replace(File.separatorChar, '.' as char)
+            }
+            def instruction = line =~ /^\s*\d+:\s+(invokevirtual|invokeinterface|invokestatic|invokespecial|getfield|getstatic|putfield|putstatic)\s+.*?\/\/\s+(?:InterfaceMethod|Method|Field) (\S+)$/
+            def handle = line =~ /\bREF_(getField|getStatic|putField|putStatic|invokeVirtual|invokeInterface|invokeStatic|invokeSpecial|newInvokeSpecial) (\S+)\s*$/
+            String opcode = null
+            String reference = null
+            if (instruction.find()) {
+                opcode = instruction.group(1)
+                reference = instruction.group(2)
+            } else if (handle.find()) {
+                opcode = handleInstructions[handle.group(1)]
+                reference = handle.group(2)
+            }
+            if (reference != null) {
+                def member = reference =~ /^(com\/_1c\/g5\/v8\/dt\/(?:internal\/)?debug\/[\w\/$]+)\.("?[^":]+"?):(\S+)$/
+                if (member.matches()) {
+                    members.add("${opcode} ${member.group(1).replace('/', '.')} ${member.group(2).replace('"', '')} ${member.group(3)} ${caller}")
+                }
+            }
+            def call = line =~ /(?:InterfaceMethod|Method|REF_invokeInterface|REF_invokeVirtual) (com\/_1c\/g5\/v8\/dt\/(?:internal\/)?debug\/[\w\/$]+Factory)\.(create[\w$]+):\(\)L([^;]+);/
+            if (call.find()) {
+                factories.add("${call.group(1).replace('/', '.')} ${call.group(2)} ${call.group(3).replace('/', '.')}")
+            }
+        }
+        if (factories.empty) {
+            throw new GradleException('No EDT factory calls found in the compiled application classes')
+        }
+        factoryManifest.get().asFile.setText(factories.join('\n') + '\n', 'UTF-8')
+        if (members.empty) {
+            throw new GradleException('No EDT member references found in the compiled application classes')
+        }
+        memberManifest.get().asFile.setText(members.join('\n') + '\n', 'UTF-8')
+    }
+}
+
+tasks.named('jar', Jar) {
+    from(edtClassList) { into 'META-INF/coverage41c' }
 }
 
 buildConfig {

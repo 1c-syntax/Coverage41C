@@ -176,8 +176,19 @@ public class MetadataOptions {
         if (projectDirName.isEmpty() && !srcDirName.isEmpty()) {
             Path source = Path.of(srcDirName);
             if (Files.isRegularFile(source)) {
-                projectDirName = source.toAbsolutePath().getParent().toString();
-                srcDirName = source.getFileName().toString();
+                Path descriptor = source.toAbsolutePath();
+                if (Files.isSymbolicLink(descriptor)) {
+                    try {
+                        projectDirName = descriptor.toRealPath().getParent().toString();
+                    } catch (IOException error) {
+                        throw new IllegalArgumentException("Cannot resolve source file: " + descriptor, error);
+                    }
+                    // Keep the supplied path as an input even though report paths use the physical directory.
+                    srcDirName = descriptor.toString();
+                } else {
+                    projectDirName = descriptor.getParent().toString();
+                    srcDirName = descriptor.getFileName().toString();
+                }
             } else {
                 // With only -s, a directory defines both project and source roots.
                 projectDirName = srcDirName;

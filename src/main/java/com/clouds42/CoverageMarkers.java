@@ -41,8 +41,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiPredicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 final class CoverageMarkers {
 
@@ -56,9 +58,9 @@ final class CoverageMarkers {
     static final Set<String> FILE_OFF = Set.of("file-off", "файл-выкл");
 
     private final List<CoverageMarker> markers;
-    private final List<String> warnings;
+    private final List<Warning> warnings;
 
-    private CoverageMarkers(List<CoverageMarker> markers, List<String> warnings) {
+    private CoverageMarkers(List<CoverageMarker> markers, List<Warning> warnings) {
         this.markers = markers;
         this.warnings = warnings;
     }
@@ -67,7 +69,7 @@ final class CoverageMarkers {
         List<Token> tokens = tokenizer.getTokens();
         int lastLine = tokens.isEmpty() ? 1 : tokens.get(tokens.size() - 1).getLine();
         List<CoverageMarker> markers = new ArrayList<>();
-        List<String> warnings = new ArrayList<>();
+        List<Warning> warnings = new ArrayList<>();
         Deque<Open> open = new ArrayDeque<>();
         Map<Integer, Range<Integer>> blocks = null;
         int firstCodeIndex = firstCodeIndex(tokens);
@@ -85,13 +87,13 @@ final class CoverageMarkers {
                     markers.add(new CoverageMarker(CoverageMarker.Kind.OFF, label, line, 1, lastLine,
                             reason(token.getText().substring(matcher.end()))));
                 } else {
-                    warnings.add(line + ": " + label + " ignored, it must precede module code");
+                    warnings.add(new Warning(line, line, label + " ignored, it must precede module code"));
                 }
                 continue;
             }
             if (ON.contains(word)) {
                 if (open.isEmpty()) {
-                    warnings.add(line + ": " + label + " without open Cover:off or Cover:auto");
+                    warnings.add(new Warning(line, line, label + " without open Cover:off or Cover:auto"));
                 } else {
                     markers.add(open.pop().close(line));
                 }
@@ -118,7 +120,8 @@ final class CoverageMarkers {
         while (!open.isEmpty()) {
             Open unclosed = open.pop();
             markers.add(unclosed.close(lastLine));
-            warnings.add(unclosed.line + ": " + unclosed.label + " is not closed, excluded up to end of module");
+            warnings.add(new Warning(unclosed.line, lastLine,
+                    unclosed.label + " is not closed, excluded up to end of module"));
         }
         markers.sort(Comparator.comparingInt(CoverageMarker::getLine));
         return new CoverageMarkers(markers, warnings);
@@ -129,7 +132,26 @@ final class CoverageMarkers {
     }
 
     List<String> getWarnings() {
-        return warnings;
+        return getWarningsIntersecting((first, last) -> true);
+    }
+
+    List<String> getWarningsIntersecting(BiPredicate<Integer, Integer> intersectsScope) {
+        return warnings.stream()
+                .filter(warning -> intersectsScope.test(warning.line, warning.lastAffectedLine))
+                .map(warning -> warning.line + ": " + warning.message)
+                .collect(Collectors.toList());
+    }
+
+    private static final class Warning {
+        private final int line;
+        private final int lastAffectedLine;
+        private final String message;
+
+        private Warning(int line, int lastAffectedLine, String message) {
+            this.line = line;
+            this.lastAffectedLine = lastAffectedLine;
+            this.message = message;
+        }
     }
 
     private static String reason(String tail) {

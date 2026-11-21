@@ -357,6 +357,29 @@ class MultipleSourcesTest {
     }
 
     @Test
+    void emptyAmbiguousLegacyKeyDoesNotRequireSourceSelection() throws Exception {
+        String emptyRecord = "<file path=\"" + KEY + "\"/>";
+        String[] sources = {"--source", "=configuration", "--source", "A=extensions/A"};
+        Map<Integer, Boolean> uncovered = Map.of(2, false, 4, false, 6, false);
+
+        Files.writeString(raw, "<coverage>" + emptyRecord + "</coverage>");
+        StringWriter error = new StringWriter();
+        assertEquals(0, convert(error, sources), error.toString());
+        Map<String, Map<Integer, Boolean>> result = coverage(output);
+        assertEquals(uncovered, result.get("configuration/" + MODULE));
+        assertEquals(uncovered, result.get("extensions/A/" + MODULE));
+
+        String measurement = "<file path=\"" + SourceKey.qualify(KEY, "A", "") + "\">"
+                + "<lineToCover covered=\"true\" lineNumber=\"4\"/></file>";
+        Files.writeString(raw, "<coverage>" + emptyRecord + measurement + "</coverage>");
+        error = new StringWriter();
+        assertEquals(0, convert(error, sources), error.toString());
+        result = coverage(output);
+        assertEquals(uncovered, result.get("configuration/" + MODULE));
+        assertEquals(Map.of(2, false, 4, true, 6, false), result.get("extensions/A/" + MODULE));
+    }
+
+    @Test
     void legacyKeyMustNotCoverTwoSourcesWithTheSameUuid() throws Exception {
         writeRaw(KEY, 4, KEY, 2);
         StringWriter error = new StringWriter();

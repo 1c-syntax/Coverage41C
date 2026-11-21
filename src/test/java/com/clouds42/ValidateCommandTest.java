@@ -35,6 +35,7 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -219,6 +220,24 @@ class ValidateCommandTest {
     }
 
     @Test
+    void resolvesParentTraversalAfterDirectoryLinkBeforeCheckingExport() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path source = project.resolve("configuration");
+        Path other = Files.createDirectory(project.resolve("other"));
+        Files.createDirectory(other.resolve("child"));
+        Files.createDirectory(other.resolve("Ext"));
+        Path alias = source.resolve("to-child");
+        linkForExportTest(alias, Path.of("../other/child"));
+        Path output = alias.resolve("../Ext/report.json");
+        StringWriter stderr = new StringWriter();
+
+        assertEquals(CommandLine.ExitCode.OK, validateProject(project, stderr,
+                "--exclusion-report", output.toString()), stderr.toString());
+        assertTrue(Files.isRegularFile(other.resolve("Ext/report.json")));
+        assertFalse(Files.exists(source.resolve("Ext/report.json")));
+    }
+
+    @Test
     void refusesNewReportVisibleThroughReverseDirectoryLink() throws Exception {
         Path project = TestUtils.copyConfiguration(tempDir);
         Path outside = Files.createDirectory(tempDir.resolve("outside"));
@@ -265,6 +284,91 @@ class ValidateCommandTest {
             assertTrue(stderr.toString().contains("overwrite input file"), stderr.toString());
             assertFalse(Files.exists(index));
         }
+    }
+
+    @Test
+    void reservedExportFileCannotBecomeAReportDirectory() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path root = project.resolve("configuration");
+        Path reserved = root.resolve("ConfigDumpInfo.xml");
+        Files.deleteIfExists(reserved);
+
+        assertReportAncestorRejected(project, reserved.resolve("nested/deeper/summary.json"));
+        assertFalse(Files.exists(reserved));
+
+        Path sibling = root.resolve("ConfigDumpInfo.xml-reports/nested/summary.json");
+        StringWriter stderr = new StringWriter();
+        assertEquals(CommandLine.ExitCode.OK, validateProject(project, stderr,
+                "--exclusion-report", sibling.toString()), stderr.toString());
+        assertTrue(new ObjectMapper().readTree(sibling.toFile()).has("totalLines"));
+    }
+
+    @Test
+    void reservedExportFileAliasesCannotBecomeReportDirectories() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path root = project.resolve("configuration");
+        Path reserved = root.resolve("ConfigDumpInfo.xml");
+        Files.deleteIfExists(reserved);
+        Path projectAlias = tempDir.resolve("export-alias");
+        linkForExportTest(projectAlias, root);
+
+        assertReportAncestorRejected(project, projectAlias.resolve("ConfigDumpInfo.xml/nested/summary.json"));
+        assertFalse(Files.exists(reserved));
+
+        Path future = tempDir.resolve("future-index");
+        linkForExportTest(reserved, future);
+        assertReportAncestorRejected(project, future.resolve("nested/summary.json"));
+        assertTrue(Files.isSymbolicLink(reserved));
+        assertFalse(Files.exists(future));
+    }
+
+    @Test
+    void writesReportInWritableChildOfReadOnlyExport() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path root = project.resolve("configuration");
+        assumeTrue(root.getFileSystem().supportedFileAttributeViews().contains("posix"));
+        Files.deleteIfExists(root.resolve("ConfigDumpInfo.xml"));
+        Path reports = Files.createDirectory(root.resolve("reports"));
+        Path output = reports.resolve("summary.json");
+        var permissions = Files.getPosixFilePermissions(root);
+        Files.setPosixFilePermissions(root, PosixFilePermissions.fromString("r-xr-xr-x"));
+        try {
+            StringWriter stderr = new StringWriter();
+            assertEquals(CommandLine.ExitCode.OK, validateProject(project, stderr,
+                    "--exclusion-report", output.toString()), stderr.toString());
+            assertTrue(new ObjectMapper().readTree(output.toFile()).has("totalLines"));
+        } finally {
+            Files.setPosixFilePermissions(root, permissions);
+        }
+    }
+
+    private static void assertReportAncestorRejected(Path project, Path report) {
+        for (int attempt = 0; attempt < 2; attempt++) {
+            StringWriter stderr = new StringWriter();
+            assertEquals(CommandLine.ExitCode.SOFTWARE, validateProject(project, stderr,
+                    "--exclusion-report", report.toString()), stderr.toString());
+            assertTrue(stderr.toString().contains("input file as an output directory"), stderr.toString());
+            assertFalse(Files.exists(report.getParent()));
+        }
+    }
+
+    @Test
+    void rejectsTerminalDirectoryComponentsInValidationReport() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path parent = tempDir.resolve("new");
+        for (Path invalid : List.of(parent.resolve("."), parent.resolve(".."))) {
+            StringWriter stderr = new StringWriter();
+            assertEquals(CommandLine.ExitCode.SOFTWARE, validateProject(project, stderr,
+                    "--exclusion-report", invalid.toString()), stderr.toString());
+            assertTrue(stderr.toString().contains("must name a file"), stderr.toString());
+            assertFalse(Files.exists(parent));
+        }
+
+        Path valid = parent.resolve("./summary.json");
+        StringWriter stderr = new StringWriter();
+        assertEquals(CommandLine.ExitCode.OK, validateProject(project, stderr,
+                "--exclusion-report", valid.toString()), stderr.toString());
+        assertTrue(new ObjectMapper().readTree(valid.toFile()).has("totalLines"));
     }
 
     private void assertNewReportRejectedTwice(Path project, Path report) throws Exception {
@@ -339,6 +443,45 @@ class ValidateCommandTest {
                 + " is inside the configuration directory and would be read as a config on the next run"),
                 stderr.toString());
         assertFalse(Files.exists(report));
+    }
+
+    @Test
+    void missingDirectoryAndLinkCannotCreateReportInsideRules() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path config = Files.createDirectory(project.resolve("rules"));
+        Files.writeString(config.resolve("rules.json"), "{\"exclude\":{\"objects\":[\"Catalog.Справочник1\"]}}");
+        Path alias = project.resolve("alias");
+        try {
+            Files.createSymbolicLink(alias, config);
+        } catch (IOException | UnsupportedOperationException e) {
+            assumeTrue(false, "Symbolic links are unavailable: " + e.getMessage());
+        }
+        Path output = alias.resolve("missing/../generated.json");
+        StringWriter stderr = new StringWriter();
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, validateProject(project, stderr, "--config", config.toString(),
+                "--exclusion-report", output.toString()), stderr.toString());
+        assertFalse(Files.exists(config.resolve("generated.json")));
+        assertFalse(Files.exists(config.resolve("missing")));
+        assertEquals(CommandLine.ExitCode.OK, validateProject(project, new StringWriter(), "--config",
+                config.toString(), "--strict"));
+    }
+
+    @Test
+    void safeCommandLineReportReplacesUnusedUnsafeConfiguredPath() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path config = Files.createDirectory(project.resolve("rules"));
+        Files.writeString(config.resolve("rules.json"), "{\"exclusionReport\":\"rules/generated.json\","
+                + "\"exclude\":{\"objects\":[\"Catalog.Справочник1\"]}}");
+        Path output = project.resolve("report.json");
+        StringWriter stderr = new StringWriter();
+
+        assertEquals(CommandLine.ExitCode.OK, validateProject(project, stderr, "--config", config.toString(),
+                "--exclusion-report", output.toString(), "--strict"), stderr.toString());
+        assertTrue(Files.isRegularFile(output));
+        assertFalse(Files.exists(config.resolve("generated.json")));
+        assertEquals(CommandLine.ExitCode.SOFTWARE, validateProject(project, new StringWriter(), "--config",
+                config.toString(), "--strict"));
     }
 
     @Test
@@ -431,6 +574,46 @@ class ValidateCommandTest {
         assertTrue(output.contains("Change blocks: 1 line(s) returned to coverage from 1 block(s) in 1 module(s)"),
                 output);
         assertTrue(output.contains("  1 lines: team.json → changeMarkers[0]"), output);
+    }
+
+    @Test
+    void strictValidatesMarkerDiagnosticsOnlyInsideSelectedChangeBlock() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path module = project.resolve(SIMPLE_MODULE);
+        String code = "Процедура А()\n// ++\nБ();\n// --\n// Cover:on\nКонецПроцедуры\n";
+        Files.writeString(module, code);
+        File config = config("{'includeSubsystems':['ПодчиненнаяПодсистема'],'changeMarkers':{}}");
+        Path report = tempDir.resolve("exclusions.json");
+
+        assertEquals(CommandLine.ExitCode.OK, validateProject(project, new StringWriter(), "--config",
+                config.getPath(), "--strict", "--exclusion-report", report.toString()));
+        assertEquals(List.of(), warnings(report));
+        assertEquals(1, new ObjectMapper().readTree(report.toFile()).path("includedLines").asInt());
+
+        Files.writeString(module, code.replace("Б();", "// Cover:on\nБ();"));
+        assertEquals(CommandLine.ExitCode.SOFTWARE, validateProject(project, new StringWriter(), "--config",
+                config.getPath(), "--strict", "--exclusion-report", report.toString()));
+        assertEquals(List.of(SIMPLE_MODULE + ":3: Cover:on without open Cover:off or Cover:auto"), warnings(report));
+    }
+
+    @Test
+    void strictValidatesMarkerDiagnosticsOnlyInsidePrefixedRoutine() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path module = project.resolve(SIMPLE_MODULE);
+        String code = "Процедура ТестА()\nБ();\nКонецПроцедуры\n// Cover:on\n";
+        Files.writeString(module, code);
+        File config = config("{'includePrefix':['Тест'],'prefixScope':{'routines':true}}");
+        Path report = tempDir.resolve("exclusions.json");
+
+        assertEquals(CommandLine.ExitCode.OK, validateProject(project, new StringWriter(), "--config",
+                config.getPath(), "--strict", "--exclusion-report", report.toString()));
+        assertEquals(List.of(), warnings(report));
+        assertEquals(2, new ObjectMapper().readTree(report.toFile()).path("totalLines").asInt());
+
+        Files.writeString(module, code.replace("Б();", "// Cover:on\nБ();"));
+        assertEquals(CommandLine.ExitCode.SOFTWARE, validateProject(project, new StringWriter(), "--config",
+                config.getPath(), "--strict", "--exclusion-report", report.toString()));
+        assertEquals(List.of(SIMPLE_MODULE + ":2: Cover:on without open Cover:off or Cover:auto"), warnings(report));
     }
 
     @Test

@@ -390,6 +390,8 @@ class CoverMapBuilderTest {
 
         assertEquals(Map.of(), outside(rules("{'changeMarkers':{}}"), report, "// Cover:off\n" + text(CHANGED)));
         assertEquals(1, report.getChangeBlocks().iterator().next().getBlocks());
+        assertEquals(List.of("Module.bsl:1: Cover:off is not closed, excluded up to end of module"),
+                report.getWarnings());
     }
 
     @Test
@@ -441,6 +443,23 @@ class CoverMapBuilderTest {
                 "\t// Cover:off", "\tТиповой();", "\t// Cover:on", "\t// ++ уч", "\tНаш();", "\t// -- уч",
                 "КонецПроцедуры")));
         assertTrue(report.getWarnings().isEmpty(), report.getWarnings().toString());
+    }
+
+    @Test
+    void unclosedMarkerAfterChangeBlockDoesNotWarn() throws Exception {
+        ExclusionReport report = new ExclusionReport();
+        assertEquals(Map.of(3, 0), outside(rules("{'changeMarkers':{}}"), report, text("Процедура А()",
+                "// ++", "Б();", "// --", "// Cover:off", "В();", "КонецПроцедуры")));
+        assertEquals(List.of(), report.getWarnings());
+    }
+
+    @Test
+    void markerPairAcrossScopeBoundariesStillExcludesIncludedLine() throws Exception {
+        ExclusionReport report = new ExclusionReport();
+        assertEquals(Map.of(), outside(rules("{'changeMarkers':{}}"), report, text("Процедура А()",
+                "// Cover:off", "// ++", "Б();", "// --", "// Cover:on", "В();", "КонецПроцедуры")));
+        assertEquals(List.of(), report.getWarnings());
+        assertEquals(1, report.getExcludedLines());
     }
 
     @Test

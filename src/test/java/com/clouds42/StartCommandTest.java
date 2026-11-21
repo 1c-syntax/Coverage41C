@@ -24,11 +24,13 @@ package com.clouds42;
 import com._1c.g5.v8.dt.debug.model.base.data.AttachDebugUIResult;
 import com._1c.g5.v8.dt.debug.model.base.data.DebugTargetId;
 import com._1c.g5.v8.dt.debug.model.base.data.DebugTargetType;
+import com._1c.g5.v8.dt.debug.model.dbgui.commands.CommandsFactory;
 import com._1c.g5.v8.dt.debug.model.dbgui.commands.DBGUIExtCmdInfoBase;
 import com._1c.g5.v8.dt.debug.model.dbgui.commands.DBGUIExtCmdInfoMeasure;
 import com._1c.g5.v8.dt.debug.model.dbgui.commands.DBGUIExtCmds;
 import com.clouds42.CommandLineOptions.ConnectionOptions;
 import com.clouds42.Commands.CoverageCommand;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,9 +46,12 @@ import picocli.CommandLine;
 
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -55,6 +60,7 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -64,12 +70,14 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -152,6 +160,34 @@ class StartCommandTest {
     }
 
     @Test
+    void unavailableDebugAreaFailsEmptyRawCollection() throws Exception {
+        dbgs.fail("getDbgTargets", 204);
+        Future<Integer> start = startRaw("-n", "Area");
+
+        int stopResult = send(PipeMessages.EXIT_COMMAND);
+        int startResult = start.get(TIMEOUT, TimeUnit.SECONDS);
+        assertEquals(CommandLine.ExitCode.SOFTWARE, stopResult);
+        assertEquals(CommandLine.ExitCode.SOFTWARE, startResult);
+        NodeList files = Utils.newInputXmlBuilder().parse(output.toFile()).getElementsByTagName("file");
+        assertEquals(0, files.getLength());
+    }
+
+    @Test
+    void unavailableDebugAreaFailsWhenAllMeasuresAreExcluded() throws Exception {
+        Path config = tempDir.resolve("exclusions.json");
+        Files.writeString(config, "{\"exclude\":{\"objects\":[\"CommonModule.ПростойОбщийМодуль\"]}}");
+        dbgs.fail("getDbgTargets", 204);
+        Future<Integer> start = start("-n", "Area", "--config", config.toString());
+        dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
+
+        int stopResult = send(PipeMessages.EXIT_COMMAND);
+        int startResult = start.get(TIMEOUT, TimeUnit.SECONDS);
+        assertEquals(null, coverage());
+        assertEquals(CommandLine.ExitCode.SOFTWARE, stopResult);
+        assertEquals(CommandLine.ExitCode.SOFTWARE, startResult);
+    }
+
+    @Test
     void stopWritesMeasuredCoverage() throws Exception {
         Future<Integer> start = start();
 
@@ -194,6 +230,260 @@ class StartCommandTest {
         assertTrue(Files.exists(report));
         assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
         assertEquals(CommandLine.ExitCode.OK, start.get(TIMEOUT, TimeUnit.SECONDS));
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void readOnlyPublishedJsonSurvivesSharedAndSeparateEmbeddedDumps() throws Exception {
+        Path json = tempDir.resolve("exclusions.json");
+        Future<Integer> start = executor.submit(() -> Coverage41C.getCommandLine().execute("start",
+                "-i", infobase, "-u", dbgs.url(), "-t", "10", "-s", "src/test/resources/configuration",
+                "--exclusion-report", json.toString()));
+        awaitStarted(start);
+        byte[] expected = Files.readAllBytes(json);
+        Path link = Files.createLink(tempDir.resolve("alias"), json);
+        var originalMode = Files.getPosixFilePermissions(json);
+        var readOnly = PosixFilePermissions.fromString("r--r--r--");
+        ByteArrayOutputStream captured = new ByteArrayOutputStream();
+        PrintStream original = System.out;
+        try (PrintStream shared = new PrintStream(new FileOutputStream(link.toFile(), true));
+             PrintStream separate = new PrintStream(captured)) {
+            Files.setPosixFilePermissions(json, readOnly);
+            System.setOut(shared);
+            assertEquals(1, send(PipeMessages.DUMP_COMMAND));
+            assertArrayEquals(expected, Files.readAllBytes(link));
+            System.setOut(separate);
+            assertEquals(0, send(PipeMessages.DUMP_COMMAND));
+            assertEquals("coverage", Utils.newInputXmlBuilder().parse(
+                    new ByteArrayInputStream(captured.toByteArray())).getDocumentElement().getTagName());
+            captured.reset();
+            assertEquals(0, send(PipeMessages.EXIT_COMMAND));
+            assertEquals(0, start.get(TIMEOUT, TimeUnit.SECONDS));
+            assertEquals("coverage", Utils.newInputXmlBuilder().parse(
+                    new ByteArrayInputStream(captured.toByteArray())).getDocumentElement().getTagName());
+            assertTrue(Files.isSameFile(link, json));
+            assertArrayEquals(expected, Files.readAllBytes(json));
+            assertEquals(readOnly, Files.getPosixFilePermissions(json));
+        } finally {
+            System.setOut(original);
+            Files.setPosixFilePermissions(json, originalMode);
+        }
+    }
+
+    @Test
+    void defaultJavaStartUsesCurrentSystemOutForDumpAndStop() throws Exception {
+        assertStartUsesCurrentSystemOut(Coverage41C.getCommandLine(), "start");
+    }
+
+    @Test
+    void directCollectorUsesCurrentSystemOutForDumpAndStop() throws Exception {
+        assertStartUsesCurrentSystemOut(new CommandLine(new CoverageCommand(TEST_FINAL_MEASURE_WINDOW,
+                TEST_FINAL_CONFIRMATION_TIMEOUT) { }));
+    }
+
+    private void assertStartUsesCurrentSystemOut(CommandLine command, String... prefix) throws Exception {
+        Path report = tempDir.resolve("exclusions.json");
+        List<String> arguments = new ArrayList<>(Arrays.asList(prefix));
+        arguments.addAll(List.of("-i", infobase, "-u", dbgs.url(), "-t", "10",
+                "-s", "src/test/resources/configuration", "--exclusion-report", report.toString()));
+        Future<Integer> start = executor.submit(() -> command.execute(arguments.toArray(new String[0])));
+        awaitStarted(start);
+        dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
+        byte[] json = Files.readAllBytes(report);
+        ByteArrayOutputStream dump = new ByteArrayOutputStream();
+        ByteArrayOutputStream stop = new ByteArrayOutputStream();
+        PrintStream original = System.out;
+        PrintStream failed = new PrintStream(OutputStream.nullOutputStream());
+        failed.close();
+        failed.write(0);
+        try (PrintStream first = new PrintStream(dump); PrintStream second = new PrintStream(stop);
+             PrintStream conflicting = new PrintStream(new FileOutputStream(report.toFile(), true))) {
+            System.setOut(failed);
+            int failedDump = send(PipeMessages.DUMP_COMMAND);
+            System.setOut(conflicting);
+            int conflictingDump = send(PipeMessages.DUMP_COMMAND);
+            System.setOut(first);
+            int dumpResult = send(PipeMessages.DUMP_COMMAND);
+            System.setOut(second);
+            assertEquals(0, send(PipeMessages.EXIT_COMMAND));
+            assertEquals(0, start.get(TIMEOUT, TimeUnit.SECONDS));
+            assertEquals(1, failedDump);
+            assertEquals(1, conflictingDump);
+            assertEquals(0, dumpResult);
+        } finally {
+            System.setOut(original);
+        }
+        for (ByteArrayOutputStream captured : List.of(dump, stop)) {
+            assertTrue(captured.size() > 0, "The current System.out did not receive coverage");
+            var xml = Utils.newInputXmlBuilder().parse(new ByteArrayInputStream(captured.toByteArray()));
+            assertEquals("coverage", xml.getDocumentElement().getTagName());
+        }
+        assertArrayEquals(json, Files.readAllBytes(report));
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void explicitStartFactoryUsesBorrowedStreamForStdoutAlias() throws Exception {
+        ByteArrayOutputStream captured = new ByteArrayOutputStream();
+        Path report = tempDir.resolve("exclusions.json");
+        Future<Integer> start = executor.submit(() -> Coverage41C.getCommandLine(captured).execute("start",
+                "-i", infobase, "-u", dbgs.url(), "-t", "10", "-s", "src/test/resources/configuration",
+                "-o", "/dev/stdout", "--exclusion-report", report.toString()));
+        awaitStarted(start);
+        assertEquals(0, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(0, start.get(TIMEOUT, TimeUnit.SECONDS));
+        var xml = Utils.newInputXmlBuilder().parse(new ByteArrayInputStream(captured.toByteArray()));
+        assertEquals("coverage", xml.getDocumentElement().getTagName());
+        assertTrue(new ObjectMapper().readTree(report.toFile()).has("totalLines"));
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void explicitStdoutPathOnDefaultStartUsesDescriptorDespiteSystemSetOut() throws Exception {
+        Path capture = tempDir.resolve("capture.xml");
+        Path report = tempDir.resolve("exclusions.json");
+        Path alias = Files.createSymbolicLink(tempDir.resolve("stdout"), Path.of("/dev/stdout"));
+        Process collector = embeddedStart("redirected", capture, report, output, "-o", alias.toString());
+        try {
+            awaitStarted(collector.onExit().thenApply(Process::exitValue));
+            assertEquals(0, send(PipeMessages.EXIT_COMMAND));
+            assertTrue(collector.waitFor(TIMEOUT, TimeUnit.SECONDS));
+            assertEquals(0, collector.exitValue());
+            assertEquals(0, Files.size(capture));
+            assertEquals("coverage", Utils.newInputXmlBuilder().parse(output.toFile()).getDocumentElement().getTagName());
+            assertTrue(new ObjectMapper().readTree(report.toFile()).has("totalLines"));
+        } finally {
+            collector.destroyForcibly();
+        }
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void explicitStdoutPathOnDefaultStartRejectsJsonAtDescriptorBeforeMeasuring() throws Exception {
+        Path capture = tempDir.resolve("capture.xml");
+        Files.writeString(output, "original");
+        dbgs.fail("attachDebugUI", 503);
+        Process collector = embeddedStart("redirected", capture, output, output, "-o", "/dev/stdout");
+        try {
+            assertTrue(collector.waitFor(TIMEOUT, TimeUnit.SECONDS));
+            assertEquals(1, collector.exitValue());
+            assertEquals("original", Files.readString(output));
+            assertTrue(dbgs.requests("attachDebugUI").isEmpty());
+        } finally {
+            collector.destroyForcibly();
+        }
+    }
+
+    @Test
+    void embeddedStartKeepsJsonWhenSystemStdoutIsRedirectedToIt() throws Exception {
+        assertEmbeddedReports("memory", false);
+    }
+
+    @Test
+    void embeddedStartWritesSeparateFileStreamAndJson() throws Exception {
+        assertEmbeddedReports("file", false);
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void embeddedStartCanWriteJsonToProcessStdoutAndCoverageToMemory() throws Exception {
+        assertEmbeddedReports("memory", true);
+    }
+
+    private void assertEmbeddedReports(String sink, boolean jsonToStdout) throws Exception {
+        Path report = tempDir.resolve("exclusions.json");
+        Process collector = embeddedStart(sink, output, jsonToStdout ? Path.of("/dev/stdout") : report, report);
+        try {
+            awaitStarted(collector.onExit().thenApply(Process::exitValue));
+            assertEquals(0, send(PipeMessages.EXIT_COMMAND));
+            assertTrue(collector.waitFor(TIMEOUT, TimeUnit.SECONDS));
+            assertEquals(0, collector.exitValue());
+            assertEquals("coverage", Utils.newInputXmlBuilder().parse(output.toFile()).getDocumentElement().getTagName());
+            assertTrue(new ObjectMapper().readTree(report.toFile()).has("totalLines"));
+        } finally {
+            collector.destroyForcibly();
+        }
+    }
+
+    @Test
+    @DisabledOnOs(OS.WINDOWS)
+    void embeddedStartSendsExplicitStdoutJsonToProcessWhenCoverageIsNamed() throws Exception {
+        Path report = tempDir.resolve("exclusions.json");
+        Path unused = tempDir.resolve("unused");
+        Process collector = embeddedStart("unused", unused, Path.of("/dev/stdout"), report, "-o", output.toString());
+        try {
+            awaitStarted(collector.onExit().thenApply(Process::exitValue));
+            assertEquals(0, send(PipeMessages.EXIT_COMMAND));
+            assertTrue(collector.waitFor(TIMEOUT, TimeUnit.SECONDS));
+            assertEquals(0, collector.exitValue());
+            assertEquals("coverage", Utils.newInputXmlBuilder().parse(output.toFile()).getDocumentElement().getTagName());
+            assertTrue(new ObjectMapper().readTree(report.toFile()).has("totalLines"));
+        } finally {
+            collector.destroyForcibly();
+        }
+    }
+
+    @Test
+    void embeddedDumpAndStopPreserveJsonAtHardLinkToCoverageStream() throws Exception {
+        Path report = Files.writeString(tempDir.resolve("exclusions.json"), "{}");
+        Path link = Files.createLink(output, report);
+        Process collector = embeddedStart("file", link, report, tempDir.resolve("stdout"));
+        try {
+            awaitStarted(collector.onExit().thenApply(Process::exitValue));
+            String json = Files.readString(report);
+            assertTrue(new ObjectMapper().readTree(json).has("totalLines"));
+            assertEquals(1, send(PipeMessages.DUMP_COMMAND));
+            assertEquals(json, Files.readString(link));
+            assertEquals(1, send(PipeMessages.EXIT_COMMAND));
+            assertTrue(collector.waitFor(TIMEOUT, TimeUnit.SECONDS));
+            assertEquals(1, collector.exitValue());
+            assertEquals(json, Files.readString(report));
+        } finally {
+            collector.destroyForcibly();
+        }
+    }
+
+    private Process embeddedStart(String sink, Path capture, Path report, Path stdout, String... options) throws IOException {
+        ProcessBuilder builder = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-cp", System.getProperty("coverage41c.testClasspath", System.getProperty("java.class.path")),
+                EmbeddedStartProbe.class.getName(), sink, capture.toString(), "-i", infobase, "-u", dbgs.url(),
+                "-s", "src/test/resources/configuration", "-t", "10", "--exclusion-report", report.toString());
+        builder.command().addAll(Arrays.asList(options));
+        return builder.redirectOutput(ProcessBuilder.Redirect.appendTo(stdout.toFile()))
+                .redirectError(tempDir.resolve("embedded-start.log").toFile()).start();
+    }
+
+    public static class EmbeddedStartProbe {
+        public static void main(String[] args) throws Exception {
+            boolean memory = args[0].equals("memory");
+            Path path = Path.of(args[1]);
+            int code;
+            if (args[0].equals("redirected")) {
+                try (PrintStream captured = new PrintStream(path.toFile())) {
+                    System.setOut(captured);
+                    List<String> start = new ArrayList<>(List.of("start"));
+                    start.addAll(Arrays.asList(args).subList(2, args.length));
+                    code = Coverage41C.getCommandLine().execute(start.toArray(new String[0]));
+                }
+                System.exit(code);
+            }
+            try (OutputStream sink = args[0].equals("file") ? new FileOutputStream(path.toFile(), true) : new ByteArrayOutputStream()) {
+                CoverageCommand command = new CoverageCommand(TEST_FINAL_MEASURE_WINDOW, TEST_FINAL_CONFIRMATION_TIMEOUT) {
+                    @Override
+                    protected OutputStream coverageOutput() {
+                        if (args[0].equals("unused")) {
+                            throw new AssertionError("A named coverage file does not use the coverage sink");
+                        }
+                        return sink;
+                    }
+                };
+                code = new CommandLine(command).execute(Arrays.copyOfRange(args, 2, args.length));
+                if (memory && code == 0) {
+                    Files.write(path, ((ByteArrayOutputStream) sink).toByteArray());
+                }
+            }
+            System.exit(code);
+        }
     }
 
     @Test
@@ -283,6 +573,168 @@ class StartCommandTest {
         assertEquals(Map.of(2, true, 10, true, 11, false), coverage());
     }
 
+    @Test
+    void stopKeepsReceivedMeasuresWhenTargetAttachmentStalls() throws Exception {
+        assertStopKeepsReceivedMeasuresWhenAttachmentStalls(true);
+    }
+
+    @Test
+    void stopKeepsReceivedMeasuresWhenTargetAttachmentStallsWithoutUserFilter() throws Exception {
+        assertStopKeepsReceivedMeasuresWhenAttachmentStalls(false);
+    }
+
+    private void assertStopKeepsReceivedMeasuresWhenAttachmentStalls(boolean filterByUser) throws Exception {
+        dbgs.setTargets();
+        Future<Integer> collector = filterByUser ? start("--include-user", "suite") : start();
+        DebugTargetId announced = user("suite");
+        DebugTargetId nameless = FakeDebugServer.target(UUID.fromString(announced.getId()),
+                DebugTargetType.MANAGED_CLIENT, null);
+        DebugTargetId another = user("suite");
+
+        dbgs.pause("attachDetachDbgTargets");
+        dbgs.deliverOnMeasureOff(FakeDebugServer.targetStarted(announced),
+                FakeDebugServer.measure(nameless, OBJECT_ID, PROPERTY_ID, 10, 1),
+                FakeDebugServer.targetStarted(another),
+                FakeDebugServer.measure(user("other"), OBJECT_ID, PROPERTY_ID, 11, 1));
+        Future<Integer> stop = executor.submit(() -> send(PipeMessages.EXIT_COMMAND));
+        try {
+            dbgs.awaitPaused("attachDetachDbgTargets");
+            assertEquals(CommandLine.ExitCode.SOFTWARE, stop.get(TIMEOUT, TimeUnit.SECONDS));
+            assertEquals(Map.of(2, false, 10, true, 11, !filterByUser), coverage());
+        } finally {
+            dbgs.resume("attachDetachDbgTargets");
+        }
+        assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(1, dbgs.requests("attachDetachDbgTargets").size());
+    }
+
+    @Test
+    void stopKeepsKnownUsersMeasurementsWhenEarlierTargetLookupStalls() throws Exception {
+        DebugTargetId known = user("suite");
+        dbgs.setTargets(known);
+        Future<Integer> collector = start("--include-user", "suite");
+        DebugTargetId late = user("suite");
+        DebugTargetId nameless = FakeDebugServer.target(UUID.fromString(late.getId()),
+                DebugTargetType.MANAGED_CLIENT, null);
+        dbgs.setTargets(known, late);
+
+        dbgs.pause("getDbgTargets");
+        dbgs.deliverOnMeasureOff(FakeDebugServer.measure(nameless, OBJECT_ID, PROPERTY_ID, 11, 1),
+                FakeDebugServer.measure(known, OBJECT_ID, PROPERTY_ID, 10, 1));
+        Future<Integer> stop = executor.submit(() -> send(PipeMessages.EXIT_COMMAND));
+        try {
+            dbgs.awaitPaused("getDbgTargets");
+            assertEquals(CommandLine.ExitCode.SOFTWARE, stop.get(TIMEOUT, TimeUnit.SECONDS));
+            assertEquals(Map.of(2, false, 10, true, 11, false), coverage());
+        } finally {
+            dbgs.resume("getDbgTargets");
+        }
+        assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(1, dbgs.requests("attachDetachDbgTargets").size());
+    }
+
+    @Test
+    void pendingAttachmentIsDroppedOnQuitButKnownUserMeasurementsAreKept() throws Exception {
+        dbgs.setTargets();
+        Future<Integer> collector = start("--include-user", "suite");
+        DebugTargetId target = user("suite");
+        DebugTargetId nameless = FakeDebugServer.target(UUID.fromString(target.getId()),
+                DebugTargetType.MANAGED_CLIENT, null);
+        dbgs.deliver(FakeDebugServer.targetStarted(target), FakeDebugServer.targetQuit(target),
+                FakeDebugServer.measure(nameless, OBJECT_ID, PROPERTY_ID, 10, 1));
+
+        assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertTrue(dbgs.requests("attachDetachDbgTargets").isEmpty());
+        assertEquals(Map.of(2, false, 10, true, 11, false), coverage());
+    }
+
+    @Test
+    void earlierNamelessPacketUsesLookupInsteadOfLaterConflictingPacketName() throws Exception {
+        dbgs.setTargets();
+        Future<Integer> collector = start("--include-user", "suite");
+        DebugTargetId listed = user("suite");
+        UUID id = UUID.fromString(listed.getId());
+        DebugTargetId nameless = FakeDebugServer.target(id, DebugTargetType.MANAGED_CLIENT, null);
+        DebugTargetId named = FakeDebugServer.target(id, DebugTargetType.MANAGED_CLIENT, "other");
+        dbgs.setTargets(listed);
+        dbgs.deliver(FakeDebugServer.measure(nameless, OBJECT_ID, PROPERTY_ID, 11, 1),
+                FakeDebugServer.measure(named, OBJECT_ID, PROPERTY_ID, 10, 1));
+
+        assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(2, dbgs.requests("getDbgTargets").size());
+        assertTrue(dbgs.requests("attachDetachDbgTargets").isEmpty());
+        assertEquals(Map.of(2, false, 10, false, 11, true), coverage());
+    }
+
+
+    @Test
+    void cleanDropsDeferredRawMeasurements() throws Exception {
+        assertCleanDropsDeferredMeasurements(true, false);
+    }
+
+    @Test
+    void cleanDropsDeferredMappedMeasurements() throws Exception {
+        assertCleanDropsDeferredMeasurements(false, false);
+    }
+
+    @Test
+    void cleanAcceptsNewRawMeasurementsAfterDroppingDeferredOnes() throws Exception {
+        assertCleanDropsDeferredMeasurements(true, true);
+    }
+
+    @Test
+    void cleanAcceptsNewMappedMeasurementsAfterDroppingDeferredOnes() throws Exception {
+        assertCleanDropsDeferredMeasurements(false, true);
+    }
+
+    private void assertCleanDropsDeferredMeasurements(boolean raw, boolean addFreshMeasurement) throws Exception {
+        DebugTargetId known = user("suite");
+        DebugTargetId late = user("suite");
+        DebugTargetId nameless = FakeDebugServer.target(UUID.fromString(late.getId()),
+                DebugTargetType.MANAGED_CLIENT, null);
+        dbgs.setTargets(known);
+        Future<Integer> collector = raw ? startRaw("--include-user", "suite") : start("--include-user", "suite");
+        dbgs.setTargets(known, late);
+        dbgs.pause("getDbgTargets");
+        Future<Integer> delivery = executor.submit(() -> {
+            dbgs.deliver(FakeDebugServer.measure(known, OBJECT_ID, PROPERTY_ID, 10, 1),
+                    FakeDebugServer.measure(nameless, OBJECT_ID, PROPERTY_ID, 11, 1));
+            return 0;
+        });
+        try {
+            dbgs.awaitPaused("getDbgTargets");
+            assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.CLEAN_COMMAND));
+            assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.CLEAN_COMMAND));
+            assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.DUMP_COMMAND));
+            assertCleanedMeasurements(raw, false);
+        } finally {
+            dbgs.resume("getDbgTargets");
+        }
+        delivery.get(TIMEOUT, TimeUnit.SECONDS);
+        if (addFreshMeasurement) {
+            dbgs.deliver(FakeDebugServer.measure(known, OBJECT_ID, PROPERTY_ID, 2, 1));
+        }
+        assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertCleanedMeasurements(raw, addFreshMeasurement);
+    }
+
+    private void assertCleanedMeasurements(boolean raw, boolean freshMeasurement) throws Exception {
+        if (raw) {
+            NodeList lines = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(output.toFile())
+                    .getElementsByTagName("lineToCover");
+            assertEquals(freshMeasurement ? 1 : 0, lines.getLength());
+            if (freshMeasurement) {
+                assertEquals("2", ((Element) lines.item(0)).getAttribute("lineNumber"));
+                assertEquals("true", ((Element) lines.item(0)).getAttribute("covered"));
+            }
+        } else {
+            assertEquals(Map.of(2, freshMeasurement, 10, false, 11, false), coverage());
+        }
+    }
+
     private List<List<DBGUIExtCmdInfoBase>> separateFinalMeasures(int count) {
         List<List<DBGUIExtCmdInfoBase>> finals = new ArrayList<>();
         for (int i = 0; i < count; i++) {
@@ -345,6 +797,129 @@ class StartCommandTest {
     }
 
     @Test
+    void finalMeasureOfMissingModuleRejectsFractionalLineAndKeepsKnownHits() throws Exception {
+        DBGUIExtCmdInfoMeasure measure = FakeDebugServer.measure(UUID.randomUUID().toString(), PROPERTY_ID, 3, 1);
+        measure.getMeasure().getModuleData().get(0).getLineInfo().get(0).setLineNo(new BigDecimal("3.5"));
+        assertInvalidUnmappedFinalMeasure(measure);
+    }
+
+    @Test
+    void finalMeasureOfOtherExtensionRejectsNegativeHitsAndKeepsKnownHits() throws Exception {
+        DBGUIExtCmdInfoMeasure measure = FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, "OtherExtension", 3, -1);
+        assertInvalidUnmappedFinalMeasure(measure);
+    }
+
+    @Test
+    void finalMeasureOfOtherExtensionRequiresModuleIdAndKeepsKnownHits() throws Exception {
+        assertInvalidUnmappedFinalMeasure(FakeDebugServer.measure("", PROPERTY_ID, "OtherExtension", 3, 1));
+    }
+
+    private void assertInvalidUnmappedFinalMeasure(DBGUIExtCmdInfoMeasure measure) throws Exception {
+        Future<Integer> collector = start();
+        dbgs.deliverOnMeasureOff(measure, FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 10, 1));
+        assertEquals(CommandLine.ExitCode.SOFTWARE, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(Map.of(2, false, 10, true, 11, false), coverage());
+    }
+
+    @Test
+    void unreadableDecimalInFinalPingPreservesSiblingLinesModulesAndCommands() throws Exception {
+        Future<Integer> collector = start();
+        dbgs.transformFinalPingXml(xml -> xml.replace(">98765<", ">NaN<").replace(">98766<", ">bad-line<"));
+        DBGUIExtCmdInfoMeasure first = FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 98765, 98766, 1, 10, 1);
+        first.getMeasure().getModuleData().add(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 11, 1)
+                .getMeasure().getModuleData().get(0));
+        dbgs.deliverOnMeasureOff(first, FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 7, 1));
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(Map.of(2, false, 7, true, 10, true, 11, true), coverage());
+    }
+
+    @Test
+    void unreadableTotalDurationKeepsMeasuredHitsInRawOutput() throws Exception {
+        Future<Integer> collector = startRaw();
+        dbgs.transformFinalPingXml(xml -> xml.replace(">98765<", ">NaN<"));
+        DBGUIExtCmdInfoMeasure first = FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 3);
+        first.getMeasure().setTotalDurability(BigDecimal.valueOf(98765));
+        dbgs.deliverOnMeasureOff(first, FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 11, 7));
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(Map.of(2, true, 11, true), coverage("/" + OBJECT_ID + "/" + PROPERTY_ID));
+    }
+
+    @Test
+    void unreadableDurationInRejectedUsersPacketDoesNotDiscardAllowedUserHits() throws Exception {
+        DebugTargetId allowed = user("suite");
+        dbgs.setTargets(allowed);
+        Future<Integer> collector = start("--include-user", "suite");
+        dbgs.transformFinalPingXml(xml -> xml.replace(">98765<", ">NaN<"));
+        DBGUIExtCmdInfoMeasure rejected = FakeDebugServer.measure(user("other"), OBJECT_ID, PROPERTY_ID, 2, 3);
+        rejected.getMeasure().setTotalDurability(BigDecimal.valueOf(98765));
+        dbgs.deliverOnMeasureOff(rejected, FakeDebugServer.measure(allowed, OBJECT_ID, PROPERTY_ID, 11, 7));
+
+        assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(Map.of(2, false, 10, false, 11, true), coverage());
+    }
+
+    @Test
+    void unreadableLineDurationKeepsItsValidLineNumberAndHits() throws Exception {
+        Future<Integer> collector = start();
+        dbgs.transformFinalPingXml(xml -> xml.replace(">98765<", ">NaN<"));
+        DBGUIExtCmdInfoMeasure first = FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 3);
+        first.getMeasure().getModuleData().get(0).getLineInfo().get(0).setDurability(BigDecimal.valueOf(98765));
+        dbgs.deliverOnMeasureOff(first, FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 11, 7));
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(Map.of(2, true, 10, false, 11, true), coverage());
+    }
+
+    @Test
+    void unreadableStartedTargetDoesNotDiscardOtherFinalCommands() throws Exception {
+        assertInvalidFinalTargetEventKeepsMeasures(true);
+    }
+
+    @Test
+    void unreadableQuitTargetDoesNotDiscardOtherFinalCommands() throws Exception {
+        assertInvalidFinalTargetEventKeepsMeasures(false);
+    }
+
+    private void assertInvalidFinalTargetEventKeepsMeasures(boolean starting) throws Exception {
+        dbgs.setTargets();
+        Future<Integer> collector = start();
+        dbgs.transformFinalPingXml(xml -> xml.replace(">98765<", ">NaN<"));
+        DebugTargetId target = user("suite");
+        target.setSeanceNo(BigDecimal.valueOf(98765));
+        DBGUIExtCmdInfoBase event = starting ? FakeDebugServer.targetStarted(target) : FakeDebugServer.targetQuit(target);
+        dbgs.deliverOnMeasureOff(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1),
+                event, FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 11, 1));
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(Map.of(2, true, 10, false, 11, true), coverage());
+        assertTrue(dbgs.requests("attachDetachDbgTargets").isEmpty());
+    }
+
+    @Test
+    void rawStopKeepsValidLinesWhenFinalMeasureHasNoLineNumber() throws Exception {
+        Future<Integer> start = startRaw();
+        dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
+        DBGUIExtCmdInfoMeasure measure = FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 10, 1, 11, 1);
+        measure.getMeasure().getModuleData().get(0).getLineInfo().get(0).setLineNo(null);
+        dbgs.deliverOnMeasureOff(measure);
+
+        int stopResult = send(PipeMessages.EXIT_COMMAND);
+        int startResult = start.get(TIMEOUT, TimeUnit.SECONDS);
+        assertEquals(Map.of(2, true, 11, true), coverage("/" + OBJECT_ID + "/" + PROPERTY_ID));
+        assertEquals(CommandLine.ExitCode.SOFTWARE, stopResult);
+        assertEquals(CommandLine.ExitCode.SOFTWARE, startResult);
+    }
+
+
+    @Test
     void proxyPingsCannotConfirmFinalCollection() throws Exception {
         Future<Integer> collector = start();
         dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 10, 1));
@@ -379,6 +954,28 @@ class StartCommandTest {
 
         assertEquals(CommandLine.ExitCode.SOFTWARE, stop.get(TIMEOUT, TimeUnit.SECONDS));
         assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(Map.of(2, true, 10, true, 11, false), coverage());
+    }
+
+    @Test
+    void stopRejectsConcatenatedPingDocumentsAndKeepsOtherMeasurements() throws Exception {
+        Future<Integer> start = start();
+        dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
+        dbgs.pause("pingDebugUIParams");
+        Future<Integer> stop;
+        try {
+            dbgs.awaitPaused("pingDebugUIParams");
+            stop = executor.submit(() -> send(PipeMessages.EXIT_COMMAND));
+            waitForFinalMeasureThread();
+            dbgs.deliverAcrossFinalPolls(List.of(List.of(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 7, 1)),
+                    List.of(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 10, 1))));
+            dbgs.sendConcatenatedXmlOnNextPing();
+        } finally {
+            dbgs.resume("pingDebugUIParams");
+        }
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, stop.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(CommandLine.ExitCode.SOFTWARE, start.get(TIMEOUT, TimeUnit.SECONDS));
         assertEquals(Map.of(2, true, 10, true, 11, false), coverage());
     }
 
@@ -449,6 +1046,144 @@ class StartCommandTest {
     }
 
     @Test
+    void stopRejectsMismatchedFinalTargetCommandAndKeepsValidHits() throws Exception {
+        var wrongModel = FakeDebugServer.targetQuit(user("synthetic_user"));
+        wrongModel.setCmdID(DBGUIExtCmds.TARGET_STARTED);
+        assertStopRejectsInvalidFinalCommand(wrongModel);
+    }
+
+    @Test
+    void stopRejectsStartedPayloadForFinalTargetQuitAndKeepsValidHits() throws Exception {
+        var wrongModel = FakeDebugServer.targetStarted(user("synthetic_user"));
+        wrongModel.setCmdID(DBGUIExtCmds.TARGET_QUIT);
+        assertStopRejectsInvalidFinalCommand(wrongModel);
+    }
+
+    @Test
+    void stopRejectsStartedPayloadForUnrelatedFinalCommandAndKeepsValidHits() throws Exception {
+        var wrongModel = FakeDebugServer.targetStarted(user("synthetic_user"));
+        wrongModel.setCmdID(DBGUIExtCmds.CORRECTED_BP);
+        assertStopRejectsInvalidFinalCommand(wrongModel);
+    }
+
+    @Test
+    void stopRejectsQuitPayloadForUnrelatedFinalCommandAndKeepsValidHits() throws Exception {
+        var wrongModel = FakeDebugServer.targetQuit(user("synthetic_user"));
+        wrongModel.setCmdID(DBGUIExtCmds.CORRECTED_BP);
+        assertStopRejectsInvalidFinalCommand(wrongModel);
+    }
+
+    @Test
+    void stopRejectsFinalDebuggerCommandWithoutIdAndKeepsValidHits() throws Exception {
+        assertStopRejectsInvalidFinalCommand(CommandsFactory.eINSTANCE.createDBGUIExtCmdInfoCorrectedBP());
+    }
+
+    @Test
+    void stopRejectsFinalDebuggerCommandWithUnknownIdAndKeepsValidHits() throws Exception {
+        var command = CommandsFactory.eINSTANCE.createDBGUIExtCmdInfoCorrectedBP();
+        command.setCmdID(DBGUIExtCmds.UNKNOWN);
+        assertStopRejectsInvalidFinalCommand(command);
+    }
+
+    @Test
+    void unknownLiveDebuggerCommandsDoNotPoisonHealthyStop() throws Exception {
+        Future<Integer> collector = start();
+        var missingId = CommandsFactory.eINSTANCE.createDBGUIExtCmdInfoCorrectedBP();
+        var unknownId = CommandsFactory.eINSTANCE.createDBGUIExtCmdInfoCorrectedBP();
+        unknownId.setCmdID(DBGUIExtCmds.UNKNOWN);
+        dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1), missingId, unknownId,
+                FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 10, 1));
+
+        assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(Map.of(2, true, 10, true, 11, false), coverage());
+    }
+
+    @Test
+    void stopIgnoresUnrelatedFinalDebuggerCommandAndKeepsValidHits() throws Exception {
+        Future<Integer> collector = start();
+        var breakpoint = CommandsFactory.eINSTANCE.createDBGUIExtCmdInfoCorrectedBP();
+        breakpoint.setCmdID(DBGUIExtCmds.CORRECTED_BP);
+        dbgs.deliverOnMeasureOff(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 10, 1), breakpoint,
+                FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 11, 1));
+
+        assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(Map.of(2, false, 10, true, 11, true), coverage());
+    }
+
+    @Test
+    void stopRejectsFinalTargetStartedWithoutTargetAndKeepsValidHits() throws Exception {
+        var event = FakeDebugServer.targetStarted(user("synthetic_user"));
+        event.setTargetID(null);
+        assertStopRejectsInvalidFinalCommand(event);
+    }
+
+    @Test
+    void stopRejectsFinalTargetStartedWithoutIdAndKeepsValidHits() throws Exception {
+        assertStopRejectsInvalidFinalCommand(FakeDebugServer.targetStarted(targetWithId(null)));
+    }
+
+    @Test
+    void stopRejectsFinalTargetStartedWithEmptyIdAndKeepsValidHits() throws Exception {
+        assertStopRejectsInvalidFinalCommand(FakeDebugServer.targetStarted(targetWithId("")));
+    }
+
+    @Test
+    void stopRejectsFinalTargetStartedWithAbbreviatedIdAndKeepsValidHits() throws Exception {
+        assertStopRejectsInvalidFinalCommand(FakeDebugServer.targetStarted(abbreviatedTarget("synthetic_user")));
+    }
+
+    @Test
+    void stopRejectsFinalTargetQuitWithoutTargetAndKeepsValidHits() throws Exception {
+        var event = FakeDebugServer.targetQuit(user("synthetic_user"));
+        event.setTargetID(null);
+        assertStopRejectsInvalidFinalCommand(event);
+    }
+
+    @Test
+    void stopRejectsFinalTargetQuitWithoutIdAndKeepsValidHits() throws Exception {
+        assertStopRejectsInvalidFinalCommand(FakeDebugServer.targetQuit(targetWithId(null)));
+    }
+
+    @Test
+    void stopRejectsFinalTargetQuitWithEmptyIdAndKeepsValidHits() throws Exception {
+        assertStopRejectsInvalidFinalCommand(FakeDebugServer.targetQuit(targetWithId("")));
+    }
+
+    @Test
+    void stopRejectsFinalTargetQuitWithAbbreviatedIdAndKeepsValidHits() throws Exception {
+        assertStopRejectsInvalidFinalCommand(FakeDebugServer.targetQuit(abbreviatedTarget("synthetic_user")));
+    }
+
+    @Test
+    void malformedLiveTargetEventsDoNotPoisonHealthyStop() throws Exception {
+        Future<Integer> collector = start();
+        dbgs.deliver(FakeDebugServer.targetStarted(targetWithId(null)),
+                FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1),
+                FakeDebugServer.targetQuit(abbreviatedTarget("synthetic_user")),
+                FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 10, 1));
+
+        assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(Map.of(2, true, 10, true, 11, false), coverage());
+    }
+
+    private void assertStopRejectsInvalidFinalCommand(DBGUIExtCmdInfoBase command) throws Exception {
+        Future<Integer> collector = start();
+        dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
+        dbgs.deliverAcrossFinalPolls(List.of(List.of(
+                FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 10, 1), command,
+                FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 11, 1))));
+
+        int stopResult = send(PipeMessages.EXIT_COMMAND);
+        int collectorResult = collector.get(TIMEOUT, TimeUnit.SECONDS);
+        assertEquals(Map.of(2, true, 10, true, 11, true), coverage());
+        assertEquals(CommandLine.ExitCode.SOFTWARE, stopResult);
+        assertEquals(CommandLine.ExitCode.SOFTWARE, collectorResult);
+    }
+
+    @Test
     void malformedMeasurementInFlightWhenStopBeginsFailsWhileSavingGoodMeasurements() throws Exception {
         Future<Integer> collector = start();
         dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
@@ -478,14 +1213,68 @@ class StartCommandTest {
     }
 
     @Test
-    void stopRejectsProxyReplyToProfilingDisableAndSavesPartialCoverage() throws Exception {
-        Future<Integer> collector = start();
-        dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
-        dbgs.sendProxyReplyWhenProfilingIsDisabled();
+    void stopRejectsProxyAcknowledgementOfProfilingDisableAndPreservesFinalHits() throws Exception {
+        assertStopRejectsProfilingDisableAcknowledgement(dbgs::sendProxyReplyWhenProfilingIsDisabled);
+    }
 
-        assertEquals(CommandLine.ExitCode.SOFTWARE, send(PipeMessages.EXIT_COMMAND));
-        assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
-        assertEquals(Map.of(2, true, 10, false, 11, false), coverage());
+    @Test
+    void stopRejectsMissingDeflateAcknowledgementAndPreservesFinalHits() throws Exception {
+        assertStopRejectsProfilingDisableAcknowledgement(
+                () -> dbgs.sendMissingCompressedReplyWhenProfilingIsDisabled("deflate"));
+    }
+
+    @Test
+    void stopRejectsMissingGzipAcknowledgementAndPreservesFinalHits() throws Exception {
+        assertStopRejectsProfilingDisableAcknowledgement(
+                () -> dbgs.sendMissingCompressedReplyWhenProfilingIsDisabled("gzip"));
+    }
+
+    @Test
+    void stopKeepsQueuedFinalHitWhenRetryIntervalExceedsWindow() throws Exception {
+        assertStopWithFinalPingReply(FakeDebugServer.FinalPingReply.UNAVAILABLE, "3000", CommandLine.ExitCode.SOFTWARE);
+    }
+
+    @Test
+    void stopRejectsCorruptGzipFinalPingAndKeepsLaterHits() throws Exception {
+        assertStopWithFinalPingReply(FakeDebugServer.FinalPingReply.CORRUPT_GZIP, "10", CommandLine.ExitCode.SOFTWARE);
+    }
+
+    @Test
+    void stopAcceptsValidGzipFinalPingAndKeepsLaterHits() throws Exception {
+        assertStopWithFinalPingReply(FakeDebugServer.FinalPingReply.GZIP, "10", CommandLine.ExitCode.OK);
+    }
+
+    private void assertStopWithFinalPingReply(FakeDebugServer.FinalPingReply reply, String pingTimeout, int exitCode)
+            throws Exception {
+        Future<Integer> start = startWithPingTimeout(startCommandLine(), pingTimeout);
+        dbgs.deliverOnMeasureOff(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 10, 1));
+        dbgs.replyToFirstFinalPingWith(reply);
+
+        assertEquals(exitCode, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(exitCode, start.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(Map.of(2, false, 10, true, 11, false), coverage());
+    }
+
+    private void assertStopRejectsProfilingDisableAcknowledgement(Runnable setInvalidReply) throws Exception {
+        Future<Integer> start = start();
+        dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
+        dbgs.pause("pingDebugUIParams");
+        Future<Integer> stop;
+        try {
+            dbgs.awaitPaused("pingDebugUIParams");
+            dbgs.deliverOnMeasureOff(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 10, 1));
+            setInvalidReply.run();
+            stop = executor.submit(() -> send(PipeMessages.EXIT_COMMAND));
+            waitForFinalMeasureThreadOrStopCompletion(stop);
+        } finally {
+            dbgs.resume("pingDebugUIParams");
+        }
+
+        int stopResult = stop.get(TIMEOUT, TimeUnit.SECONDS);
+        int startResult = start.get(TIMEOUT, TimeUnit.SECONDS);
+        assertEquals(Map.of(2, true, 10, true, 11, false), coverage());
+        assertEquals(CommandLine.ExitCode.SOFTWARE, stopResult);
+        assertEquals(CommandLine.ExitCode.SOFTWARE, startResult);
     }
 
     @Test
@@ -537,8 +1326,15 @@ class StartCommandTest {
     }
 
     private Thread waitForFinalMeasureThread() throws InterruptedException {
+        return waitForFinalMeasureThreadOrStopCompletion(null);
+    }
+
+    private Thread waitForFinalMeasureThreadOrStopCompletion(Future<Integer> stop) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
         while (System.nanoTime() - deadline < 0) {
+            if (stop != null && stop.isDone()) {
+                return null;
+            }
             for (var entry : Thread.getAllStackTraces().entrySet()) {
                 boolean waiting = Arrays.stream(entry.getValue())
                         .anyMatch(frame -> frame.getClassName().equals("com.clouds42.Commands.CoverageCommand")
@@ -625,12 +1421,45 @@ class StartCommandTest {
     @Test
     void statsPrintsReportToTheCollectorOutput() throws Exception {
         Future<Integer> start = start();
-        String report = captureLog(() -> assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.STATS_COMMAND)));
+        String report = captureStatistics(() -> assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.STATS_COMMAND)));
         assertTrue(report.contains("Lines to cover"));
         assertTrue(report.contains("Module.bsl"));
 
         assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
         assertEquals(CommandLine.ExitCode.OK, start.get(TIMEOUT, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void statsPrintsZeroCountersBeforeAnyRawMeasurements() throws Exception {
+        Future<Integer> start = startRaw();
+        String report = captureStatistics(() -> assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.STATS_COMMAND)));
+        assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.OK, start.get(TIMEOUT, TimeUnit.SECONDS));
+
+        assertTrue(report.contains("Lines to cover"), report);
+        assertTrue(report.contains("Covered lines"), report);
+        assertTrue(report.lines().anyMatch(line -> line.matches(".*Total\\W+0\\W+0\\W+0\\W*")), report);
+    }
+
+    @Test
+    void statsReturnsErrorUntilProfilingIsReady() throws Exception {
+        dbgs.pause("setMeasureMode", body -> body.contains("measureModeSeanceID"));
+        Future<Integer> start = executor.submit(() -> startCommandLine().execute(PipeMessages.START_COMMAND,
+                "-i", infobase, "-u", dbgs.url(), "-o", output.toString(), "-t", "10"));
+        int startingResult;
+        try {
+            dbgs.awaitPaused("setMeasureMode");
+            startingResult = send(PipeMessages.STATS_COMMAND);
+        } finally {
+            dbgs.resume("setMeasureMode");
+        }
+        awaitStarted(start);
+        int readyResult = send(PipeMessages.STATS_COMMAND);
+        assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.OK, start.get(TIMEOUT, TimeUnit.SECONDS));
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, startingResult);
+        assertEquals(CommandLine.ExitCode.OK, readyResult);
     }
 
     @Test
@@ -1043,6 +1872,42 @@ class StartCommandTest {
     }
 
     @Test
+    void terminalPingFailureClosesCommandsBeforeSavingRawCoverage() throws Exception {
+        Future<Integer> start = submit(List.of(PipeMessages.START_COMMAND, "-i", infobase, "-u", dbgs.url(),
+                "-o", output.toString(), "-t", "3000"));
+        dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
+        CountDownLatch pingFailure = new CountDownLatch(1);
+        PrintStream stderr = System.err;
+        int checkResult;
+        int cleanResult;
+        int stopResult;
+        try (PrintStream log = new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8) {
+            @Override
+            public void println(String line) {
+                super.println(line);
+                if (line.contains("Can't send ping to debug server")) {
+                    pingFailure.countDown();
+                }
+            }
+        }) {
+            System.setErr(log);
+            dbgs.failNextPing(503);
+            assertTrue(pingFailure.await(TIMEOUT, TimeUnit.SECONDS), "Collector did not report the terminal ping failure");
+            checkResult = send(PipeMessages.CHECK_COMMAND);
+            cleanResult = send(PipeMessages.CLEAN_COMMAND);
+            stopResult = send(PipeMessages.EXIT_COMMAND);
+        } finally {
+            System.setErr(stderr);
+        }
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, start.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(CommandLine.ExitCode.SOFTWARE, checkResult);
+        assertEquals(CommandLine.ExitCode.SOFTWARE, cleanResult);
+        assertEquals(CommandLine.ExitCode.SOFTWARE, stopResult);
+        assertEquals(Map.of(2, true), coverage("/" + OBJECT_ID + "/" + PROPERTY_ID));
+    }
+
+    @Test
     void secondStartForSameInfobaseFails() throws Exception {
         Future<Integer> first = start();
         StringWriter stderr = new StringWriter();
@@ -1234,6 +2099,33 @@ class StartCommandTest {
     }
 
     @Test
+    void failedProfilingEnableAcknowledgementDisablesProfilingAndDetaches() throws Exception {
+        assertFailedProfilingEnableAcknowledgementDisablesProfilingAndDetaches();
+    }
+
+    @Test
+    void failedDeflateProfilingEnableAcknowledgementDisablesProfilingAndDetaches() throws Exception {
+        dbgs.setCompressResponses(true);
+        assertFailedProfilingEnableAcknowledgementDisablesProfilingAndDetaches();
+    }
+
+    private void assertFailedProfilingEnableAcknowledgementDisablesProfilingAndDetaches() throws Exception {
+        dbgs.rejectProfilingEnableAcknowledgement();
+
+        assertStartFails("Unexpected response body to setMeasureMode");
+
+        List<FakeDebugServer.Request> measureModes = dbgs.requests("setMeasureMode");
+        assertEquals(3, measureModes.size());
+        assertFalse(measureModes.get(0).body.contains("measureModeSeanceID"));
+        assertTrue(measureModes.get(1).body.contains("measureModeSeanceID"));
+        assertFalse(measureModes.get(2).body.contains("measureModeSeanceID"));
+        assertTrue(dbgs.isProfilingDisabled());
+        List<String> commands = dbgs.commands();
+        assertEquals(List.of("setMeasureMode", "detachDebugUI"), commands.subList(commands.size() - 2, commands.size()));
+        assertFalse(Files.exists(output));
+    }
+
+    @Test
     void startFailsWhenInfobaseIsInDebug() throws Exception {
         dbgs.setAttachResult(AttachDebugUIResult.IB_IN_DEBUG);
 
@@ -1255,6 +2147,186 @@ class StartCommandTest {
     }
 
     // --- includeUsers: фильтр замеров по пользователю ИБ ---
+
+    @Test
+    void includeUserFailsWhenAllowedTargetCannotAttachAndNoMeasurementsArrive() throws Exception {
+        dbgs.setTargets(user("demo_runner"));
+        dbgs.fail("attachDetachDbgTargets", 503);
+        Future<Integer> start = start("--include-user", "demo_runner");
+
+        int stopResult = send(PipeMessages.EXIT_COMMAND);
+        int startResult = start.get(TIMEOUT, TimeUnit.SECONDS);
+        assertEquals(1, dbgs.requests("attachDetachDbgTargets").size());
+        assertEquals(CommandLine.ExitCode.SOFTWARE, stopResult);
+        assertEquals(CommandLine.ExitCode.SOFTWARE, startResult);
+        assertEquals(Map.of(2, false, 10, false, 11, false), coverage());
+    }
+
+    @Test
+    void proxyReplyDoesNotConfirmTargetAttachment() throws Exception {
+        dbgs.setTargets(user("demo_runner"));
+        dbgs.sendProxyReplyForTargetAttachment();
+        Future<Integer> collector = start("--include-user", "demo_runner");
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(1, dbgs.requests("attachDetachDbgTargets").size());
+        assertEquals(Map.of(2, false, 10, false, 11, false), coverage());
+    }
+
+    @Test
+    void includeUserRecoversFromFailedAttachmentWhenMeasuresAreReceived() throws Exception {
+        DebugTargetId target = user("demo_runner");
+        dbgs.setTargets(target);
+        dbgs.fail("attachDetachDbgTargets", 503);
+        Future<Integer> start = start("--include-user", "demo_runner");
+        dbgs.deliver(FakeDebugServer.measure(target, OBJECT_ID, PROPERTY_ID, 2, 1));
+
+        assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.OK, start.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(Map.of(2, true, 10, false, 11, false), coverage());
+    }
+
+    @Test
+    void autoConnectedUserCanFinishWhenOnlyExcludedCodeRan() throws Exception {
+        assertExcludedMeasurement(false, true);
+    }
+
+    @Test
+    void autoConnectedUserCanFinishAfterManualAttachmentFailed() throws Exception {
+        assertExcludedMeasurement(true, true);
+    }
+
+    @Test
+    void autoConnectedTargetCanFinishWithoutUserFilterWhenOnlyExcludedCodeRan() throws Exception {
+        assertExcludedMeasurement(false, false);
+    }
+
+    @Test
+    void autoConnectedTargetCanFinishWithoutUserFilterAfterManualAttachmentFailed() throws Exception {
+        assertExcludedMeasurement(true, false);
+    }
+
+    private void assertExcludedMeasurement(boolean attachmentFails, boolean filterByUser) throws Exception {
+        DebugTargetId allowed = user("demo_runner");
+        if (attachmentFails) {
+            dbgs.setTargets(allowed);
+            dbgs.fail("attachDetachDbgTargets", 503);
+        } else {
+            dbgs.setTargets();
+        }
+        Path config = tempDir.resolve("exclusions.json");
+        Files.writeString(config, "{\"exclude\":{\"objects\":[\"CommonModule.ПростойОбщийМодуль\"]}}");
+        Future<Integer> collector = filterByUser
+                ? start("--include-user", "demo_runner", "--config", config.toString())
+                : start("--config", config.toString());
+        dbgs.deliver(FakeDebugServer.measure(allowed, OBJECT_ID, PROPERTY_ID, 2, 1));
+
+        assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(attachmentFails ? 1 : 0, dbgs.requests("attachDetachDbgTargets").size());
+        assertEquals(null, coverage());
+    }
+
+    @Test
+    void cleanPreservesConfirmationFromAcceptedMeasurement() throws Exception {
+        dbgs.setTargets();
+        DebugTargetId target = user("demo_runner");
+        Future<Integer> collector = startRaw("--include-user", "demo_runner");
+        dbgs.deliver(FakeDebugServer.measure(target, OBJECT_ID, PROPERTY_ID, 2, 1));
+        assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.DUMP_COMMAND));
+        assertTrue(Files.readString(output).contains("covered=\"true\""));
+
+        assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.CLEAN_COMMAND));
+        assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertFalse(Files.readString(output).contains("lineToCover"));
+    }
+
+    @Test
+    void failedAttachmentWithoutFilterOrMeasurementsFailsCollection() throws Exception {
+        dbgs.setTargets(user("demo_runner"));
+        dbgs.fail("attachDetachDbgTargets", 503);
+        Future<Integer> collector = startRaw();
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(1, dbgs.requests("attachDetachDbgTargets").size());
+    }
+
+    @Test
+    void invalidExplicitIdCannotConfirmFailedAttachmentWithOnlyExcludedLines() throws Exception {
+        dbgs.setTargets(user("demo_runner"));
+        dbgs.fail("attachDetachDbgTargets", 503);
+        Future<Integer> collector = start();
+        DBGUIExtCmdInfoMeasure foreign = FakeDebugServer.measure(abbreviatedTarget("demo_runner"),
+                OBJECT_ID, PROPERTY_ID, 3, 1);
+        foreign.getMeasure().getModuleData().get(0).getModuleID().setExtensionName("OtherExtension");
+        dbgs.deliver(foreign);
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(Map.of(2, false, 10, false, 11, false), coverage());
+    }
+
+    @Test
+    void anonymousPacketWithoutLinesDoesNotConfirmFailedAttachment() throws Exception {
+        dbgs.setTargets(user("demo_runner"));
+        dbgs.fail("attachDetachDbgTargets", 503);
+        Future<Integer> collector = start();
+        dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID));
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.SOFTWARE, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(Map.of(2, false, 10, false, 11, false), coverage());
+    }
+
+    @Test
+    void malformedListedTargetsWithoutFilterAllowEmptyCollection() throws Exception {
+        dbgs.setTargets(targetWithId(null), targetWithId(""), abbreviatedTarget("synthetic_user"));
+        Future<Integer> collector = startRaw();
+
+        assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertTrue(dbgs.requests("attachDetachDbgTargets").isEmpty());
+    }
+
+    @Test
+    void noTargetsWithoutFilterAllowsEmptyCollection() throws Exception {
+        dbgs.setTargets();
+        Future<Integer> collector = startRaw();
+
+        assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertTrue(dbgs.requests("attachDetachDbgTargets").isEmpty());
+    }
+
+    @Test
+    void rejectedPacketDoesNotUndoConfirmedTargetAttachment() throws Exception {
+        DebugTargetId accepted = user("demo_runner");
+        dbgs.setTargets(accepted);
+        Future<Integer> collector = start("--include-user", "demo_runner");
+
+        DebugTargetId rejected = FakeDebugServer.target(
+                UUID.fromString(accepted.getId()), DebugTargetType.MANAGED_CLIENT, "other_runner");
+        dbgs.deliver(FakeDebugServer.measure(rejected, OBJECT_ID, PROPERTY_ID, 2, 1));
+
+        assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(1, dbgs.requests("attachDetachDbgTargets").size());
+        assertEquals(Map.of(2, false, 10, false, 11, false), coverage());
+    }
+
+    @Test
+    void includeUserSucceedsWithoutMeasurementsWhenAllowedTargetIsAttached() throws Exception {
+        dbgs.setTargets(user("demo_runner"));
+        Future<Integer> start = start("--include-user", "demo_runner");
+
+        assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.OK, start.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(1, dbgs.requests("attachDetachDbgTargets").size());
+        assertEquals(Map.of(2, false, 10, false, 11, false), coverage());
+    }
 
     @Test
     void includeUserCollectsOnlyMeasuresOfAllowedUsersAndAttachesOnlyTheirTargets() throws Exception {
@@ -1510,6 +2582,39 @@ class StartCommandTest {
     }
 
     @Test
+    void includeUserResolvesPacketsFromMultipleAreasInOneLookupWithoutAttachingOtherTargets() throws Exception {
+        String runner = "demo_runner";
+        DebugTargetId first = user(runner);
+        DebugTargetId second = user(runner);
+        DebugTargetId outside = user(runner);
+        DebugTargetId firstUnnamed = FakeDebugServer.target(UUID.fromString(first.getId()),
+                DebugTargetType.MANAGED_CLIENT, null);
+        DebugTargetId secondUnnamed = FakeDebugServer.target(UUID.fromString(second.getId()),
+                DebugTargetType.MANAGED_CLIENT, null);
+        dbgs.setTargetsForArea("area-first", firstUnnamed);
+        dbgs.setTargetsForArea("area-second", secondUnnamed);
+        Future<Integer> start = start("-n", "area-first", "area-second", "--include-user", runner);
+
+        dbgs.setTargetsForArea("area-first", first);
+        dbgs.setTargetsForArea("area-second", second);
+        dbgs.setTargets(first, second, outside);
+        dbgs.deliver(FakeDebugServer.measure(secondUnnamed, OBJECT_ID, PROPERTY_ID, 10, 1),
+                FakeDebugServer.measure(firstUnnamed, OBJECT_ID, PROPERTY_ID, 2, 1));
+        dbgs.deliver(FakeDebugServer.measure(secondUnnamed, OBJECT_ID, PROPERTY_ID, 11, 1));
+
+        assertEquals(CommandLine.ExitCode.OK, send(PipeMessages.EXIT_COMMAND));
+        assertEquals(CommandLine.ExitCode.OK, start.get(TIMEOUT, TimeUnit.SECONDS));
+        List<FakeDebugServer.Request> lookups = dbgs.requests("getDbgTargets");
+        assertEquals(3, lookups.size());
+        assertTrue(lookups.get(0).body.contains("area-first"));
+        assertTrue(lookups.get(1).body.contains("area-second"));
+        assertFalse(lookups.get(2).body.contains("area-first"));
+        assertFalse(lookups.get(2).body.contains("area-second"));
+        assertTrue(dbgs.requests("attachDetachDbgTargets").isEmpty());
+        assertEquals(Map.of(2, true, 10, true, 11, true), coverage());
+    }
+
+    @Test
     void includeUserFailsStartAndStopWhenNoTargetMatched() throws Exception {
         dbgs.setTargets(user("smoke"));
         String log = captureLog(() -> {
@@ -1649,6 +2754,12 @@ class StartCommandTest {
                 FakeDebugServer.measure(smoke, OBJECT_ID, PROPERTY_ID, 7, 1));
     }
 
+    private static DebugTargetId targetWithId(String id) {
+        DebugTargetId target = user("synthetic_user");
+        target.setId(id);
+        return target;
+    }
+
     private static DebugTargetId abbreviatedTarget(String name) {
         DebugTargetId target = user(name);
         target.setId("A-B-C-D-E");
@@ -1657,6 +2768,233 @@ class StartCommandTest {
 
     private static DebugTargetId user(String name) {
         return FakeDebugServer.target(UUID.randomUUID(), DebugTargetType.MANAGED_CLIENT, name);
+    }
+
+
+    @Test
+    void statsOutputSurvivesDisabledInfoLogging() throws Exception {
+        for (String level : List.of("warn", "error", "off")) {
+            Path stderr = tempDir.resolve("stats-" + level + ".stderr");
+            Path stdout = tempDir.resolve("stats-" + level + ".stdout");
+            Path coverage = tempDir.resolve("stats-" + level + ".xml");
+            Process child = new ProcessBuilder(
+                    Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                    "-Dorg.slf4j.simpleLogger.defaultLogLevel=" + level,
+                    "-cp", System.getProperty("coverage41c.testClasspath", System.getProperty("java.class.path")),
+                    StatsOutputProbe.class.getName(), coverage.toString())
+                    .redirectError(stderr.toFile()).redirectOutput(stdout.toFile()).start();
+            try {
+                assertTrue(child.waitFor(30, TimeUnit.SECONDS), "stats probe timed out at " + level);
+                String output = Files.readString(stderr);
+                assertEquals(0, child.exitValue(), output);
+                assertTrue(output.contains("Lines to cover"), output);
+                assertTrue(output.contains("Covered lines"), output);
+                assertFalse(Files.readString(stdout).contains("Lines to cover"));
+            } finally {
+                child.destroyForcibly();
+            }
+        }
+    }
+
+    @Test
+    void statsReportsStderrWriteAndFlushFailures() throws Exception {
+        for (String failure : List.of("write", "flush", "closed")) {
+            runFailingStatsProbe(failure, tempDir.resolve("stats-failure-" + failure + ".stderr"));
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(OS.LINUX)
+    void statsReportsFullStderrDevice() throws Exception {
+        runFailingStatsProbe("device", Path.of("/dev/full"));
+    }
+
+    private void runFailingStatsProbe(String failure, Path stderr) throws Exception {
+        Path stdout = tempDir.resolve("stats-failure-" + failure + ".stdout");
+        Process child = new ProcessBuilder(
+                Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-Dorg.slf4j.simpleLogger.defaultLogLevel=off",
+                "-cp", System.getProperty("coverage41c.testClasspath", System.getProperty("java.class.path")),
+                StatsOutputProbe.class.getName(), tempDir.resolve("stats-" + failure + ".xml").toString(), failure)
+                .redirectError(stderr.toFile()).redirectOutput(stdout.toFile()).start();
+        try {
+            assertTrue(child.waitFor(30, TimeUnit.SECONDS), "stats failure probe timed out: " + failure);
+            String diagnostic = Files.readString(stdout);
+            if (!failure.equals("device")) {
+                diagnostic += Files.readString(stderr);
+            }
+            assertEquals(0, child.exitValue(), diagnostic);
+            assertTrue(Files.readString(stdout).contains("Stats failure reported"), diagnostic);
+        } finally {
+            child.destroyForcibly();
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(OS.LINUX)
+    void coverageStdoutRecoversOnTheSameDescriptor() throws Exception {
+        Path diagnostics = tempDir.resolve("stdout-recovery.log");
+        Process probe = new ProcessBuilder(
+                Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-cp", System.getProperty("coverage41c.testClasspath", System.getProperty("java.class.path")),
+                StdoutRecoveryProbe.class.getName(), tempDir.toString())
+                .redirectError(diagnostics.toFile()).redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
+        try {
+            assertTrue(probe.waitFor(45, TimeUnit.SECONDS), () -> "See " + diagnostics);
+            assertEquals(0, probe.exitValue(), Files.readString(diagnostics));
+        } finally {
+            probe.destroyForcibly();
+        }
+    }
+
+    public static class StdoutRecoveryProbe {
+        public interface NativeOutput extends com.sun.jna.Library {
+            int open(String path, int flags);
+            int dup2(int source, int destination);
+            int close(int descriptor);
+        }
+
+        private static void redirect(Path destination) {
+            NativeOutput libc = com.sun.jna.Native.load("c", NativeOutput.class);
+            int fd = libc.open(destination.toString(), 1);
+            assertTrue(fd >= 0, destination.toString());
+            try {
+                assertEquals(1, libc.dup2(fd, 1));
+            } finally {
+                libc.close(fd);
+            }
+        }
+
+        private static int send(String command, String alias, String url) {
+            return Coverage41C.getCommandLine().execute(command, "-i", alias, "-u", url);
+        }
+
+        public static void main(String[] args) throws Exception {
+            Path directory = Path.of(args[0]);
+            for (int scenario = 0; scenario < 3; scenario++) {
+                boolean explicitStdout = scenario == 1;
+                boolean persistentFailure = scenario == 2;
+                try (FakeDebugServer server = new FakeDebugServer()) {
+                    String alias = "output-" + UUID.randomUUID();
+                    List<String> options = new ArrayList<>(List.of("start", "-i", alias, "-u", server.url()));
+                    if (explicitStdout) {
+                        options.addAll(List.of("-o", "/dev/stdout"));
+                    }
+                    var start = java.util.concurrent.CompletableFuture.supplyAsync(() ->
+                            Coverage41C.getCommandLine(StandardOutputFile.PROCESS_OUTPUT)
+                                    .execute(options.toArray(new String[0])));
+                    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+                    while (server.requests("pingDebugUIParams").isEmpty()) {
+                        assertFalse(start.isDone(), "Collector exited before its first poll");
+                        assertTrue(System.nanoTime() < deadline, "Collector did not start");
+                        Thread.sleep(10);
+                    }
+                    assertEquals(0, send("check", alias, server.url()));
+                    server.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
+                    redirect(Path.of("/dev/full"));
+                    assertEquals(1, send("dump", alias, server.url()));
+                    assertEquals(1, send("dump", alias, server.url()));
+                    if (persistentFailure) {
+                        assertEquals(1, send("stop", alias, server.url()));
+                        assertEquals(1, start.get(15, TimeUnit.SECONDS));
+                        continue;
+                    }
+                    Path dump = Files.createFile(directory.resolve("dump-" + explicitStdout + ".xml"));
+                    redirect(dump);
+                    assertEquals(0, send("dump", alias, server.url()), "dump after restoring fd 1");
+                    Path stop = Files.createFile(directory.resolve("stop-" + explicitStdout + ".xml"));
+                    redirect(stop);
+                    assertEquals(0, send("stop", alias, server.url()));
+                    assertEquals(0, start.get(15, TimeUnit.SECONDS));
+                    for (Path report : List.of(dump, stop)) {
+                        var xml = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(report.toFile());
+                        Element line = (Element) xml.getElementsByTagName("lineToCover").item(0);
+                        assertTrue(line != null, report.toString());
+                        assertEquals("2", line.getAttribute("lineNumber"));
+                        assertEquals("true", line.getAttribute("covered"));
+                    }
+                }
+            }
+        }
+    }
+
+    public static class StatsOutputProbe {
+        public static void main(String[] args) throws Exception {
+            try (FakeDebugServer server = new FakeDebugServer()) {
+                String alias = "stats-" + UUID.randomUUID();
+                Future<Integer> collector = java.util.concurrent.CompletableFuture.supplyAsync(() ->
+                        startCommandLine().execute("start", "-i", alias, "-u", server.url(),
+                                "-o", args[0], "-t", "10"));
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+                while (server.requests("pingDebugUIParams").isEmpty()) {
+                    if (collector.isDone() || System.nanoTime() >= deadline) {
+                        throw new AssertionError("Stats collector did not start");
+                    }
+                    Thread.sleep(10);
+                }
+                boolean expectFailure = args.length > 1;
+                boolean[] broken = {true};
+                boolean[] closed = {false};
+                ByteArrayOutputStream collected = new ByteArrayOutputStream();
+                java.io.OutputStream sink = new java.io.OutputStream() {
+                    @Override
+                    public void write(int value) throws IOException {
+                        if (closed[0] || broken[0] && args[1].equals("write")) {
+                            throw new IOException("synthetic write failure");
+                        }
+                        collected.write(value);
+                    }
+
+                    @Override
+                    public void flush() throws IOException {
+                        if (closed[0] || broken[0] && args[1].equals("flush")) {
+                            throw new IOException("synthetic flush failure");
+                        }
+                    }
+
+                    @Override
+                    public void close() {
+                        closed[0] = true;
+                    }
+                };
+                if (expectFailure && !args[1].equals("device")) {
+                    if (args[1].equals("closed")) {
+                        sink.close();
+                    }
+                    statisticsSink = sink;
+                }
+                int stats = Coverage41C.getCommandLine().execute("stats", "-i", alias, "-u", server.url());
+                int repeated = expectFailure
+                        ? Coverage41C.getCommandLine().execute("stats", "-i", alias, "-u", server.url()) : 0;
+                int recovered = 0;
+                if (expectFailure && !args[1].equals("device")) {
+                    broken[0] = false;
+                    collected.reset();
+                    if (closed[0]) {
+                        statisticsSink = collected;
+                    }
+                    recovered = Coverage41C.getCommandLine().execute("stats", "-i", alias, "-u", server.url());
+                    if (!collected.toString().contains("Covered lines")) {
+                        throw new AssertionError("Recovery did not write statistics");
+                    }
+                    if (!closed[0]) {
+                        broken[0] = true;
+                        if (Coverage41C.getCommandLine().execute("stats", "-i", alias, "-u", server.url()) == 0) {
+                            throw new AssertionError("Persistent failure returned success after recovery");
+                        }
+                    }
+                    statisticsSink = null;
+                }
+                int stop = Coverage41C.getCommandLine().execute("stop", "-i", alias, "-u", server.url());
+                int start = collector.get(20, TimeUnit.SECONDS);
+                if ((expectFailure ? stats == 0 || repeated == 0 : stats != 0) || recovered != 0 || stop != 0 || start != 0) {
+                    throw new AssertionError("Unexpected status: stats=" + stats + ", stop=" + stop + ", start=" + start);
+                }
+                if (expectFailure) {
+                    System.out.println("Stats failure reported");
+                }
+            }
+        }
     }
 
     interface Scenario {
@@ -1698,6 +3036,19 @@ class StartCommandTest {
         assertFalse(Files.exists(Path.of(Utils.getPipeName(connectionOptions()))));
     }
 
+    private static volatile java.io.OutputStream statisticsSink;
+
+    private static String captureStatistics(Scenario scenario) throws Exception {
+        ByteArrayOutputStream report = new ByteArrayOutputStream();
+        statisticsSink = report;
+        try {
+            scenario.run();
+            return report.toString(StandardCharsets.UTF_8);
+        } finally {
+            statisticsSink = null;
+        }
+    }
+
     private static CommandLine startCommandLine() {
         return startCommandLine(System::nanoTime);
     }
@@ -1709,20 +3060,28 @@ class StartCommandTest {
             public <T> T create(Class<T> type) throws Exception {
                 if (type == CoverageCommand.class) {
                     return type.cast(new CoverageCommand(targetLookupClock, TEST_FINAL_MEASURE_WINDOW,
-                            TEST_FINAL_CONFIRMATION_TIMEOUT));
+                            TEST_FINAL_CONFIRMATION_TIMEOUT) {
+                        @Override
+                        protected java.io.OutputStream statisticsOutput() {
+                            java.io.OutputStream sink = statisticsSink;
+                            return sink == null ? super.statisticsOutput() : sink;
+                        }
+                    });
                 }
                 return defaultFactory.create(type);
             }
         });
     }
 
-    private Future<Integer> startRaw() throws Exception {
-        return submit(List.of(
+    private Future<Integer> startRaw(String... options) throws Exception {
+        List<String> arguments = new ArrayList<>(List.of(
                 PipeMessages.START_COMMAND,
                 "-i", infobase,
                 "-u", dbgs.url(),
                 "-o", output.toString(),
                 "-t", "10"));
+        arguments.addAll(Arrays.asList(options));
+        return submit(arguments);
     }
 
     private Future<Integer> start(String... options) throws Exception {
@@ -1730,6 +3089,10 @@ class StartCommandTest {
     }
 
     private Future<Integer> start(CommandLine command, String... options) throws Exception {
+        return startWithPingTimeout(command, "10", options);
+    }
+
+    private Future<Integer> startWithPingTimeout(CommandLine command, String pingTimeout, String... options) throws Exception {
         Path project = tempDir.resolve("project");
         if (!Files.exists(project)) {
             TestUtils.copyConfiguration(tempDir);
@@ -1742,7 +3105,7 @@ class StartCommandTest {
                 "-P", project.toString(),
                 "-s", "configuration",
                 "-o", output.toString(),
-                "-t", "10"));
+                "-t", pingTimeout));
         arguments.addAll(Arrays.asList(options));
         return submit(command, arguments);
     }

@@ -32,6 +32,7 @@ import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 
+import java.io.OutputStream;
 import java.lang.invoke.MethodHandles;
 import java.util.List;
 import java.util.concurrent.Callable;
@@ -42,6 +43,15 @@ import java.util.concurrent.Callable;
 public class ValidateCommand implements Callable<Integer> {
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+    private final OutputStream reportOutput;
+
+    public ValidateCommand() {
+        this(null);
+    }
+
+    public ValidateCommand(OutputStream reportOutput) {
+        this.reportOutput = reportOutput;
+    }
 
     @Mixin
     private MetadataOptions metadataOptions;
@@ -51,7 +61,7 @@ public class ValidateCommand implements Callable<Integer> {
 
     @Override
     public Integer call() throws Exception {
-        List<String> warnings = Utils.validateMetadata(metadataOptions);
+        List<String> warnings = Utils.validateMetadata(metadataOptions, reportOutput);
         if (strict && !warnings.isEmpty()) {
             logger.error("Validation failed: {} warning(s) in strict mode", warnings.size());
             return CommandLine.ExitCode.SOFTWARE;

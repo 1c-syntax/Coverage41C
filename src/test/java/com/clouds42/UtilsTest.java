@@ -143,4 +143,41 @@ class UtilsTest {
 
         Utils.printCoverageStats(coverageData, metadataOptions);
     }
+    @Test
+    void statisticsSinkPreservesStderrEncodingForUnicodePaths() throws Exception {
+        Map<URI, Map<BigDecimal, Integer>> data = Map.of(
+                new File("src/CommonModules/Модуль/Ext/Module.bsl").getAbsoluteFile().toURI(),
+                Map.of(BigDecimal.ONE, 1));
+        MetadataOptions metadata = new MetadataOptions();
+        metadata.setSrcDirName("");
+        metadata.setProjectDirName(new File(".").getAbsolutePath());
+        var expected = new java.io.ByteArrayOutputStream();
+        var actual = new java.io.ByteArrayOutputStream();
+        var original = System.err;
+        try (var stderr = new java.io.PrintStream(new java.io.ByteArrayOutputStream(), true,
+                java.nio.charset.Charset.forName("windows-1251"));
+             var rendered = new java.io.PrintStream(expected, false, stderr.charset())) {
+            System.setErr(stderr);
+            Utils.printCoverageStats(data, metadata, rendered);
+            Utils.writeCoverageStats(data, metadata, actual);
+            org.junit.jupiter.api.Assertions.assertArrayEquals(expected.toByteArray(), actual.toByteArray());
+            assertTrue(actual.toString(stderr.charset()).contains("Модуль"));
+        } finally {
+            System.setErr(original);
+        }
+    }
+
+    @Test
+    void throwingStatisticsApiRejectsPrintStreamBeforeWriting() {
+        MetadataOptions metadata = new MetadataOptions();
+        metadata.setSrcDirName("");
+        metadata.setProjectDirName(new File(".").getAbsolutePath());
+        var bytes = new java.io.ByteArrayOutputStream();
+        try (var output = new java.io.PrintStream(bytes)) {
+            org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                    () -> Utils.writeCoverageStats(Map.of(), metadata, output));
+            assertEquals(0, bytes.size());
+        }
+    }
+
 }

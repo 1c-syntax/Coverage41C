@@ -21,6 +21,7 @@
  */
 package com.clouds42;
 
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Locale;
@@ -37,14 +38,20 @@ public final class SourceKey {
     }
 
     public static String moduleKey(String objectId, String propertyId) {
-        validateModuleComponent(objectId, "object");
-        validateModuleComponent(propertyId, "property");
-        return Utils.getUriKey(objectId, propertyId);
+        requirePathSegment(objectId, "objectID");
+        requirePathSegment(propertyId, "propertyID");
+        String key = Utils.getUriKey(objectId, propertyId);
+        String path = "/" + key;
+        // RAW serialization reads URI.getPath(). Escapes, query and fragment data cannot change the key.
+        if (!path.equals(URI.create(path).getPath())) {
+            throw new IllegalArgumentException("Debugger module ID does not round-trip through a URI path");
+        }
+        return key;
     }
 
-    private static void validateModuleComponent(String value, String component) {
-        if (value == null || value.isBlank() || value.indexOf('/') >= 0) {
-            throw new IllegalArgumentException("Invalid module " + component + " identifier");
+    private static void requirePathSegment(String value, String field) {
+        if (value == null || value.isBlank() || value.indexOf('/') >= 0 || value.equals(".") || value.equals("..")) {
+            throw new IllegalArgumentException("Invalid " + field + " in debugger module ID");
         }
     }
 

@@ -143,9 +143,13 @@ final class CoverMapBuilder {
                 routine.getPrefixes().forEach(prefix -> routineLines.merge(prefix.getSource(), 1, Integer::sum));
             }
         }
-        if (!outside || counted > 0) {
-            markers.getWarnings().forEach(warning -> report.warn(module.getPath() + ":" + warning));
-        }
+        // Parse the whole module so markers can pair across scope boundaries. Report only
+        // diagnostics whose location or affected range intersects a selected block or method.
+        List<String> markerWarnings = outside
+                ? markers.getWarningsIntersecting((first, last) -> blocks.intersects(first, last)
+                        || found.intersects(first, last))
+                : markers.getWarnings();
+        markerWarnings.forEach(warning -> report.warn(module.getPath() + ":" + warning));
         report.addModuleTotals(counted, excluded, auto);
         report.addIncludedLines(module.getPath(), included);
         recordChangeBlocks(blocks, module, report, includedBySource);

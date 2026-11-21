@@ -25,6 +25,9 @@ import com.clouds42.Commands.*;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 
+import java.io.OutputStream;
+import java.io.PrintStream;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 
 @Command(name = "Coverage41C",
@@ -45,12 +48,41 @@ import java.util.concurrent.Callable;
 public class Coverage41C implements Callable<Integer> {
 
     public static void main(String[] args) {
-        int exitCode = getCommandLine().execute(args);
+        int exitCode = getCommandLine(StandardOutputFile.PROCESS_OUTPUT).execute(args);
         System.exit(exitCode);
     }
 
     public static CommandLine getCommandLine() {
         return new CommandLine(new Coverage41C());
+    }
+
+    /** Uses a caller-owned stream for start coverage and for convert and validate reports directed to stdout. */
+    public static CommandLine getCommandLine(OutputStream reportOutput) {
+        Objects.requireNonNull(reportOutput, "reportOutput");
+        if (reportOutput instanceof PrintStream) {
+            throw new IllegalArgumentException("Pass the underlying OutputStream so write errors propagate");
+        }
+        CommandLine.IFactory defaults = CommandLine.defaultFactory();
+        return new CommandLine(new Coverage41C(), new CommandLine.IFactory() {
+            @Override
+            public <T> T create(Class<T> type) throws Exception {
+                if (type == CoverageCommand.class) {
+                    return type.cast(new CoverageCommand() {
+                        @Override
+                        protected OutputStream coverageOutput() {
+                            return reportOutput;
+                        }
+                    });
+                }
+                if (type == ConvertCommand.class) {
+                    return type.cast(new ConvertCommand(reportOutput));
+                }
+                if (type == ValidateCommand.class) {
+                    return type.cast(new ValidateCommand(reportOutput));
+                }
+                return defaults.create(type);
+            }
+        });
     }
 
     @Override

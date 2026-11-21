@@ -102,6 +102,11 @@ final class ExclusionRules {
 
     static ExclusionRules load(File path, Path projectDir, CF configuration, ExclusionReport report,
                                boolean multipleSources) throws IOException {
+        return load(path, projectDir, configuration, report, multipleSources, false);
+    }
+
+    static ExclusionRules load(File path, Path projectDir, CF configuration, ExclusionReport report,
+                               boolean multipleSources, boolean reportOverridden) throws IOException {
         boolean filtersScope = false;
         Set<String> includedSubsystems = new HashSet<>();
         List<ScopePrefix> prefixes = new ArrayList<>();
@@ -126,17 +131,18 @@ final class ExclusionRules {
                 IncludeUsers.parse(fileName, config.getIncludeUsers());
                 includeUsersSources.add(fileName + " → includeUsers");
             }
-            if (!config.getExclusionReport().isEmpty()) {
+            if (!reportOverridden && !config.getExclusionReport().isEmpty()) {
                 // A relative path belongs to the project root (-P), not to the config file or the working directory.
                 File reportFile = projectDir.toAbsolutePath()
-                        .resolve(config.getExclusionReport()).normalize().toFile();
+                        .resolve(config.getExclusionReport()).toFile();
                 rejectReportInsideConfigDirectory(path, reportFile, fileName + " → exclusionReport");
-                if (exclusionReportFile != null && !exclusionReportFile.equals(reportFile)) {
+                if (exclusionReportFile == null) {
+                    exclusionReportFile = reportFile;
+                    exclusionReportSource = fileName;
+                } else if (!Utils.sameOutputFile(exclusionReportFile.toPath(), reportFile.toPath())) {
                     throw new IllegalArgumentException(fileName + " → exclusionReport: " + reportFile
                             + " conflicts with " + exclusionReportFile + " from " + exclusionReportSource);
                 }
-                exclusionReportFile = reportFile;
-                exclusionReportSource = fileName;
             }
             List<String> include = config.getIncludeSubsystems();
             for (int index = 0; index < include.size(); index++) {
@@ -259,7 +265,7 @@ final class ExclusionRules {
     // A report written into the config directory would be read as a config on the next run and fail it.
     static void rejectReportInsideConfigDirectory(File configPath, File reportFile, String source)
             throws IOException {
-        if (configPath == null || reportFile == null || !configPath.isDirectory()) {
+        if (configPath == null || reportFile == null || !configPath.isDirectory() || StandardOutputFile.isAlias(reportFile)) {
             return;
         }
         Path report = reportFile.toPath().toAbsolutePath();
@@ -277,24 +283,30 @@ final class ExclusionRules {
             }
         }
         Set<Path> visited = new HashSet<>();
-        for (Path candidate = report; candidate.getParent() != null; ) {
-            Path parent = candidate.getParent();
-            if (isConfigFileName(candidate.toFile()) && (configDirectory.normalize().equals(parent.normalize())
-                    || Files.exists(parent) && Files.isSameFile(configDirectory, parent))) {
-                throw new IllegalArgumentException(source + ": " + report
-                        + " is inside the configuration directory and would be read as a config on the next run");
-            }
+        Path candidate = report;
+        while (!isJsonInConfigDirectory(candidate, configDirectory)) {
             if (!Files.isSymbolicLink(candidate)) {
-                return;
+                if (!isJsonInConfigDirectory(Utils.resolveOutputPath(candidate), configDirectory)) {
+                    return;
+                }
+                break;
             }
-
-            // Resolve the parent only, as the final link may point to a file that does not exist yet.
-            Path link = parent.toRealPath().resolve(candidate.getFileName());
+            // Resolve the parent separately, since the final link may lead to a future output.
+            Path link = candidate.getParent().toRealPath().resolve(candidate.getFileName());
             if (!visited.add(link)) {
                 throw new FileSystemLoopException(report.toString());
             }
             candidate = link.resolveSibling(Files.readSymbolicLink(link));
         }
+        throw new IllegalArgumentException(source + ": " + report
+                + " is inside the configuration directory and would be read as a config on the next run");
+    }
+
+    private static boolean isJsonInConfigDirectory(Path report, Path configDirectory) throws IOException {
+        Path parent = report.getParent();
+        return isConfigFileName(report.toFile()) && parent != null
+                && (configDirectory.equals(parent)
+                || Files.exists(parent) && Files.isSameFile(configDirectory, parent));
     }
 
     private static boolean isConfigFileName(File file) {

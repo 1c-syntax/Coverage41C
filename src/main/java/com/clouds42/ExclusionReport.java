@@ -29,6 +29,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.lang.invoke.MethodHandles;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -288,6 +289,16 @@ final class ExclusionReport {
     }
 
     void writeJson(File file) throws IOException {
+        File directory = file.getAbsoluteFile().getParentFile();
+        if (directory != null) {
+            Files.createDirectories(directory.toPath());
+        }
+        try (OutputStream output = Files.newOutputStream(file.toPath())) {
+            writeJson(output);
+        }
+    }
+
+    void writeJson(OutputStream output) throws IOException {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("totalLines", totalLines);
         root.put("excludedLines", excludedLines);
@@ -316,11 +327,7 @@ final class ExclusionReport {
             scope.put("prefixScope", settings);
         }
         root.put("scope", scope);
-        File directory = file.getAbsoluteFile().getParentFile();
-        if (directory != null) {
-            Files.createDirectories(directory.toPath());
-        }
-        new ObjectMapper().writerWithDefaultPrettyPrinter().writeValue(file, root);
+        new ObjectMapper().writerWithDefaultPrettyPrinter().writeValue(output, root);
     }
 
     @JsonPropertyOrder({"source", "team", "reason", "kind", "excludedLines", "modules"})

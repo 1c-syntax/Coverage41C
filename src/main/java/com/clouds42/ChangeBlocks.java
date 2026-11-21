@@ -145,6 +145,10 @@ final class ChangeBlocks {
         return blocks.stream().anyMatch(block -> block.covers(line));
     }
 
+    boolean intersects(int firstLine, int lastLine) {
+        return blocks.stream().anyMatch(block -> block.intersects(firstLine, lastLine));
+    }
+
     boolean isEmpty() {
         return blocks.isEmpty();
     }
@@ -228,9 +232,13 @@ final class ChangeBlocks {
 
         // A comment-only marker line stays outside the block; a marker after code keeps its line in the block.
         boolean covers(int line) {
-            boolean afterBegin = line > beginLine || (line == beginLine && beginInline);
-            boolean beforeEnd = line < endLine || (line == endLine && (endInline || isAutomaticallyClosed()));
-            return afterBegin && beforeEnd;
+            return intersects(line, line);
+        }
+
+        private boolean intersects(int firstLine, int lastLine) {
+            int firstIncluded = beginInline ? beginLine : beginLine + 1;
+            int lastIncluded = endInline || isAutomaticallyClosed() ? endLine : endLine - 1;
+            return Math.max(firstLine, firstIncluded) <= Math.min(lastLine, lastIncluded);
         }
     }
 }

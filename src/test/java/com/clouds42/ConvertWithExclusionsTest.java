@@ -315,6 +315,19 @@ class ConvertWithExclusionsTest {
     }
 
     @Test
+    void missingIntermediateDirectoryCannotRedirectCoverageToRaw() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Path raw = Files.copy(Path.of(INTERNAL_XML), tempDir.resolve("raw.xml"));
+        byte[] original = Files.readAllBytes(raw);
+        Path output = tempDir.resolve("missing/../raw.xml");
+        StringWriter stderr = new StringWriter();
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, convert(project, raw, output, stderr), stderr.toString());
+        assertArrayEquals(original, Files.readAllBytes(raw));
+        assertFalse(Files.exists(tempDir.resolve("missing")));
+    }
+
+    @Test
     void rejectsExclusionReportThatIsTheRawInput() throws Exception {
         Path project = TestUtils.copyConfiguration(tempDir);
         Path rawCoverage = Files.copy(Path.of(INTERNAL_XML), tempDir.resolve("raw.xml"));
@@ -425,6 +438,79 @@ class ConvertWithExclusionsTest {
     }
 
     @Test
+    void emptySelectedRecordsDoNotHideForeignMeasurements() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Files.writeString(project.resolve(MODULE), String.join("\n", PLAIN_MODULE) + "\n");
+        Path report = Files.writeString(tempDir.resolve("report.json"), "{\"previous\":true}");
+        Path coverage = Files.writeString(tempDir.resolve("coverage.xml"), "<previous/>");
+        Path raw = tempDir.resolve("raw.xml");
+        String selected = "source-v1/-/-/" + MODULE_KEY.replaceFirst("^/", "");
+        String unknown = "source-v1/-/-/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222";
+        String foreign = "<file extension=\"A\" path=\"" + MODULE_KEY
+                + "\"><lineToCover covered=\"true\" lineNumber=\"4\"/></file>";
+        for (String placeholder : List.of(
+                "<file path=\"" + selected + "\"/>",
+                "<file path=\"" + unknown + "\"/>")) {
+            Files.writeString(raw, "<coverage sourceIdentity=\"true\">" + placeholder + foreign + "</coverage>");
+            StringWriter stderr = new StringWriter();
+            assertEquals(CommandLine.ExitCode.SOFTWARE, convert(project, raw, coverage, stderr,
+                    "--exclusion-report", report.toString()), stderr.toString());
+            assertTrue(stderr.toString().contains("No RAW measurements"), stderr.toString());
+            assertEquals("<previous/>", Files.readString(coverage));
+            assertEquals("{\"previous\":true}", Files.readString(report));
+        }
+        for (boolean covered : List.of(false, true)) {
+            Files.writeString(raw, "<coverage sourceIdentity=\"true\"><file path=\"" + selected
+                    + "\"><lineToCover covered=\"" + covered + "\" lineNumber=\"2\"/></file>" + foreign + "</coverage>");
+            StringWriter stderr = new StringWriter();
+            assertEquals(CommandLine.ExitCode.OK, convert(project, raw, coverage, stderr,
+                    "--exclusion-report", report.toString()), stderr.toString());
+            assertEquals(Map.of(2, covered, 3, false, 4, false), genericCoverage(coverage).get(MODULE));
+        }
+    }
+
+    @Test
+    void convertsRawWithOnlyEmptyRecordsFromAnySource() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Files.writeString(project.resolve(MODULE), String.join("\n", PLAIN_MODULE) + "\n");
+        Path raw = tempDir.resolve("raw.xml");
+        Path output = tempDir.resolve("coverage.xml");
+        String main = "<file path=\"" + MODULE_KEY + "\"/>";
+        String foreign = "<file path=\"" + MODULE_KEY + "\" extension=\"B\"/>";
+        for (String files : List.of("", main, main + foreign, foreign, foreign + main)) {
+            Files.writeString(raw, "<coverage sourceIdentity=\"true\">" + files + "</coverage>");
+            StringWriter stderr = new StringWriter();
+            assertEquals(CommandLine.ExitCode.OK, convert(project, raw, output, stderr), stderr.toString());
+            assertEquals(Map.of(2, false, 3, false, 4, false), genericCoverage(output).get(MODULE));
+        }
+    }
+
+    @Test
+    void rejectsForeignRawXmlNamespacesWithoutReplacingReports() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Files.writeString(project.resolve(MODULE), String.join("\n", PLAIN_MODULE) + "\n");
+        Path report = Files.writeString(tempDir.resolve("report.json"), "{\"previous\":true}");
+        Path coverage = Files.writeString(tempDir.resolve("coverage.xml"), "<previous/>");
+        Path raw = tempDir.resolve("raw.xml");
+        String document = "<coverage><file path=\"" + MODULE_KEY
+                + "\"><lineToCover covered=\"true\" lineNumber=\"2\"/></file></coverage>";
+        for (String tag : List.of("coverage", "file", "lineToCover")) {
+            Files.writeString(raw, document.replaceFirst("<" + tag, "<" + tag + " xmlns=\"urn:example:foreign\""));
+            StringWriter stderr = new StringWriter();
+            assertEquals(CommandLine.ExitCode.SOFTWARE, convert(project, raw, coverage, stderr,
+                    "--exclusion-report", report.toString()), stderr.toString());
+            assertEquals("<previous/>", Files.readString(coverage));
+            assertEquals("{\"previous\":true}", Files.readString(report));
+        }
+        Files.writeString(raw, document.replace("<coverage>", "<coverage xmlns:example=\"urn:example:unused\">"));
+        StringWriter stderr = new StringWriter();
+        assertEquals(CommandLine.ExitCode.OK, convert(project, raw, coverage, stderr,
+                "--exclusion-report", report.toString()), stderr.toString());
+        assertEquals(Map.of(2, true, 3, false, 4, false), genericCoverage(coverage).get(MODULE));
+    }
+
+
+    @Test
     void foreignRawKeepsPreviousCoverageAndConfiguredExclusionReport() throws Exception {
         Path project = TestUtils.copyConfiguration(tempDir);
         Path config = Files.writeString(tempDir.resolve("rules.json"), "{\"exclusionReport\":\"previous.json\"}");
@@ -432,7 +518,7 @@ class ConvertWithExclusionsTest {
         Path coverage = Files.writeString(tempDir.resolve("coverage.xml"), "<previous/>");
         Path raw = Files.writeString(tempDir.resolve("raw.xml"),
                 "<coverage sourceIdentity=\"true\"><file extension=\"Other\" path=\"" + MODULE_KEY
-                        + "\"/></coverage>");
+                        + "\"><lineToCover covered=\"true\" lineNumber=\"2\"/></file></coverage>");
         StringWriter stderr = new StringWriter();
 
         assertEquals(CommandLine.ExitCode.SOFTWARE, convert(project, raw, coverage, stderr,

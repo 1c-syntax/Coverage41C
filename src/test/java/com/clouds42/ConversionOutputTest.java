@@ -28,10 +28,15 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -44,6 +49,33 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ConversionOutputTest {
     @TempDir Path directory;
+
+    @Test
+    void movingThePublishedReportDoesNotExposeEitherInodeToAnEmbeddedDump() throws Exception {
+        Path named = directory.resolve("report.json");
+        Path moved = directory.resolve("moved.json");
+        try (ConversionOutput.PublishedReport published = new ConversionOutput.PublishedReport()) {
+            published.write(named, stage -> Files.writeString(stage, "first"));
+            Files.move(named, moved);
+            // The reader has moved the report, leaving its original pathname vacant.
+            try (var stream = Files.newOutputStream(moved, StandardOpenOption.APPEND)) {
+                assertThrows(IOException.class, () -> ConversionOutput.writeSeparate(stream, named.toFile(), published,
+                        out -> out.write(42)));
+            }
+            assertFalse(Files.exists(named));
+            assertEquals("first", Files.readString(moved));
+            // Another producer may reuse the name between dumps without waiting for stop.
+            ConversionOutput.writeFile(named, stage -> Files.writeString(stage, "second"));
+            for (Path target : List.of(named, moved)) {
+                try (var stream = Files.newOutputStream(target, StandardOpenOption.APPEND)) {
+                    assertThrows(IOException.class, () -> ConversionOutput.writeSeparate(stream, named.toFile(), published,
+                            out -> out.write(42)));
+                }
+                assertEquals("first", Files.readString(moved));
+                assertEquals("second", Files.readString(named));
+            }
+        }
+    }
 
     @Test
     void failureAfterWritingPartOfTemporaryJsonPreservesBothReports() throws Exception {
@@ -68,6 +100,40 @@ class ConversionOutputTest {
         }, null, OutputStream.nullOutputStream()));
         assertEquals("<old/>", Files.readString(xml));
         assertDirectorySize(1);
+    }
+
+    @Test
+    void updatesWriteOnlyReportInPlaceAndDelaysItUntilOtherOutputsSucceed() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(directory.getFileSystem().supportedFileAttributeViews().contains("posix"));
+        Path report = Files.writeString(directory.resolve("report"), "original");
+        Path alias = Files.createLink(directory.resolve("alias"), report);
+        var writeOnly = PosixFilePermissions.fromString("-w-------");
+        Files.setPosixFilePermissions(report, writeOnly);
+        try {
+            org.junit.jupiter.api.Assumptions.assumeTrue(!Files.isReadable(report));
+            Path second = directory.resolve("second");
+            assertThrows(IOException.class, () -> ConversionOutput.publish(second, report,
+                    out -> { throw new IOException("coverage failed"); }, out -> out.write('j'), null));
+            assertThrows(IOException.class, () -> ConversionOutput.write(null, report,
+                    file -> Files.writeString(file, "coverage"), file -> Files.writeString(file, "json"), OutputStream.nullOutputStream()));
+            Files.setPosixFilePermissions(report, PosixFilePermissions.fromString("rw-------"));
+            assertEquals("original", Files.readString(alias));
+            Files.setPosixFilePermissions(report, writeOnly);
+            assertFalse(Files.exists(second));
+            assertThrows(IOException.class, () -> ConversionOutput.publish(report, null, out -> {
+                out.write('x');
+                throw new IOException("interrupted write");
+            }, null, null));
+            var capture = new java.io.ByteArrayOutputStream();
+            ConversionOutput.write(null, report, stage -> Files.writeString(stage, "coverage"),
+                    stage -> Files.writeString(stage, "replacement"), capture);
+            assertEquals("coverage", capture.toString(StandardCharsets.UTF_8));
+            assertEquals(writeOnly, Files.getPosixFilePermissions(report));
+            assertTrue(Files.isSameFile(report, alias));
+        } finally {
+            Files.setPosixFilePermissions(report, PosixFilePermissions.fromString("rw-------"));
+        }
+        assertEquals("replacement", Files.readString(alias));
     }
 
     @Test
@@ -104,6 +170,256 @@ class ConversionOutputTest {
             assertEquals("{}", Files.readString(json));
         }
         assertDirectorySize(1);
+    }
+
+    @Test
+    void markerRollbackRemovesUnmodifiedOutputWhenBasicFileKeyIsMissing() throws Exception {
+        Path coverage = directory.resolve("coverage.xml");
+        Path report = Files.writeString(directory.resolve("report.json"), "{}");
+        ConversionOutput.FileKeys keys = markerKeysWithoutBasicIdentity(ConversionOutputTest::readUnixIdentity);
+        try (FileChannel holder = FileChannel.open(report, StandardOpenOption.WRITE);
+             FileLock lock = holder.lock()) {
+            IOException error = assertThrows(IOException.class, () -> ConversionOutput.publish(coverage, report,
+                    output -> output.write(1), output -> output.write(2), OutputStream.nullOutputStream(), keys));
+            assertTrue(error.getMessage().contains("Another conversion is writing"), error.toString());
+            assertFalse(Files.exists(coverage));
+            assertEquals("{}", Files.readString(report));
+            assertTrue(lock.isValid());
+            assertDirectorySize(1);
+        }
+
+        ConversionOutput.publish(coverage, report, output -> output.write('x'), output -> output.write('j'),
+                OutputStream.nullOutputStream(), keys);
+        assertEquals("x", Files.readString(coverage));
+        assertEquals("j", Files.readString(report));
+        try (FileChannel opened = FileChannel.open(coverage, StandardOpenOption.WRITE);
+             FileLock lock = opened.tryLock()) {
+            assertNotNull(lock);
+        }
+        assertDirectorySize(2);
+    }
+
+    @Test
+    void markerRollbackRetainsFileAndSymlinkReplacementsWhenBasicKeyIsMissing() throws Exception {
+        ConversionOutput.FileKeys keys = markerKeysWithoutBasicIdentity(ConversionOutputTest::readUnixIdentity);
+        for (String replacement : List.of("file", "symlink")) {
+            Path report = directory.resolve(replacement + ".json");
+            Path moved = directory.resolve(replacement + "-moved.json");
+            IOException error = assertThrows(IOException.class, () -> ConversionOutput.publish(null, report, output -> {
+                Files.move(report, moved);
+                if (replacement.equals("symlink")) {
+                    Files.createSymbolicLink(report, moved.getFileName());
+                } else {
+                    Files.writeString(report, "replacement");
+                }
+                throw new IOException("coverage stream failed");
+            }, output -> output.write('j'), OutputStream.nullOutputStream(), keys));
+            assertEquals("coverage stream failed", error.getMessage());
+            assertEquals("j", Files.readString(moved));
+            if (replacement.equals("symlink")) {
+                assertTrue(Files.isSymbolicLink(report));
+                assertEquals("j", Files.readString(report));
+            } else {
+                assertEquals("replacement", Files.readString(report));
+            }
+        }
+        assertDirectorySize(4);
+    }
+
+    @Test
+    void rejectsExistingDestinationReplacedBeforeLockWhenBasicKeyIsMissing() throws Exception {
+        Path coverage = directory.resolve("coverage.xml");
+        Path report = Files.writeString(directory.resolve("report.json"), "{}");
+        Path moved = directory.resolve("moved.json");
+        ConversionOutput.FileKeys keys = markerKeysWithoutBasicIdentity((path, options) -> {
+            Object key = readUnixIdentity(path, options);
+            if (path.equals(report) && !Files.exists(moved)) {
+                Files.move(report, moved);
+                Files.writeString(report, "replacement");
+            }
+            return key;
+        });
+        IOException error = assertThrows(IOException.class, () -> ConversionOutput.publish(coverage, report,
+                output -> output.write('x'), output -> output.write('j'), OutputStream.nullOutputStream(), keys));
+        assertTrue(error.getMessage().contains("Report destination changed"), error.toString());
+        assertFalse(Files.exists(coverage));
+        assertEquals("{}", Files.readString(moved));
+        assertEquals("replacement", Files.readString(report));
+        try (FileChannel opened = FileChannel.open(report, StandardOpenOption.WRITE);
+             FileLock lock = opened.tryLock()) {
+            assertNotNull(lock);
+        }
+        assertDirectorySize(2);
+    }
+
+    @Test
+    void markerRejectsFilesystemsWithoutAnyIdentityBeforeCreatingOutput() throws Exception {
+        Path coverage = directory.resolve("coverage.xml");
+        Path report = Files.writeString(directory.resolve("report.json"), "old");
+        ConversionOutput.FileKeys keys = new ConversionOutput.FileKeys(false, attributes -> null, (path, options) -> null);
+
+        IOException error = assertThrows(IOException.class, () -> ConversionOutput.publish(coverage, report,
+                output -> output.write('x'), output -> output.write('j'), OutputStream.nullOutputStream(), keys));
+        assertTrue(error.getMessage().contains("Cannot identify new report destination"), error.toString());
+        assertFalse(Files.exists(coverage));
+        assertEquals("old", Files.readString(report));
+        assertDirectorySize(1);
+    }
+
+    @Test
+    void independentJvmCanPublishOtherReportsWhileFallbackCreationIsPending() throws Exception {
+        ConversionOutput.FileKeys keys = markerKeysWithBasicIdentity();
+        Path coverage = directory.resolve("coverage.xml");
+        Path unrelated = directory.resolve("unrelated.json");
+        Path existing = Files.writeString(directory.resolve("existing.json"), "old");
+        Path coordination = Files.createDirectory(directory.resolve("coordination"));
+        Path alias = Files.createSymbolicLink(coordination.resolve("alias.xml"), coverage);
+        Path ready = coordination.resolve("ready");
+        Path release = coordination.resolve("release");
+        String classpath = System.getProperty("coverage41c.testClasspath", System.getProperty("java.class.path"));
+        Path javaExecutable = Path.of(System.getProperty("java.home"), "bin", "java");
+        Process holder = new ProcessBuilder(javaExecutable.toString(), "-cp", classpath, ExternalCreationHolder.class.getName(),
+                coverage.toString(), ready.toString(), release.toString()).redirectErrorStream(true).start();
+        try {
+            awaitMarkerSignal(ready);
+            assertAll(
+                    () -> assertThrows(IOException.class, () -> publishMarkerOutput(coverage, keys)),
+                    () -> assertThrows(IOException.class, () -> publishMarkerOutput(alias, keys)),
+                    () -> {
+                        publishMarkerOutput(unrelated, keys);
+                        assertEquals("x", Files.readString(unrelated));
+                    },
+                    () -> {
+                        publishMarkerOutput(existing, keys);
+                        assertEquals("x", Files.readString(existing));
+                    });
+            assertEquals(0, Files.size(coverage));
+            Files.createFile(release);
+            assertTrue(holder.waitFor(15, TimeUnit.SECONDS));
+            assertEquals(0, holder.exitValue(), new String(holder.getInputStream().readAllBytes(), StandardCharsets.UTF_8));
+            assertEquals("x", Files.readString(coverage));
+            assertDirectorySize(4);
+        } finally {
+            holder.destroyForcibly();
+            assertTrue(holder.waitFor(15, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void orphanedLegacyDirectoryMarkerDoesNotBlockOtherReports() throws IOException {
+        ConversionOutput.FileKeys keys = markerKeysWithBasicIdentity();
+        Path orphan = Files.createDirectory(directory.resolve(".coverage41c-creating.lock"));
+        Path coverage = directory.resolve("coverage.xml");
+        Path existing = Files.writeString(directory.resolve("existing.json"), "old");
+
+        assertAll(
+                () -> {
+                    publishMarkerOutput(coverage, keys);
+                    assertEquals("x", Files.readString(coverage));
+                },
+                () -> {
+                    publishMarkerOutput(existing, keys);
+                    assertEquals("x", Files.readString(existing));
+                });
+        assertTrue(Files.isDirectory(orphan));
+        assertDirectorySize(3);
+    }
+
+    @Test
+    void orphanedDestinationClaimProtectsOnlyThatReportAndItsAliases() throws IOException {
+        ConversionOutput.FileKeys keys = markerKeysWithBasicIdentity();
+        Path coverage = Files.writeString(directory.resolve("coverage.xml"), "old");
+        Path aliasParent = Files.createDirectory(directory.resolve("links"));
+        Path alias = Files.createSymbolicLink(aliasParent.resolve("alias.xml"), coverage);
+        Path claim = Files.createDirectories(directory.resolve(".coverage41c-creating").resolve("coverage.xml"));
+        Path alternateSpelling = directory.resolve("COVERAGE.XML");
+        boolean caseAlias = Files.exists(alternateSpelling) && Files.isSameFile(coverage, alternateSpelling);
+
+        assertAll(
+                () -> assertThrows(IOException.class, () -> publishMarkerOutput(coverage, keys)),
+                () -> assertThrows(IOException.class, () -> publishMarkerOutput(alias, keys)),
+                () -> {
+                    if (caseAlias) {
+                        assertThrows(IOException.class, () -> publishMarkerOutput(alternateSpelling, keys));
+                    } else {
+                        publishMarkerOutput(alternateSpelling, keys);
+                        assertEquals("x", Files.readString(alternateSpelling));
+                    }
+                });
+        assertEquals("old", Files.readString(coverage));
+        assertTrue(Files.isDirectory(claim));
+        Files.delete(coverage);
+        assertThrows(IOException.class, () -> publishMarkerOutput(coverage, keys));
+        assertThrows(IOException.class, () -> ConversionOutput.writeFile(coverage, file -> Files.writeString(file, "x")));
+        assertFalse(Files.exists(coverage));
+        assertTrue(Files.isDirectory(claim));
+    }
+
+    @Test
+    void fallbackCreationDoesNotFollowASymlinkAtTheCreationNamespace() throws IOException {
+        ConversionOutput.FileKeys keys = markerKeysWithBasicIdentity();
+        Path foreign = Files.createDirectory(directory.resolve("foreign"));
+        Path namespace = Files.createSymbolicLink(directory.resolve(".coverage41c-creating"), foreign);
+        Path coverage = directory.resolve("coverage.xml");
+
+        IOException failure = assertThrows(IOException.class, () -> publishMarkerOutput(coverage, keys));
+        assertTrue(failure.getMessage().contains("Report creation marker path is not a directory"));
+        assertTrue(Files.isSymbolicLink(namespace));
+        assertFalse(Files.exists(coverage));
+        try (Stream<Path> contents = Files.list(foreign)) {
+            assertEquals(0, contents.count());
+        }
+    }
+
+    private ConversionOutput.FileKeys markerKeysWithBasicIdentity() throws IOException {
+        org.junit.jupiter.api.Assumptions.assumeTrue(directory.getFileSystem().supportedFileAttributeViews().contains("unix")
+                && Files.readAttributes(directory, BasicFileAttributes.class).fileKey() != null);
+        return new ConversionOutput.FileKeys(false, BasicFileAttributes::fileKey, (path, options) -> null);
+    }
+
+    private static void publishMarkerOutput(Path path, ConversionOutput.FileKeys keys) throws IOException {
+        ConversionOutput.publish(path, null, output -> output.write('x'), null, OutputStream.nullOutputStream(), keys);
+    }
+
+    private static void awaitMarkerSignal(Path signal) throws IOException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+        while (!Files.exists(signal)) {
+            if (System.nanoTime() >= deadline) {
+                throw new IOException("Timed out waiting for " + signal);
+            }
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IOException(interrupted);
+            }
+        }
+    }
+
+    public static final class ExternalCreationHolder {
+        public static void main(String[] args) throws IOException {
+            Path output = Path.of(args[0]);
+            Path ready = Path.of(args[1]);
+            Path release = Path.of(args[2]);
+            ConversionOutput.FileKeys keys = new ConversionOutput.FileKeys(false, attributes -> null, (file, options) -> {
+                Object key = Files.readAttributes(file, BasicFileAttributes.class, options).fileKey();
+                if (file.equals(output)) {
+                    Files.createFile(ready);
+                    awaitMarkerSignal(release);
+                }
+                return key;
+            });
+            publishMarkerOutput(output, keys);
+        }
+    }
+
+    private ConversionOutput.FileKeys markerKeysWithoutBasicIdentity(ConversionOutput.NativeFileKey fallback) {
+        org.junit.jupiter.api.Assumptions.assumeTrue(directory.getFileSystem().supportedFileAttributeViews().contains("unix"));
+        return new ConversionOutput.FileKeys(false, attributes -> null, fallback);
+    }
+
+    private static Object readUnixIdentity(Path path, LinkOption... options) throws IOException {
+        return Files.readAttributes(path, "unix:dev,ino", options);
     }
 
     @Test
@@ -159,6 +475,50 @@ class ConversionOutputTest {
     }
 
     @Test
+    void createOnlyReportRejectsFileAppearingAfterStaging() throws Exception {
+        Path report = directory.resolve("report.json");
+        assertThrows(FileAlreadyExistsException.class, () ->
+                ConversionOutput.writeNewFile(report, stage -> {
+                    Files.writeString(stage, "replacement");
+                    Files.writeString(report, "previous");
+                }));
+        assertEquals("previous", Files.readString(report));
+        assertDirectorySize(1);
+    }
+
+    @Test
+    void rollbackLeavesAReplacementAtTheCreatedOutputName() throws Exception {
+        Path report = directory.resolve("report.json");
+        Path moved = directory.resolve("moved.json");
+        IOException error = assertThrows(IOException.class, () -> ConversionOutput.publish(null, report,
+                stream -> {
+                    Files.move(report, moved);
+                    Files.writeString(report, "replacement");
+                    throw new IOException("coverage stream failed");
+                }, stream -> stream.write('1'), OutputStream.nullOutputStream()));
+
+        assertEquals("coverage stream failed", error.getMessage());
+        assertEquals("replacement", Files.readString(report));
+        assertEquals("1", Files.readString(moved));
+    }
+
+    @Test
+    void createOnlyPairRollsBackWhenSecondDestinationAppearsAfterStaging() throws Exception {
+        Path coverage = directory.resolve("coverage.xml");
+        Path report = directory.resolve("report.json");
+
+        assertThrows(FileAlreadyExistsException.class, () -> ConversionOutput.write(coverage, report,
+                stage -> Files.writeString(stage, "<coverage/>"), stage -> {
+                    Files.writeString(stage, "[]");
+                    Files.writeString(report, "replacement");
+                }, OutputStream.nullOutputStream(), true));
+
+        assertFalse(Files.exists(coverage));
+        assertEquals("replacement", Files.readString(report));
+        assertDirectorySize(1);
+    }
+
+    @Test
     void newReportsInheritNormalOutputPermissions() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeTrue(directory.getFileSystem().supportedFileAttributeViews().contains("posix"));
         Path reference = Files.createFile(directory.resolve("reference"));
@@ -200,23 +560,46 @@ class ConversionOutputTest {
     void localContentionDoesNotReleaseTheLockSeenByAnotherJvm() throws Exception {
         Path xml = Files.writeString(directory.resolve("coverage.xml"), "old");
         Path json = Files.writeString(directory.resolve("report.json"), "{}");
-        String classes = Path.of(ExternalLockProbe.class.getProtectionDomain().getCodeSource().getLocation().toURI()).toString();
-        Path java = Path.of(System.getProperty("java.home"), "bin", "java");
+        ProcessBuilder checker = lockChecker(xml);
         ConversionOutput.publish(xml, json, out -> out.write(1), out -> {
             assertThrows(IOException.class, () -> ConversionOutput.publish(xml, json,
                     bytes -> bytes.write(2), bytes -> bytes.write(3), OutputStream.nullOutputStream()));
-            Process probe = new ProcessBuilder(java.toString(), "-cp", classes,
-                    ExternalLockProbe.class.getName(), xml.toString()).inheritIO().start();
-            try {
-                assertTrue(probe.waitFor(15, TimeUnit.SECONDS));
-                assertEquals(0, probe.exitValue(), "An independent JVM acquired the active output");
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-                throw new IOException(interrupted);
-            } finally {
-                probe.destroyForcibly();
-            }
+            assertLocked(checker);
         }, OutputStream.nullOutputStream());
+    }
+
+    @Test
+    void closingCollectorDuringAnotherPublicationKeepsThatPublishersLock() throws Exception {
+        Path json = directory.resolve("report.json");
+        ProcessBuilder checker = lockChecker(json);
+        try (ConversionOutput.PublishedReport published = new ConversionOutput.PublishedReport()) {
+            published.write(json, file -> Files.writeString(file, "original"));
+            ConversionOutput.publish(json, null, stream -> {
+                published.close();
+                assertLocked(checker);
+                stream.write(42);
+            }, null, OutputStream.nullOutputStream());
+        }
+        assertArrayEquals(new byte[]{42}, Files.readAllBytes(json));
+    }
+
+    private static ProcessBuilder lockChecker(Path path) throws Exception {
+        String classes = Path.of(ExternalLockProbe.class.getProtectionDomain().getCodeSource().getLocation().toURI()).toString();
+        return new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(), "-cp", classes,
+                ExternalLockProbe.class.getName(), path.toString()).inheritIO();
+    }
+
+    private static void assertLocked(ProcessBuilder checker) throws IOException {
+        Process probe = checker.start();
+        try {
+            assertTrue(probe.waitFor(15, TimeUnit.SECONDS));
+            assertEquals(0, probe.exitValue(), "An independent JVM acquired the active output");
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IOException(interrupted);
+        } finally {
+            probe.destroyForcibly();
+        }
     }
 
     public static final class ExternalLockProbe {
