@@ -44,6 +44,7 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.HashMap;
 import java.util.List;
@@ -570,6 +571,22 @@ class ConversionOutputTest {
         assertEquals("a", Files.readString(first));
         assertEquals("b", Files.readString(second));
         assertDirectorySize(4);
+    }
+
+    @Test
+    void creationStampAllowsPeerSearchAndReadWithoutWorldWrite() throws IOException {
+        org.junit.jupiter.api.Assumptions.assumeTrue(PosixFiles.supportsNamespaceLeases(directory));
+        String namespaceName = ".coverage41c-creating";
+        Path namespace = directory.resolve(namespaceName);
+        Path stamp = namespace.resolve(namespaceName);
+        ConversionOutput.publish(directory.resolve("coverage.xml"), directory.resolve("exclusions.json"), xml -> {
+            assertTrue(Files.getPosixFilePermissions(namespace).contains(PosixFilePermission.OTHERS_EXECUTE));
+            var stampAccess = Files.getPosixFilePermissions(stamp);
+            assertTrue(stampAccess.contains(PosixFilePermission.OTHERS_READ));
+            assertFalse(stampAccess.contains(PosixFilePermission.OTHERS_WRITE));
+            xml.write('x');
+        }, json -> json.write('j'), null);
+        assertFalse(Files.exists(namespace));
     }
 
     @Test

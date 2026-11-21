@@ -206,7 +206,7 @@ final class PosixFiles {
             int end = offset + length;
             while (offset < end) {
                 byte[] buffer = offset == 0 ? bytes : Arrays.copyOfRange(bytes, offset, end);
-                long written = LibC.INSTANCE.write(descriptor, buffer, new NativeLong(end - offset)).longValue();
+                long written = LibC.INSTANCE.write(descriptor, buffer, new NativeLong((long) end - offset)).longValue();
                 if (written < 0 && Native.getLastError() == 4) { // EINTR
                     continue;
                 }
@@ -247,6 +247,20 @@ final class PosixFiles {
 
     // flock belongs to this open file description. Other opens and closes in the JVM cannot release it.
     static Pin tryNamespaceStampLock(Path path, boolean exclusive) throws IOException {
+        return tryNamespaceStampLock(path, exclusive, exclusive);
+    }
+
+    static Pin tryNamespaceCleanupLock(Path path) throws IOException {
+        try {
+            return tryNamespaceStampLock(path, true);
+        } catch (AccessDeniedException readOnlyStamp) {
+            // On local Unix filesystems, a peer can lock the read-only stamp before removing
+            // a directory it is already allowed to delete. Network filesystems may reject this.
+            return tryNamespaceStampLock(path, true, false);
+        }
+    }
+
+    private static Pin tryNamespaceStampLock(Path path, boolean exclusive, boolean writable) throws IOException {
         boolean mac = Platform.isMac();
         byte[] name = nativePath(path);
         // toUri appends a slash to directories. O_NOFOLLOW must apply to the final named entry.
@@ -254,7 +268,7 @@ final class PosixFiles {
             name[name.length - 2] = 0;
         }
         // A writable regular descriptor also supports NFS and SMB implementations of exclusive flock.
-        int fd = LibC.INSTANCE.open(name, (exclusive ? 2 : 0) | nonBlocking() | noFollowCloseOnExec());
+        int fd = LibC.INSTANCE.open(name, (writable ? 2 : 0) | nonBlocking() | noFollowCloseOnExec());
         if (fd < 0) {
             int error = Native.getLastError();
             if (error == 2) {

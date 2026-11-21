@@ -149,8 +149,10 @@ final class ConversionOutput {
         OutputStream stream = coverage == null ? Utils.reportStdout(stdout) : null;
         // A prepared output directory can move during serialization. Keep the private staged
         // files independent of its name so failure leaves nothing behind in the moved directory.
-        try (Temporary coverageStage = Temporary.create(prepared == null ? coverage : null);
-             Temporary reportStage = report == null ? null : Temporary.create(prepared == null ? report : null)) {
+        Path stagingCoverage = prepared == null ? coverage : null;
+        Path stagingReport = prepared == null ? report : null;
+        try (Temporary coverageStage = Temporary.create(stagingCoverage);
+             Temporary reportStage = report == null ? null : Temporary.create(stagingReport)) {
             writeCoverage.write(coverageStage.path);
             if (reportStage != null) {
                 writeReport.write(reportStage.path);
@@ -736,22 +738,9 @@ final class ConversionOutput {
             boolean installed = false;
             try {
                 Files.createDirectory(staged);
-                var permissions = Files.getPosixFilePermissions(staged);
-                permissions.add(PosixFilePermission.GROUP_EXECUTE);
-                permissions.add(PosixFilePermission.OTHERS_EXECUTE);
-                Files.setPosixFilePermissions(staged, permissions);
                 Path stamp = staged.resolve(namespace.getFileName());
                 writeOwnershipStamp(stamp);
-                var stampAccess = Files.getPosixFilePermissions(stamp);
-                stampAccess.add(PosixFilePermission.GROUP_READ);
-                stampAccess.add(PosixFilePermission.OTHERS_READ);
-                if (permissions.contains(PosixFilePermission.GROUP_WRITE)) {
-                    stampAccess.add(PosixFilePermission.GROUP_WRITE);
-                }
-                if (permissions.contains(PosixFilePermission.OTHERS_WRITE)) {
-                    stampAccess.add(PosixFilePermission.OTHERS_WRITE);
-                }
-                Files.setPosixFilePermissions(stamp, stampAccess);
+                configureNamespaceAccess(staged, stamp);
                 PosixFiles.Pin lease = PosixFiles.tryNamespaceStampLock(stamp, true);
                 if (lease == null) {
                     return null;
@@ -793,6 +782,25 @@ final class ConversionOutput {
                     // A concurrently replaced directory is retained for the owner at the path in the error.
                 }
             }
+        }
+
+        @SuppressWarnings("java:S2612")
+        private static void configureNamespaceAccess(Path directory, Path stamp) throws IOException {
+            // A peer that can traverse the report parent needs access to the known stamp name
+            // to acquire a shared lock. Its contents are a fixed marker with no report data.
+            // Do not grant directory listing or write access to the marker to other users.
+            var directoryAccess = Files.getPosixFilePermissions(directory);
+            directoryAccess.add(PosixFilePermission.GROUP_EXECUTE);
+            directoryAccess.add(PosixFilePermission.OTHERS_EXECUTE);
+            Files.setPosixFilePermissions(directory, directoryAccess);
+            var stampAccess = Files.getPosixFilePermissions(stamp);
+            stampAccess.add(PosixFilePermission.GROUP_READ);
+            stampAccess.add(PosixFilePermission.OTHERS_READ);
+            stampAccess.remove(PosixFilePermission.OTHERS_WRITE);
+            if (directoryAccess.contains(PosixFilePermission.GROUP_WRITE)) {
+                stampAccess.add(PosixFilePermission.GROUP_WRITE);
+            }
+            Files.setPosixFilePermissions(stamp, stampAccess);
         }
 
         private static void withdrawNamespace(Path namespace, Path staged, PosixFiles.Pin lease) throws IOException {
@@ -998,7 +1006,7 @@ final class ConversionOutput {
                 if (!isOwned(stamp)) {
                     return;
                 }
-                try (PosixFiles.Pin lease = PosixFiles.tryNamespaceStampLock(stamp, true)) {
+                try (PosixFiles.Pin lease = PosixFiles.tryNamespaceCleanupLock(stamp)) {
                     if (lease == null || !PosixFiles.namespaceStampStillNamed(lease, stamp)) {
                         return;
                     }
