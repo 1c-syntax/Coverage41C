@@ -632,10 +632,10 @@ class ConversionOutputTest {
     }
 
     @Test
-    void ordinaryPairCanReserveNamesWhenThreeInitialCreatorsAreBusy() throws Exception {
+    void waitingPairDoesNotDelayAnIndependentPublication() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeTrue(PosixFiles.supportsNamespaceLeases(directory));
         var leases = new java.util.ArrayList<PosixFiles.Pin>();
-        var workers = java.util.concurrent.Executors.newSingleThreadExecutor();
+        var workers = java.util.concurrent.Executors.newFixedThreadPool(2);
         try {
             for (String name : List.of(".coverage41c-creating", ".coverage41c-creating-1", ".coverage41c-creating-2")) {
                 Path namespace = Files.createDirectory(directory.resolve(name));
@@ -654,6 +654,15 @@ class ConversionOutputTest {
             });
             assertTrue(started.await(15, TimeUnit.SECONDS));
             assertThrows(java.util.concurrent.TimeoutException.class, () -> publication.get(200, TimeUnit.MILLISECONDS));
+            Path unrelated = Files.writeString(Files.createDirectory(directory.resolve("unrelated"))
+                    .resolve("coverage.xml"), "old report");
+            var independent = workers.submit(() -> {
+                ConversionOutput.publish(unrelated, null, xml -> xml.write('y'), null, null);
+                return null;
+            });
+            independent.get(5, TimeUnit.SECONDS);
+            assertEquals("y", Files.readString(unrelated));
+
             leases.remove(0).close();
             publication.get(15, TimeUnit.SECONDS);
             assertEquals("x", Files.readString(coverage));

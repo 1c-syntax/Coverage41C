@@ -1105,12 +1105,21 @@ final class ConversionOutput {
             }
         }
 
-        private static synchronized Destination reserve(Path path, boolean createOnly, FileKeys keys,
-                                                        boolean claimNewOutput, Path peer) throws IOException {
-            Destination destination = !createOnly && Files.exists(path)
-                    ? openExisting(path, keys) : create(path, createOnly, keys, claimNewOutput, peer);
-            ACTIVE.add(destination);
-            return destination;
+        private static Destination reserve(Path path, boolean createOnly, FileKeys keys,
+                                           boolean claimNewOutput, Path peer) throws IOException {
+            while (true) {
+                try {
+                    synchronized (Destination.class) {
+                        Destination destination = !createOnly && Files.exists(path)
+                                ? openExisting(path, keys) : create(path, createOnly, keys, claimNewOutput, peer);
+                        ACTIVE.add(destination);
+                        return destination;
+                    }
+                } catch (CreationClaim.BusyNamespace busy) {
+                    // Only this publication should wait for another process to finish reserving a name.
+                    CreationClaim.waitForCreator(path);
+                }
+            }
         }
 
         private static synchronized Destination reservePublished(PublishedReport published, Path name) throws IOException {
@@ -1226,7 +1235,8 @@ final class ConversionOutput {
         private static Destination create(Path path, boolean createOnly, FileKeys keys, boolean claimNewOutput, Path peer)
                 throws IOException {
             boolean posix = path.getFileSystem().supportedFileAttributeViews().contains("posix");
-            CreationClaim claim = claimNewOutput || !keys.usePrivateLinks || !posix ? CreationClaim.acquire(path, peer) : null;
+            CreationClaim claim = claimNewOutput || !keys.usePrivateLinks || !posix
+                    ? CreationClaim.selectNamespace(path, peer) : null;
             try {
                 if (claim == null) {
                     CreationClaim.rejectIfHeld(path);
