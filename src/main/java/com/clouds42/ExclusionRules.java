@@ -74,13 +74,15 @@ final class ExclusionRules {
     private final PrefixScope prefixScope;
     private final Pattern routinePrecheck;
     private final List<String> includeUsersSources;
+    private final List<File> loadedFiles;
 
     private ExclusionRules(boolean filtersScope, Set<String> includedSubsystems, List<ScopePrefix> prefixes,
                            List<String> includeSources, List<Rule> rules, File exclusionReportFile,
                            List<ChangeMarker> changeMarkers, PrefixScope prefixScope,
-                           List<String> includeUsersSources) {
+                           List<String> includeUsersSources, List<File> loadedFiles) {
         this.filtersScope = filtersScope;
         this.includeUsersSources = includeUsersSources;
+        this.loadedFiles = List.copyOf(loadedFiles);
         this.includedSubsystems = includedSubsystems;
         this.prefixes = prefixes;
         this.includeSources = includeSources;
@@ -93,7 +95,8 @@ final class ExclusionRules {
 
     static ExclusionRules empty() {
         return new ExclusionRules(false, Collections.emptySet(), Collections.emptyList(), Collections.emptyList(),
-                Collections.emptyList(), null, Collections.emptyList(), PrefixScope.DEFAULT, Collections.emptyList());
+                Collections.emptyList(), null, Collections.emptyList(), PrefixScope.DEFAULT, Collections.emptyList(),
+                List.of());
     }
 
     static ExclusionRules load(File path, Path projectDir, CF configuration, ExclusionReport report)
@@ -120,7 +123,8 @@ final class ExclusionRules {
         List<String[]> prefixValues = new ArrayList<>();
         PrefixScope.Builder prefixScope = new PrefixScope.Builder();
         List<String> includeUsersSources = new ArrayList<>();
-        for (File file : configFiles(path)) {
+        List<File> loadedFiles = configFiles(path);
+        for (File file : loadedFiles) {
             String fileName = file.getName();
             CoverageConfig config = read(file);
             config.getUnknownKeys().forEach(key -> report.warn(fileName + ": unknown key " + key));
@@ -195,7 +199,7 @@ final class ExclusionRules {
         return new ExclusionRules(filtersScope, Collections.unmodifiableSet(includedSubsystems),
                 Collections.unmodifiableList(prefixes), Collections.unmodifiableList(includeSources),
                 Collections.unmodifiableList(rules), exclusionReportFile, Collections.unmodifiableList(changeMarkers),
-                scope, Collections.unmodifiableList(includeUsersSources));
+                scope, Collections.unmodifiableList(includeUsersSources), loadedFiles);
     }
 
     boolean filtersScope() {
@@ -257,6 +261,10 @@ final class ExclusionRules {
 
     File getExclusionReportFile() {
         return exclusionReportFile;
+    }
+
+    List<File> getLoadedFiles() {
+        return loadedFiles;
     }
 
     List<ChangeMarker> getChangeMarkers() {

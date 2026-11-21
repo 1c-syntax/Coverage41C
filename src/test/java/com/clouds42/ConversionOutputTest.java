@@ -306,6 +306,66 @@ class ConversionOutputTest {
     }
 
     @Test
+    void standaloneOutputKeepsTheCreationNamespaceName() throws IOException {
+        Path coverage = directory.resolve(".coverage41c-creating");
+
+        ConversionOutput.writeFile(coverage, staged -> Files.writeString(staged, "<coverage/>"));
+
+        assertEquals("<coverage/>", Files.readString(coverage));
+        assertDirectorySize(1);
+    }
+
+    @Test
+    void newPairCanUseBothPreferredCreationNamespaceNames() throws IOException {
+        Path coverage = directory.resolve(".coverage41c-creating");
+        Path report = directory.resolve(".coverage41c-creating-1");
+
+        ConversionOutput.publish(coverage, report, output -> output.write('x'), output -> output.write('j'), null);
+
+        assertEquals("x", Files.readString(coverage));
+        assertEquals("j", Files.readString(report));
+        assertDirectorySize(2);
+    }
+
+    @Test
+    void posixCanPublishWithEveryMarkerNamespaceOccupiedByAReport() throws IOException {
+        org.junit.jupiter.api.Assumptions.assumeTrue(directory.getFileSystem().supportedFileAttributeViews().contains("posix"));
+        List<String> names = List.of(".coverage41c-creating", ".coverage41c-creating-1", ".coverage41c-creating-2", "coverage.xml");
+
+        for (String name : names) {
+            ConversionOutput.writeNewFile(directory.resolve(name), staged -> Files.writeString(staged, name));
+        }
+
+        for (String name : names) {
+            assertEquals(name, Files.readString(directory.resolve(name)));
+        }
+        assertDirectorySize(names.size());
+    }
+
+    @Test
+    void pairClaimInAlternateNamespaceExcludesOtherPublishers() throws IOException {
+        Path coverage = directory.resolve(".coverage41c-creating");
+        Path report = directory.resolve("report.json");
+        Path unrelated = directory.resolve("unrelated.xml");
+        Path existingNamespace = Files.createDirectory(directory.resolve(".coverage41c-creating-1"));
+        ConversionOutput.FileKeys keys = markerKeysWithBasicIdentity();
+
+        ConversionOutput.publish(coverage, report, output -> output.write('x'), output -> {
+            assertFalse(Files.exists(coverage));
+            IOException busy = assertThrows(IOException.class, () -> publishMarkerOutput(report, keys));
+            assertTrue(busy.getMessage().contains("Report creation is in progress"), busy.toString());
+            output.write('j');
+        }, null);
+        publishMarkerOutput(unrelated, keys);
+
+        assertEquals("x", Files.readString(coverage));
+        assertEquals("j", Files.readString(report));
+        assertEquals("x", Files.readString(unrelated));
+        assertTrue(Files.isDirectory(existingNamespace));
+        assertDirectorySize(4);
+    }
+
+    @Test
     void orphanedLegacyDirectoryMarkerDoesNotBlockOtherReports() throws IOException {
         ConversionOutput.FileKeys keys = markerKeysWithBasicIdentity();
         Path orphan = Files.createDirectory(directory.resolve(".coverage41c-creating.lock"));
@@ -566,6 +626,37 @@ class ConversionOutputTest {
                     bytes -> bytes.write(2), bytes -> bytes.write(3), OutputStream.nullOutputStream()));
             assertLocked(checker);
         }, OutputStream.nullOutputStream());
+    }
+
+    @Test
+    void rejectedPosixChannelDoesNotBlockIndependentPublications() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(directory.getFileSystem().supportedFileAttributeViews().contains("posix"));
+        Path active = Files.writeString(directory.resolve("active.xml"), "old");
+        Path busy = Files.writeString(directory.resolve("busy.xml"), "unchanged");
+        Path existing = Files.writeString(directory.resolve("independent.xml"), "old");
+        Path fresh = directory.resolve("fresh.xml");
+
+        ConversionOutput.publish(active, null, stream -> {
+            try (FileChannel channel = FileChannel.open(busy, StandardOpenOption.WRITE);
+                 FileLock lock = channel.lock()) {
+                IOException conflict = assertThrows(IOException.class,
+                        () -> ConversionOutput.writeFile(busy, file -> Files.writeString(file, "unexpected")));
+                assertInstanceOf(java.nio.channels.OverlappingFileLockException.class, conflict.getCause());
+            }
+            IOException pending = assertThrows(IOException.class,
+                    () -> ConversionOutput.writeFile(busy, file -> Files.writeString(file, "unexpected")));
+            assertTrue(pending.getMessage().contains("releasing a report lock"), pending.toString());
+            for (Path unrelated : List.of(existing, fresh)) {
+                ConversionOutput.writeFile(unrelated, file -> Files.writeString(file, "published"));
+                assertEquals("published", Files.readString(unrelated));
+            }
+            stream.write('x');
+        }, null, OutputStream.nullOutputStream());
+
+        assertEquals("unchanged", Files.readString(busy));
+        assertEquals("x", Files.readString(active));
+        ConversionOutput.writeFile(busy, file -> Files.writeString(file, "retry"));
+        assertEquals("retry", Files.readString(busy));
     }
 
     @Test

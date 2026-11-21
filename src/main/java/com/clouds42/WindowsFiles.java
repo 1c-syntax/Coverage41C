@@ -157,9 +157,20 @@ final class WindowsFiles {
         return handle;
     }
 
-    private static WString name(Path path) {
+    private static WString name(Path path) throws IOException {
         String name = path.toAbsolutePath().toString();
         if (name.length() >= 248 && !name.startsWith("\\\\?\\")) {
+            WString absolute = new WString(name);
+            char[] normalized = new char[name.length() + 1];
+            int length = Kernel.INSTANCE.GetFullPathNameW(absolute, normalized.length, normalized, null);
+            if (length >= normalized.length) {
+                normalized = new char[length];
+                length = Kernel.INSTANCE.GetFullPathNameW(absolute, normalized.length, normalized, null);
+            }
+            if (length == 0) {
+                throw failure(path.toString(), Native.getLastError());
+            }
+            name = new String(normalized, 0, length);
             name = name.startsWith("\\\\") ? "\\\\?\\UNC\\" + name.substring(2) : "\\\\?\\" + name;
         }
         return new WString(name);
@@ -217,6 +228,7 @@ final class WindowsFiles {
         Kernel INSTANCE = Native.load("kernel32", Kernel.class);
         Pointer GetStdHandle(int handle);
         int GetFileType(Pointer handle);
+        int GetFullPathNameW(WString path, int size, char[] fullPath, Pointer filePart);
         Pointer CreateFileW(WString name, int access, int share, Pointer security, int creation,
                             int flags, Pointer template);
         int GetFileInformationByHandleEx(Pointer handle, int infoClass, byte[] info, int size);

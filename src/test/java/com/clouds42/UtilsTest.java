@@ -24,15 +24,22 @@ package com.clouds42;
 import com.clouds42.CommandLineOptions.MetadataOptions;
 import com.clouds42.CommandLineOptions.OutputOptions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.api.io.TempDir;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
+import picocli.CommandLine;
 
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.IOException;
 import java.io.OutputStream;
 import java.math.BigDecimal;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -42,9 +49,48 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class UtilsTest {
+
+    @Test
+    void deferredNamedMeasurementOutputProtectsLoadedConfig(@TempDir Path directory) throws Exception {
+        Path rules = Files.createDirectory(directory.resolve("rules"));
+        String contents = "{\"exclude\":{\"objects\":[\"Catalog.Справочник1\"]}}";
+        Path config = Files.writeString(rules.resolve("team.json"), contents);
+        Path destination = directory.resolve("coverage.xml");
+        try {
+            Files.createLink(destination, config);
+        } catch (IOException | UnsupportedOperationException error) {
+            assumeTrue(false, () -> "Cannot create a hard link: " + error.getMessage());
+        }
+        MetadataOptions metadata = CommandLine.populateCommand(new MetadataOptions(),
+                "-s", TestUtils.CONFIGURATION.toString(), "--config", rules.toString());
+        OutputOptions options = new OutputOptions();
+        options.setOutputFile(destination.toFile());
+        options.setOutputFormat(OutputOptions.OutputFormat.GENERIC_COVERAGE);
+        Map<URI, Map<BigDecimal, Integer>> coverage = new HashMap<>();
+        try (var reports = new Utils.MeasurementReports()) {
+            reports.readMetadata(metadata, "", "", coverage, false, null, ByteArrayOutputStream::new);
+
+            var error = assertThrows(IllegalArgumentException.class,
+                    () -> reports.dump(coverage, metadata, options, ByteArrayOutputStream::new));
+            assertTrue(error.getMessage().contains("would overwrite input file"), error.getMessage());
+            assertEquals(contents, Files.readString(config));
+        }
+    }
+
+    @Test
+    @EnabledOnOs(OS.WINDOWS)
+    void nativeFileIdentityAcceptsLongPathsWithDotSegments(@TempDir Path directory) throws Exception {
+        Path parent = Files.createDirectories(directory.resolve("a".repeat(120)).resolve("b".repeat(120)));
+        Path file = Files.writeString(parent.resolve("coverage.xml"), "coverage");
+        Path unnormalized = parent.resolve("unused").resolve("..").resolve(".").resolve(file.getFileName());
+
+        assertEquals(WindowsFiles.key(file, false), WindowsFiles.key(unnormalized, false));
+    }
 
     @Test
     void normalizeXml() {

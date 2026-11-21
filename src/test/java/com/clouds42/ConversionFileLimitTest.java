@@ -29,6 +29,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -127,8 +128,9 @@ class ConversionFileLimitTest {
             try {
                 var logCopy = process.getInputStream();
                 var reader = java.util.concurrent.CompletableFuture.runAsync(() -> {
-                    try (logCopy) {
-                        Files.copy(logCopy, output, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    try (logCopy; var log = Files.newOutputStream(output,
+                            StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING)) {
+                        logCopy.transferTo(log);
                     } catch (java.io.IOException error) {
                         throw new java.io.UncheckedIOException(error);
                     }

@@ -609,6 +609,7 @@ public class Utils {
                         rules = ExclusionRules.load(metadataOptions.getConfigFile(),
                                 Path.of(metadataOptions.getProjectDirName()), conf, report,
                                 metadataOptions.hasMultipleSources(), metadataOptions.getExclusionReportFile() != null);
+                        rules.getLoadedFiles().forEach(file -> inputFiles.add(file.toPath()));
                         configExclusionReportFile = rules.getExclusionReportFile();
                         rules.getIncludeSources().forEach(report::addScopeSource);
                         if (!rules.getPrefixes().isEmpty()) {
@@ -804,6 +805,9 @@ public class Utils {
             ConversionOutput.checkMeasurementReport(requestedStream, exclusionReportFile);
         }
         File configFile = metadataOptions.getConfigFile();
+        if (rawMode && configFile != null) {
+            ExclusionRules.configFiles(configFile).forEach(file -> inputFiles.add(file.toPath()));
+        }
         // System.out may still be fd 1. Keep the input preflight even when its actual sink is opaque.
         StandardOutputFile.FileIdentity stdout = writesToStdout && (usesProcessStdout || reportOutput == null)
                 ? StandardOutputFile.regularFile() : null;
@@ -811,7 +815,7 @@ public class Utils {
             uriListByKey.values().stream().map(Path::of).filter(Files::isRegularFile).forEach(inputFiles::add);
         }
         if (stdout != null) {
-            rejectStdoutOverwritingInputs(stdout, inputFiles, exportTrees, configFile);
+            rejectStdoutOverwritingInputs(stdout, inputFiles, exportTrees);
         }
         FreshOutputs freshOutputs = validateOutputFiles(coverageToStdout ? null : coverageOutput,
                 reportToStdout ? null : exclusionReportFile, configFile, inputFiles, exportTrees, unreadableExternalForms);
@@ -929,7 +933,7 @@ public class Utils {
                 throw missing;
             }
             Path parent = resolveOutputPath(path.getParent(), links, false, futureDirectories);
-            if (goesUp && !matchesFutureDirectory(parent, futureDirectories)) {
+            if (goesUp && !Files.isDirectory(parent) && !matchesFutureDirectory(parent, futureDirectories)) {
                 throw missing;
             }
             Path candidate = parent.resolve(name).normalize();
@@ -1063,10 +1067,7 @@ public class Utils {
     }
 
     private static void rejectStdoutOverwritingInputs(StandardOutputFile.FileIdentity stdout, Set<Path> inputs,
-                                                      Set<Path> trees, File config) throws IOException {
-        if (config != null) {
-            ExclusionRules.configFiles(config).forEach(file -> inputs.add(file.toPath()));
-        }
+                                                      Set<Path> trees) throws IOException {
         for (Path input : inputs) {
             if (Files.exists(input) && stdout.matches(input)) {
                 throw new IllegalArgumentException("Standard output would overwrite input file: " + input);
@@ -1115,9 +1116,6 @@ public class Utils {
             throws IOException {
         if (coverageOutput == null && exclusionReport == null) {
             return null;
-        }
-        if (config != null) {
-            ExclusionRules.configFiles(config).forEach(file -> inputs.add(file.toPath()));
         }
         OutputPaths coverage = coverageOutput == null ? null : new OutputPaths(coverageOutput);
         OutputPaths report = exclusionReport == null ? null : new OutputPaths(exclusionReport);

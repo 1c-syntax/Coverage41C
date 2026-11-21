@@ -454,8 +454,8 @@ class ValidateCommandTest {
         Path config = Files.createDirectory(project.resolve("rules"));
         Files.writeString(config.resolve("rules.json"), "{\"exclude\":{\"objects\":[\"Catalog.Справочник1\"]}}");
         Path broken = config.resolve("broken.json");
-        linkForExportTest(broken, Path.of("../absent/../unrelated.json"));
-        Path report = project.resolve("report.json");
+        linkForExportTest(broken, Path.of("../future/../absent/../future/report.json"));
+        Path report = project.resolve("future/report.json");
         StringWriter stderr = new StringWriter();
 
         assertEquals(CommandLine.ExitCode.OK, validateProject(project, stderr, "--config", config.toString(),
@@ -473,7 +473,10 @@ class ValidateCommandTest {
         Path report = project.resolve("future/report.json");
         Path link = config.resolve("future.json");
 
-        for (Path target : List.of(Path.of("../future/report.json"), Path.of("../future/../future/report.json"))) {
+        Files.createDirectory(project.resolve("existing"));
+        linkForExportTest(project.resolve("report-link"), Path.of("future/report.json"));
+        for (Path target : List.of(Path.of("../future/report.json"), Path.of("../future/../future/report.json"),
+                Path.of("../future/../existing/../report-link"))) {
             linkForExportTest(link, target);
             StringWriter stderr = new StringWriter();
 

@@ -45,6 +45,7 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -199,7 +200,7 @@ final class ConversionOutput {
                 try (Destination output = Destination.open(path, false, SYSTEM_FILE_KEYS)) {
                     writeResult(path, output, stream -> Files.copy(staged.path, stream), null);
                     if (output != null) {
-                        output.installNewOutput();
+                        output.installNewOutput(null);
                         output.committed = true;
                         if (output.fileKey != null && output.access != Access.WRITE_ONLY) {
                             fileKey = output.fileKey;
@@ -243,8 +244,8 @@ final class ConversionOutput {
                                 OutputStream stdout, boolean createOnly, FileKeys keys, Path verifyReport) throws IOException {
         boolean newPair = coverage != null && report != null && Files.notExists(coverage, LinkOption.NOFOLLOW_LINKS)
                 && Files.notExists(report, LinkOption.NOFOLLOW_LINKS);
-        try (Destination coverageFile = Destination.open(coverage, createOnly, keys, newPair);
-             Destination reportFile = Destination.open(report, createOnly, keys, newPair)) {
+        try (Destination coverageFile = Destination.open(coverage, createOnly, keys, newPair, report);
+             Destination reportFile = Destination.open(report, createOnly, keys, newPair, coverage)) {
             if (reportFile != null && reportFile.access == Access.WRITE_ONLY) {
                 if (verifyReport != null) {
                     throw new IOException("Cannot verify separate outputs for a write-only report and an unknown stream: "
@@ -267,11 +268,11 @@ final class ConversionOutput {
             }
             if (reportFile != null) {
                 reportFile.checkNewName();
-                reportFile.installNewOutput();
+                reportFile.installNewOutput(coverage);
             }
             if (coverageFile != null) {
                 try {
-                    coverageFile.installNewOutput();
+                    coverageFile.installNewOutput(report);
                     coverageFile.committed = true;
                 } catch (IOException failure) {
                     if (reportFile != null && reportFile.privateName != null) {
@@ -383,19 +384,23 @@ final class ConversionOutput {
 
     // Directory entries give claims the same case and Unicode matching as the output names.
     private static final class CreationClaim implements Closeable {
+        // A publication can name up to two outputs in the same directory.
+        private static final List<String> NAMESPACES =
+                List.of(".coverage41c-creating", ".coverage41c-creating-1", ".coverage41c-creating-2");
         private final Path marker;
+        private final boolean createdNamespace;
 
-        private CreationClaim(Path marker) {
+        private CreationClaim(Path marker, boolean createdNamespace) {
             this.marker = marker;
+            this.createdNamespace = createdNamespace;
         }
 
-        private static Path markerFor(Path path) throws IOException {
+        private static Path destinationFor(Path path) throws IOException {
             Path destination = Utils.resolveOutputPath(path.toAbsolutePath());
-            Path name = destination.getFileName();
-            if (name == null) {
+            if (destination.getFileName() == null) {
                 throw new IOException("Report destination is not a regular file: " + path);
             }
-            return destination.resolveSibling(".coverage41c-creating").resolve(name);
+            return destination;
         }
 
         private static IOException inProgress(Path path, Path marker) {
@@ -404,23 +409,74 @@ final class ConversionOutput {
         }
 
         static void rejectIfHeld(Path path) throws IOException {
-            Path marker = markerFor(path);
-            if (Files.isDirectory(marker.getParent(), LinkOption.NOFOLLOW_LINKS)
-                    && Files.isDirectory(marker, LinkOption.NOFOLLOW_LINKS)) {
-                throw inProgress(path, marker);
+            rejectIfHeld(path, destinationFor(path), null);
+        }
+
+        private static void rejectIfHeld(Path path, Path destination, Path ownMarker) throws IOException {
+            for (String name : NAMESPACES) {
+                Path namespace = destination.resolveSibling(name);
+                Path marker = namespace.resolve(destination.getFileName());
+                if (!marker.equals(ownMarker) && Files.isDirectory(namespace, LinkOption.NOFOLLOW_LINKS)
+                        && Files.isDirectory(marker, LinkOption.NOFOLLOW_LINKS)) {
+                    throw inProgress(path, marker);
+                }
             }
         }
 
-        static CreationClaim acquire(Path path) throws IOException {
-            Path marker = markerFor(path);
+        static CreationClaim acquire(Path path, Path peer) throws IOException {
+            Path destination = destinationFor(path);
+            rejectIfHeld(path, destination, null);
+            Path peerDestination = peer == null ? null : Utils.resolveOutputPath(peer.toAbsolutePath());
+            for (String name : NAMESPACES) {
+                Path namespace = destination.resolveSibling(name);
+                if (Files.isSymbolicLink(namespace)) {
+                    throw new IOException("Report creation marker path is not a directory: " + namespace);
+                }
+                if (Files.isRegularFile(namespace, LinkOption.NOFOLLOW_LINKS)
+                        || Utils.sameOutputFile(namespace, destination)
+                        || (peerDestination != null && Utils.sameOutputFile(namespace, peerDestination))) {
+                    continue;
+                }
+                Path marker = namespace.resolve(destination.getFileName());
+                CreationClaim claim = acquireInNamespace(path, marker);
+                if (claim == null) {
+                    continue;
+                }
+                try {
+                    // Another publication can select a different namespace for the same destination.
+                    rejectIfHeld(path, destination, marker);
+                    return claim;
+                } catch (IOException | RuntimeException error) {
+                    try {
+                        claim.close();
+                    } catch (IOException cleanup) {
+                        error.addSuppressed(cleanup);
+                    }
+                    throw error;
+                }
+            }
+            // POSIX can still install the staged file atomically without replacing an existing entry.
+            if (path.getFileSystem().supportedFileAttributeViews().contains("posix")) {
+                return null;
+            }
+            throw new IOException("No report creation marker directory is available for " + path);
+        }
+
+        private static CreationClaim acquireInNamespace(Path path, Path marker) throws IOException {
             Path namespace = marker.getParent();
             while (true) {
+                boolean createdNamespace = false;
                 try {
                     Files.createDirectory(namespace);
+                    createdNamespace = true;
                 } catch (FileAlreadyExistsException occupied) {
                     try {
-                        if (!Files.readAttributes(namespace, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS)
-                                .isDirectory()) {
+                        BasicFileAttributes attributes = Files.readAttributes(namespace, BasicFileAttributes.class,
+                                LinkOption.NOFOLLOW_LINKS);
+                        if (attributes.isRegularFile()) {
+                            return null;
+                        }
+                        if (!attributes.isDirectory()) {
                             throw new IOException("Report creation marker path is not a directory: " + namespace, occupied);
                         }
                     } catch (NoSuchFileException removed) {
@@ -429,13 +485,16 @@ final class ConversionOutput {
                 }
                 try {
                     Files.createDirectory(marker);
-                    return new CreationClaim(marker);
+                    return new CreationClaim(marker, createdNamespace);
                 } catch (FileAlreadyExistsException busy) {
                     throw inProgress(path, marker);
-                } catch (NoSuchFileException removed) {
-                    // The previous creator can remove the empty namespace between the two creates.
-                    if (!Files.isDirectory(namespace.getParent())) {
-                        throw removed;
+                } catch (IOException failure) {
+                    // A creator can remove the empty namespace between the two creates.
+                    if (Files.isRegularFile(namespace, LinkOption.NOFOLLOW_LINKS)) {
+                        return null;
+                    }
+                    if (!(failure instanceof NoSuchFileException) || !Files.isDirectory(namespace.getParent())) {
+                        throw failure;
                     }
                 }
             }
@@ -444,10 +503,12 @@ final class ConversionOutput {
         @Override
         public void close() throws IOException {
             Files.delete(marker);
-            try {
-                Files.deleteIfExists(marker.getParent());
-            } catch (IOException cleanup) {
-                // Another creator can hold a claim here. An empty namespace can also be reused.
+            if (createdNamespace) {
+                try {
+                    Files.deleteIfExists(marker.getParent());
+                } catch (IOException cleanup) {
+                    // Another creator can hold a claim here. An empty namespace can also be reused.
+                }
             }
         }
     }
@@ -458,7 +519,11 @@ final class ConversionOutput {
         // On POSIX, closing another channel to the same inode can drop this JVM's OS lock.
         // Reject local contenders before open; unrelated files and output streams remain independent.
         private static final Set<Destination> ACTIVE = new HashSet<>();
-        private static final List<FileChannel> REJECTED_CHANNELS = new ArrayList<>();
+        private static final List<RejectedChannel> REJECTED_CHANNELS = new ArrayList<>();
+
+        private record RejectedChannel(FileChannel channel, Path path, Set<Object> observedKeys,
+                                       Set<Destination> possibleOwners) {}
+
         private final Object fileKey;
         private final Path path;
         private final FileChannel channel;
@@ -489,14 +554,15 @@ final class ConversionOutput {
         }
 
         static Destination open(Path path, boolean createOnly, FileKeys keys) throws IOException {
-            return open(path, createOnly, keys, false);
+            return open(path, createOnly, keys, false, null);
         }
 
-        static Destination open(Path path, boolean createOnly, FileKeys keys, boolean claimNewOutput) throws IOException {
+        static Destination open(Path path, boolean createOnly, FileKeys keys, boolean claimNewOutput, Path peer)
+                throws IOException {
             if (path == null || (!createOnly && isSpecialFile(path))) {
                 return null;
             }
-            return reserve(path, createOnly, keys, claimNewOutput).withBackup();
+            return reserve(path, createOnly, keys, claimNewOutput, peer).withBackup();
         }
 
         private Destination withBackup() throws IOException {
@@ -520,16 +586,14 @@ final class ConversionOutput {
         }
 
         private static synchronized Destination reserve(Path path, boolean createOnly, FileKeys keys,
-                                                        boolean claimNewOutput) throws IOException {
-            rejectDuringDeferredClose(path);
+                                                        boolean claimNewOutput, Path peer) throws IOException {
             Destination destination = !createOnly && Files.exists(path)
-                    ? openExisting(path, keys) : create(path, createOnly, keys, claimNewOutput);
+                    ? openExisting(path, keys) : create(path, createOnly, keys, claimNewOutput, peer);
             ACTIVE.add(destination);
             return destination;
         }
 
         private static synchronized Destination reservePublished(PublishedReport published, Path name) throws IOException {
-            rejectDuringDeferredClose(name);
             rejectActive(name, published.fileKey);
             FileLock acquired = lock(published.channel, name);
             Destination original = new Destination(name, published.channel, acquired, Access.READ_WRITE,
@@ -541,10 +605,32 @@ final class ConversionOutput {
 
         private static void rejectActive(Path path, Object fileKey) throws IOException {
             for (Destination active : ACTIVE) {
-                if (active.fileKey != null && fileKey != null
-                        ? active.fileKey.equals(fileKey) : Files.isSameFile(path, active.path)) {
+                if (active.matches(path, fileKey)) {
                     throw new IOException("Another conversion is writing " + path);
                 }
+            }
+            for (RejectedChannel rejected : REJECTED_CHANNELS) {
+                if (path.equals(rejected.path) || (fileKey != null && rejected.observedKeys.contains(fileKey))) {
+                    throw new IOException("Another conversion is releasing a report lock; retry writing " + path);
+                }
+                for (Destination possibleOwner : rejected.possibleOwners) {
+                    if (possibleOwner.matches(path, fileKey)) {
+                        // Keep the candidate reserved even after its original lock has been released.
+                        throw new IOException("Another conversion is releasing a report lock; retry writing " + path);
+                    }
+                }
+            }
+        }
+
+        private boolean matches(Path candidate, Object candidateKey) throws IOException {
+            if (fileKey != null && candidateKey != null) {
+                return fileKey.equals(candidateKey);
+            }
+            try {
+                Path currentName = privateName != null && Files.exists(privateName.path) ? privateName.path : path;
+                return Files.isSameFile(candidate, currentName);
+            } catch (NoSuchFileException removed) {
+                return false;
             }
         }
 
@@ -574,12 +660,27 @@ final class ConversionOutput {
                 if (previousKey != null && !previousKey.equals(currentKey)) {
                     throw new IOException("Report destination changed during conversion: " + path);
                 }
+                if (previousKey == null && currentKey != null) {
+                    rejectActive(path, currentKey);
+                }
                 return new Destination(path, channel, acquired, access, currentKey, null, null, null, false);
             } catch (IOException | RuntimeException error) {
                 // A key read by name does not identify the open channel if the entry changed.
                 if (error.getCause() instanceof OverlappingFileLockException
                         && File.separatorChar != '\\' && !ACTIVE.isEmpty()) {
-                    REJECTED_CHANNELS.add(channel);
+                    Set<Object> observedKeys = new HashSet<>();
+                    if (previousKey != null) {
+                        observedKeys.add(previousKey);
+                    }
+                    try {
+                        Object currentKey = keys.read(path, Files.readAttributes(path, BasicFileAttributes.class));
+                        if (currentKey != null) {
+                            observedKeys.add(currentKey);
+                        }
+                    } catch (IOException | RuntimeException unavailable) {
+                        error.addSuppressed(unavailable);
+                    }
+                    REJECTED_CHANNELS.add(new RejectedChannel(channel, path, observedKeys, Set.copyOf(ACTIVE)));
                 } else {
                     try {
                         channel.close();
@@ -588,12 +689,6 @@ final class ConversionOutput {
                     }
                 }
                 throw error;
-            }
-        }
-
-        private static void rejectDuringDeferredClose(Path path) throws IOException {
-            if (!REJECTED_CHANNELS.isEmpty()) {
-                throw new IOException("Another conversion is releasing report locks; retry writing " + path);
             }
         }
 
@@ -608,10 +703,10 @@ final class ConversionOutput {
             channel.close();
         }
 
-        private static Destination create(Path path, boolean createOnly, FileKeys keys, boolean claimNewOutput)
+        private static Destination create(Path path, boolean createOnly, FileKeys keys, boolean claimNewOutput, Path peer)
                 throws IOException {
             boolean posix = path.getFileSystem().supportedFileAttributeViews().contains("posix");
-            CreationClaim claim = claimNewOutput || !keys.usePrivateLinks || !posix ? CreationClaim.acquire(path) : null;
+            CreationClaim claim = claimNewOutput || !keys.usePrivateLinks || !posix ? CreationClaim.acquire(path, peer) : null;
             try {
                 if (claim == null) {
                     CreationClaim.rejectIfHeld(path);
@@ -697,12 +792,12 @@ final class ConversionOutput {
             }
         }
 
-        private void installNewOutput() throws IOException {
+        private void installNewOutput(Path peer) throws IOException {
             if (privateName == null) {
                 return;
             }
             // A single-file publisher also cooperates with claims held for a pair of new reports.
-            try (CreationClaim publication = claim == null ? CreationClaim.acquire(path) : null) {
+            try (CreationClaim publication = claim == null ? CreationClaim.acquire(path, peer) : null) {
                 if (useHardLink) {
                     linkOrMove();
                 } else {
@@ -799,10 +894,13 @@ final class ConversionOutput {
         private void finish() throws IOException {
             synchronized (Destination.class) {
                 ACTIVE.remove(this);
-                if (ACTIVE.isEmpty()) {
-                    deferredClose.addAll(REJECTED_CHANNELS);
-                    REJECTED_CHANNELS.clear();
-                }
+                REJECTED_CHANNELS.removeIf(rejected -> {
+                    if (!Collections.disjoint(ACTIVE, rejected.possibleOwners)) {
+                        return false;
+                    }
+                    deferredClose.add(rejected.channel);
+                    return true;
+                });
                 IOException failure = null;
                 for (FileChannel descriptor : deferredClose) {
                     try {
