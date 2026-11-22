@@ -125,8 +125,8 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
 
     private final AtomicBoolean stopExecution = new AtomicBoolean(false);
     private final AtomicBoolean shutDown = new AtomicBoolean(false);
-    private volatile boolean coverageWritten = true;
-    private volatile boolean profilingFinished = true;
+    // Set once by gracefulShutdown and read by the collector after synchronized shutdown.
+    private Boolean finalCollectionSucceeded;
     private volatile boolean targetDiscoveryUnconfirmed;
     private volatile boolean targetAttachmentFailed;
     private volatile boolean receivedAcceptedPacket;
@@ -349,13 +349,27 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     }
 
     private void attachTarget(String id) {
+        Exception failure = null;
         try {
             client.attachRuntimeDebugTargets(Collections.singletonList(UUID.fromString(id)));
-            targets.attached(id);
-        } catch (RuntimeDebugClientException e) {
-            targetAttachmentFailed = true;
-            logger.error(e.getLocalizedMessage());
+        } catch (RuntimeDebugClientException | RuntimeException e) {
+            failure = e;
         }
+        synchronized (coverageData) {
+            if (stopExecution.get()) {
+                return;
+            }
+            if (failure == null) {
+                targets.attached(id);
+                return;
+            }
+            if (failure instanceof RuntimeException unexpectedFailure) {
+                systemStarted = false;
+                throw unexpectedFailure;
+            }
+            targetAttachmentFailed = true;
+        }
+        logger.error(failure.getLocalizedMessage());
     }
 
     private void mainLoop(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet)
@@ -787,7 +801,9 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         try {
             if (!stopExecution.get()) {
                 closeCollectionCommands();
-                if (serverPipeOut != null && mainLoopRunning) {
+                boolean waitForFinalPoll = serverPipeOut != null && mainLoopRunning;
+                boolean profilingFinished = false;
+                if (waitForFinalPoll) {
                     // Final measures can arrive in an in-flight ping before disable returns.
                     synchronized (coverageData) {
                         collectingFinalMeasures = true;
@@ -800,24 +816,25 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                         profilingFinished = disableAcknowledged && finalPollConfirmed;
                     } catch (InterruptedException e) {
                         logger.error("Interrupted while waiting for final measures");
-                        profilingFinished = false;
                         interrupted = true;
                     }
-                    synchronized (coverageData) {
-                        stopExecution.set(true);
-                        coverageData.notifyAll();
-                        if (finalMeasureFailed) {
-                            logger.error("Final debugger measures are incomplete");
-                            profilingFinished = false;
-                        }
-                    }
-                    coverageWritten = dumpCoverage();
-                } else {
-                    // The process may be killed soon. Save what was collected before contacting dbgs.
+                }
+                boolean collectionConfirmed;
+                synchronized (coverageData) {
+                    // Seal the measurements and attachment evidence together before writing the report.
                     stopExecution.set(true);
-                    coverageWritten = dumpCoverage();
+                    coverageData.notifyAll();
+                    if (finalMeasureFailed) {
+                        logger.error("Final debugger measures are incomplete");
+                    }
+                    collectionConfirmed = !finalMeasureFailed && collectionSucceeded();
+                }
+                boolean coverageWritten = dumpCoverage();
+                if (!waitForFinalPoll) {
+                    // The process may be killed soon. Save what was collected before contacting dbgs.
                     profilingFinished = disableProfiling() && serverPipeOut == null;
                 }
+                finalCollectionSucceeded = collectionConfirmed && profilingFinished && coverageWritten;
                 logger.info("Bye!");
             }
             if (serverPipeOut != null) {
@@ -831,8 +848,11 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     }
 
     private boolean collectionSucceeded() {
-        return systemStarted && profilingFinished && coverageWritten
-                && !targetDiscoveryUnconfirmed && hasConfirmedCollection();
+        if (finalCollectionSucceeded != null) {
+            return finalCollectionSucceeded;
+        }
+        // A subclass can replace gracefulShutdown without delegating to this implementation.
+        return systemStarted && !targetDiscoveryUnconfirmed && hasConfirmedCollection();
     }
 
     private boolean hasConfirmedCollection() {

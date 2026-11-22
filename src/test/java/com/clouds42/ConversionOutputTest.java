@@ -67,6 +67,47 @@ class ConversionOutputTest {
     @TempDir Path directory;
 
     @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    void firstDumpPublishesOnlyAfterTheCompleteReportIsWritten() throws IOException {
+        Path report = directory.resolve("coverage.xml");
+        ConversionOutput.writeMeasurementOutput(report, null, true, output -> {
+            output.write('a');
+            assertFalse(Files.exists(report), "An incomplete report must remain private");
+            output.write('b');
+        });
+
+        assertEquals("ab", Files.readString(report));
+        assertDirectorySize(1);
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    void firstDumpDoesNotReplaceAnotherPublication() throws IOException {
+        Path report = directory.resolve("coverage.xml");
+        assertThrows(java.nio.file.FileAlreadyExistsException.class,
+                () -> ConversionOutput.writeMeasurementOutput(report, null, true, output -> {
+                    ConversionOutput.writeNewFile(report, staged -> Files.writeString(staged, "published first"));
+                    output.write('d');
+                }));
+
+        assertEquals("published first", Files.readString(report));
+        assertDirectorySize(1);
+    }
+
+    @Test
+    void failedFirstDumpDoesNotLeaveAPartialReport() throws IOException {
+        Path report = directory.resolve("coverage.xml");
+        IOException failure = new IOException("Report serialization failed");
+        assertSame(failure, assertThrows(IOException.class,
+                () -> ConversionOutput.writeMeasurementOutput(report, null, true, output -> {
+                    output.write('a');
+                    throw failure;
+                })));
+
+        assertDirectorySize(0);
+    }
+
+    @Test
     void measurementOutputKeepsOriginalInputsWhenItsNameBecomesAHardLink() throws IOException {
         Path report = Files.writeString(directory.resolve("coverage.xml"), "existing report");
         Path alternate = directory.resolve("old-coverage.xml");
@@ -1039,7 +1080,8 @@ class ConversionOutputTest {
             Files.move(dump, directory.resolve("saved.xml"));
             Files.createLink(dump, xml);
             assertThrows(IOException.class,
-                    () -> ConversionOutput.writeMeasurementOutput(dump, identity, false, bytes -> bytes.write('d')));
+                    () -> ConversionOutput.writeMeasurementOutput(dump, identity, false,
+                            bytes -> fail("Rejected dump must not write")));
             assertLocked(checker);
             out.write('c');
         }, null, OutputStream.nullOutputStream());
@@ -1385,6 +1427,119 @@ class ConversionOutputTest {
                 assertLocked(reportCheck);
                 assertLocked(rulesCheck);
             }
+        }
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void rejectedMeasurementPreservesTheCallerLockWithoutAccumulatingDescriptors() throws Exception {
+        Path report = Files.writeString(directory.resolve("coverage.xml"), "original");
+        Path other = Files.writeString(directory.resolve("other.xml"), "old");
+        Object identity = StandardOutputFile.regularFileKey(report);
+        ProcessBuilder checker = lockChecker(report);
+
+        try (FileChannel channel = FileChannel.open(report, StandardOpenOption.WRITE);
+             FileLock lock = channel.lock()) {
+            assertLocked(checker);
+            long baseline = descriptorsTo(report);
+            assertThrows(IOException.class,
+                    () -> ConversionOutput.writeMeasurementOutput(report, identity, false, out -> out.write('d')));
+            assertLocked(checker);
+            for (int attempt = 1; attempt < 16; attempt++) {
+                assertThrows(IOException.class,
+                        () -> ConversionOutput.writeMeasurementOutput(report, identity, false, out -> out.write('d')));
+            }
+            assertLocked(checker);
+            assertTrue(descriptorsTo(report) <= baseline + 1);
+            ConversionOutput.writeMeasurementOutput(other, StandardOutputFile.regularFileKey(other), false,
+                    out -> out.write('a'));
+        }
+
+        assertEquals("a", Files.readString(other));
+        assertEquals("original", Files.readString(report));
+        ConversionOutput.writeMeasurementOutput(other, StandardOutputFile.regularFileKey(other), false,
+                out -> out.write('b'));
+        assertEquals(0, descriptorsTo(report));
+        ConversionOutput.writeMeasurementOutput(report, identity, false, out -> out.write('d'));
+        assertEquals("d", Files.readString(report));
+        assertEquals(0, descriptorsTo(report));
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void rejectedMeasurementPreservesTheCallerLockOnAReplacementInode() throws Exception {
+        Path report = Files.writeString(directory.resolve("coverage.xml"), "original");
+        Path replacement = Files.writeString(directory.resolve("replacement.xml"), "caller owned");
+        Object identity = StandardOutputFile.regularFileKey(report);
+        ProcessBuilder checker = lockChecker(replacement);
+
+        try (FileChannel channel = FileChannel.open(replacement, StandardOpenOption.WRITE);
+             FileLock lock = channel.lock()) {
+            assertLocked(checker);
+            long baseline = descriptorsTo(replacement);
+            Files.move(report, directory.resolve("saved.xml"));
+            Files.createLink(report, replacement);
+            assertThrows(IOException.class,
+                    () -> ConversionOutput.writeMeasurementOutput(report, identity, false, out -> out.write('d')));
+            assertLocked(checker);
+            assertEquals(baseline, descriptorsTo(replacement));
+        }
+
+        assertEquals("caller owned", Files.readString(replacement));
+        assertEquals("original", Files.readString(directory.resolve("saved.xml")));
+        ConversionOutput.writeMeasurementOutput(report, StandardOutputFile.regularFileKey(report), false,
+                out -> out.write('d'));
+        assertEquals("d", Files.readString(replacement));
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void rejectedMeasurementPreservesTheCallerLockWhenASpecialOutputBecomesRegular() throws Exception {
+        ConversionOutput.writeMeasurementOutput(Path.of("/dev/null"), null, false, out -> out.write('d'));
+        Path report = directory.resolve("coverage.fifo");
+        Process create = new ProcessBuilder("mkfifo", report.toString()).start();
+        try {
+            assertTrue(create.waitFor(10, TimeUnit.SECONDS), "mkfifo did not finish");
+            assertEquals(0, create.exitValue());
+        } finally {
+            create.destroyForcibly();
+        }
+        assertNull(StandardOutputFile.regularFileKey(report));
+        Path replacement = Files.writeString(directory.resolve("replacement.xml"), "caller owned");
+        ProcessBuilder checker = lockChecker(replacement);
+
+        try (FileChannel fifo = FileChannel.open(report, StandardOpenOption.READ, StandardOpenOption.WRITE)) {
+            ConversionOutput.writeMeasurementOutput(report, null, false, out -> out.write('d'));
+            var byteWritten = java.nio.ByteBuffer.allocate(1);
+            assertEquals(1, fifo.read(byteWritten));
+            assertEquals((byte) 'd', byteWritten.get(0));
+            Path link = Files.createSymbolicLink(directory.resolve("link.fifo"), report);
+            assertThrows(IOException.class,
+                    () -> ConversionOutput.writeMeasurementOutput(link, null, false, out -> out.write('d')));
+        }
+        try (FileChannel channel = FileChannel.open(replacement, StandardOpenOption.WRITE);
+             FileLock lock = channel.lock()) {
+            assertLocked(checker);
+            Files.delete(report);
+            Files.createLink(report, replacement);
+            assertThrows(IOException.class,
+                    () -> ConversionOutput.writeMeasurementOutput(report, null, false, out -> out.write('d')));
+            assertLocked(checker);
+        }
+        assertEquals("caller owned", Files.readString(replacement));
+    }
+
+    private static long descriptorsTo(Path path) throws IOException {
+        try (var descriptors = Files.list(Path.of("/proc/self/fd"))) {
+            return descriptors.filter(descriptor -> {
+                try {
+                    return Files.isSameFile(descriptor, path);
+                } catch (java.nio.file.NoSuchFileException closed) {
+                    return false;
+                } catch (IOException error) {
+                    throw new UncheckedIOException(error);
+                }
+            }).count();
         }
     }
 

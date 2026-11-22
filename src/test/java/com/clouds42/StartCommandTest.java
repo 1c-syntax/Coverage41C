@@ -775,11 +775,22 @@ class StartCommandTest {
 
     @Test
     void timelyQuietFinalPollIsConfirmedBeforeADeferredAttachment() throws Exception {
+        dbgs.fail("attachDetachDbgTargets", 503);
+        assertStartAndStopWithDeferredAttachment(CommandLine.ExitCode.OK);
+    }
+
+    @Test
+    void lateSuccessfulAttachmentDoesNotChangeFailedCollection() throws Exception {
+        assertStartAndStopWithDeferredAttachment(CommandLine.ExitCode.SOFTWARE, "--include-user", "probe");
+    }
+
+    private void assertStartAndStopWithDeferredAttachment(int expectedExitCode, String... options) throws Exception {
         FinalPollClock clock = new FinalPollClock();
-        Future<Integer> collector = start(startCommandLine(System::nanoTime, clock));
-        UUID target = UUID.randomUUID();
+        dbgs.setTargets();
+        Future<Integer> collector = startRaw(startCommandLine(System::nanoTime, clock), options);
+        DebugTargetId target = FakeDebugServer.target(UUID.randomUUID(), DebugTargetType.MANAGED_CLIENT, "probe");
         dbgs.pause("pingDebugUIParams");
-        dbgs.pause("attachDetachDbgTargets", body -> body.contains(target.toString()));
+        dbgs.pause("attachDetachDbgTargets", body -> body.contains(target.getId()));
 
         try {
             dbgs.awaitPaused("pingDebugUIParams");
@@ -791,12 +802,13 @@ class StartCommandTest {
             dbgs.awaitPaused("attachDetachDbgTargets");
             clock.advance(TEST_FINAL_CONFIRMATION_TIMEOUT);
 
-            assertEquals(CommandLine.ExitCode.OK, stop.get(TIMEOUT, TimeUnit.SECONDS));
+            assertEquals(expectedExitCode, stop.get(TIMEOUT, TimeUnit.SECONDS));
+            assertEquals(expectedExitCode, send(PipeMessages.EXIT_COMMAND));
         } finally {
             dbgs.resume("pingDebugUIParams");
             dbgs.resume("attachDetachDbgTargets");
         }
-        assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
+        assertEquals(expectedExitCode, collector.get(TIMEOUT, TimeUnit.SECONDS));
     }
 
     @Test

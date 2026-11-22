@@ -47,17 +47,28 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 
 final class PosixFiles {
     private PosixFiles() { }
 
+    // Closing a rejected writable descriptor can release the host JVM's POSIX locks. Keep at most
+    // one per inode, and bound the total so long-lived locks cannot consume all open descriptors.
+    private static final int MAX_REJECTED_REPORTS = 32;
+    private static final Map<Object, OpenReport> REJECTED_REPORTS = new HashMap<>();
+
     static Pin pinOnLinux(Path path) throws IOException {
         if (!Platform.isLinux()) {
             return null;
         }
+        return pinOnLinux(path, 0x80000); // O_CLOEXEC
+    }
+
+    private static Pin pinOnLinux(Path path, int flags) throws IOException {
         // O_PATH keeps the inode alive without the lock-releasing close of an ordinary POSIX descriptor.
-        int descriptor = LibC.INSTANCE.open(nativePath(path), 0x200000 | 0x80000); // O_PATH | O_CLOEXEC
+        int descriptor = LibC.INSTANCE.open(nativePath(path), 0x200000 | flags); // O_PATH
         if (descriptor < 0) {
             throw new FileSystemException(path.toString(), null, "Cannot retain report identity (errno "
                     + Native.getLastError() + ")");
@@ -112,14 +123,13 @@ final class PosixFiles {
             return;
         }
         boolean lock = !darwin && expected != null;
-        try (OpenReport output = lock ? ConversionOutput.openLinuxMeasurementOutput(path, expected)
-                : openReport(path, expected != null)) {
+        try (Pin special = !darwin && !lock ? pinOnLinux(path, noFollowCloseOnExec()) : null;
+             OpenReport output = lock ? ConversionOutput.openLinuxMeasurementOutput(path, expected)
+                     : special != null ? reopenPinnedReportOnLinux(path, special, null)
+                     : openReport(path, path, noFollowCloseOnExec() | 1 | (expected != null ? nonBlocking() : 0))) {
             int descriptor = output.descriptor;
-            if (!lock) {
-                Object actual = darwin ? StandardOutputFile.darwinOpenFileKey(descriptor, path) : output.linuxFileKey();
-                if (!Objects.equals(expected, actual)) {
-                    throw new IOException("Coverage output changed before it could be written: " + path);
-                }
+            if (darwin && !Objects.equals(expected, StandardOutputFile.darwinOpenFileKey(descriptor, path))) {
+                throw new IOException("Coverage output changed before it could be written: " + path);
             }
             if (expected != null) {
                 NativeLong start = new NativeLong(0);
@@ -136,11 +146,46 @@ final class PosixFiles {
         }
     }
 
-    static OpenReport openReport(Path path, boolean regular) throws IOException {
-        // O_WRONLY | O_NOFOLLOW | O_CLOEXEC. The original file is untouched until the open inode is verified.
-        // A regular destination replaced by a FIFO must fail without waiting for a reader.
-        int flags = noFollowCloseOnExec() | 1 | (regular ? nonBlocking() : 0);
-        int descriptor = LibC.INSTANCE.open(nativePath(path), flags);
+    static synchronized OpenReport openLockedReportOnLinux(Path path, Object expected) throws IOException {
+        OpenReport rejected = REJECTED_REPORTS.get(expected);
+        if (rejected != null) {
+            rejected.lockOnLinux(path);
+            REJECTED_REPORTS.remove(expected);
+            rejected.close();
+        }
+        REJECTED_REPORTS.values().removeIf(OpenReport::closeIfUnlockedOnLinux);
+        if (REJECTED_REPORTS.size() >= MAX_REJECTED_REPORTS) {
+            throw new IOException("Too many coverage reports have outstanding file locks; retry writing " + path);
+        }
+
+        OpenReport output;
+        try (Pin pin = pinOnLinux(path, noFollowCloseOnExec())) {
+            output = reopenPinnedReportOnLinux(path, pin, expected);
+            REJECTED_REPORTS.put(expected, output);
+        }
+        output.lockOnLinux(path);
+        REJECTED_REPORTS.remove(expected);
+        return output;
+    }
+
+    private static OpenReport reopenPinnedReportOnLinux(Path path, Pin pin, Object expected) throws IOException {
+        Path reference = pin.descriptorPath();
+        if (reference == null) {
+            throw new IOException("Cannot reopen the retained report inode for " + path + ": /proc/self/fd or /dev/fd is required");
+        }
+        var stat = Files.readAttributes(reference, "unix:dev,ino,isRegularFile,isSymbolicLink");
+        Object actual = Boolean.TRUE.equals(stat.get("isRegularFile"))
+                ? StandardOutputFile.fileKey(((Number) stat.get("dev")).longValue(), ((Number) stat.get("ino")).longValue())
+                : null;
+        if (!Objects.equals(expected, actual) || Boolean.TRUE.equals(stat.get("isSymbolicLink"))) {
+            throw new IOException("Coverage output changed before it could be written: " + path);
+        }
+        // Open the verified inode through its descriptor. A replacement of the public name cannot redirect this open.
+        return openReport(path, reference, 1 | linuxCloseOnExec() | (expected != null ? nonBlocking() : 0));
+    }
+
+    private static OpenReport openReport(Path path, Path source, int flags) throws IOException {
+        int descriptor = LibC.INSTANCE.open(nativePath(source), flags);
         if (descriptor < 0) {
             throw reportError(path, "open");
         }
@@ -203,11 +248,7 @@ final class PosixFiles {
             this.path = path;
         }
 
-        Object linuxFileKey() throws IOException {
-            return linuxOpenFileKey(descriptor, path);
-        }
-
-        void lockOnLinux() throws IOException {
+        private void lockOnLinux(Path path) throws IOException {
             // A whole-file open-description write lock interoperates with FileChannel's POSIX
             // record lock and survives closes of unrelated descriptors in this process.
             // Only the first field of struct flock is nonzero (l_type = F_WRLCK).
@@ -226,6 +267,18 @@ final class PosixFiles {
                 }
                 throw reportError(path, "lock");
             }
+        }
+
+        private boolean closeIfUnlockedOnLinux() {
+            try {
+                lockOnLinux(path);
+            } catch (IOException locked) {
+                return false;
+            }
+            // Linux removes process locks during close, before releasing this descriptor's OFD lock.
+            // The descriptor number is released even if close reports a writeback error.
+            LibC.INSTANCE.close(descriptor);
+            return true;
         }
 
         @Override
@@ -263,8 +316,11 @@ final class PosixFiles {
             return 0x100 | 0x01000000;
         }
         int noFollow = Platform.isARM() || Platform.isPPC() ? 0x8000 : 0x20000;
-        int closeOnExec = Platform.isSPARC() ? 0x400000 : 0x80000;
-        return noFollow | closeOnExec;
+        return noFollow | linuxCloseOnExec();
+    }
+
+    private static int linuxCloseOnExec() {
+        return Platform.isSPARC() ? 0x400000 : 0x80000;
     }
 
     private static int nonBlocking() {

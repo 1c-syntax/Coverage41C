@@ -126,9 +126,7 @@ final class ConversionOutput {
 
     static void writeMeasurementOutput(Path path, Object identity, boolean createOnly, Content writer) throws IOException {
         if (createOnly) {
-            try (OutputStream output = Files.newOutputStream(path, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)) {
-                writer.copyTo(output);
-            }
+            publish(path, null, writer, null, null, true, SYSTEM_FILE_KEYS, null, null, null);
         } else if (File.separatorChar == '\\') {
             WindowsFiles.writeCheckedReport(path, identity, writer);
         } else {
@@ -139,31 +137,7 @@ final class ConversionOutput {
     static PosixFiles.OpenReport openLinuxMeasurementOutput(Path path, Object expected) throws IOException {
         synchronized (Destination.class) {
             Destination.rejectActive(path, expected);
-            PosixFiles.OpenReport report = PosixFiles.openReport(path, true);
-            Object actual = null;
-            boolean identified = false;
-            try {
-                actual = report.linuxFileKey();
-                identified = true;
-                if (!expected.equals(actual)) {
-                    throw new IOException("Coverage output changed before it could be written: " + path);
-                }
-                report.lockOnLinux();
-                return report;
-            } catch (IOException | RuntimeException error) {
-                try {
-                    // Even a rejected open can land on an inode already locked by this JVM.
-                    if (!identified && !Destination.ACTIVE.isEmpty()) {
-                        Destination.REJECTED_CHANNELS.add(new Destination.RejectedChannel(report, path,
-                                Set.of(expected), Set.copyOf(Destination.ACTIVE)));
-                    } else {
-                        Destination.closeAfterUse(actual, report);
-                    }
-                } catch (IOException cleanup) {
-                    error.addSuppressed(cleanup);
-                }
-                throw error;
-            }
+            return PosixFiles.openLockedReportOnLinux(path, expected);
         }
     }
 

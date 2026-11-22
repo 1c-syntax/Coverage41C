@@ -234,8 +234,10 @@ class ExclusionConfigTest {
         String recordWithHits = Arrays.stream(lcov.split("end_of_record"))
                 .filter(record -> record.lines().anyMatch(line -> line.startsWith("SF:") && line.endsWith(hitModule)))
                 .findFirst().orElseThrow(() -> new AssertionError("Missing LCOV record for " + hitModule));
-        assertTrue(recordWithHits.lines().anyMatch(line -> line.startsWith("DA:3,") && !line.equals("DA:3,0")),
-                recordWithHits);
+        String coveredLine = "DA:3,";
+        assertTrue(recordWithHits.lines()
+                .filter(line -> line.startsWith(coveredLine))
+                .anyMatch(line -> Integer.parseInt(line.substring(coveredLine.length())) > 0), recordWithHits);
         String recordWithoutHits = Arrays.stream(lcov.split("end_of_record"))
                 .filter(record -> record.lines().anyMatch(line -> line.startsWith("SF:") && line.endsWith(noHitModule)))
                 .findFirst().orElseThrow(() -> new AssertionError("Missing LCOV record for " + noHitModule));
