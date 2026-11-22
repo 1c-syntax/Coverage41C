@@ -377,7 +377,8 @@ class CoverMapBuilderTest {
 
         assertEquals(Map.of(), outside(rules("{'changeMarkers':{}}"), report, "// Cover:file-off\n" + text(CHANGED)));
         assertEquals(0, report.getTotalLines());
-        assertTrue(report.getEntries().isEmpty());
+        assertEquals(0, report.getExcludedLines());
+        assertEquals("Module.bsl:1 → Cover:file-off", report.getEntries().iterator().next().getSource());
         ExclusionReport.ChangeBlocksEntry entry = report.getChangeBlocks().iterator().next();
         assertEquals(1, entry.getBlocks());
         assertEquals(0, entry.getIncludedLines());
@@ -657,8 +658,12 @@ class CoverMapBuilderTest {
         ExclusionReport report = new ExclusionReport();
 
         assertEquals(Map.of(), outsideScope(scoped(ROUTINES), report,
-                text("// Cover:file-off", "Процедура тестХ()", "\tА();", "КонецПроцедуры")));
+                text("// Cover:file-off — generated code", "Процедура тестХ()", "\tА();", "КонецПроцедуры")));
         assertEquals(0, report.getTotalLines());
+        assertEquals(0, report.getExcludedLines());
+        ExclusionReport.Entry marker = report.getEntries().iterator().next();
+        assertEquals("Module.bsl:1 → Cover:file-off", marker.getSource());
+        assertEquals("generated code", marker.getReason());
         ExclusionReport.PrefixRoutinesEntry entry = report.prefixRoutines("team.json → includePrefix[0]");
         assertTrue(report.hasPrefixRoutines("team.json → includePrefix[0]"));
         assertEquals(1, entry.getRoutines());

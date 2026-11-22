@@ -193,6 +193,44 @@ class ConfiguredCoverageTest {
     }
 
     @Test
+    void validateProtectsObjectMetadataAndAllowsAnUnrelatedXmlReport() throws Exception {
+        Path project = project();
+        Path sources = project.resolve("configuration");
+        Path metadata = sources.resolve("CommonModules/ПростойОбщийМодуль.xml");
+        String previous = Files.readString(metadata);
+
+        assertEquals(1, execute("validate", "-s", sources.toString(), "--exclusion-report", metadata.toString()));
+        assertEquals(previous, Files.readString(metadata));
+
+        Path report = Files.writeString(sources.resolve("diagnostic.xml"), "previous report");
+        assertEquals(0, execute("validate", "-s", sources.toString(), "--exclusion-report", report.toString()));
+        assertTrue(new ObjectMapper().readTree(report.toFile()).has("excludedLines"));
+    }
+
+    @Test
+    void validateProtectsEdtObjectMetadata() throws Exception {
+        Path sources = directory.resolve("edt");
+        TestUtils.copyDirectory(Path.of("src/test/resources/edt/pc"), sources);
+        Path metadata = sources.resolve("src/CommonModules/ПростойОбщийМодуль/ПростойОбщийМодуль.mdo");
+        String previous = Files.readString(metadata);
+
+        assertEquals(1, execute("validate", "-s", sources.toString(), "--exclusion-report", metadata.toString()));
+        assertEquals(previous, Files.readString(metadata));
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    void validateRejectsAnExclusionReportHardLinkedToObjectMetadata() throws Exception {
+        Path sources = project().resolve("configuration");
+        Path metadata = sources.resolve("CommonModules/ПростойОбщийМодуль.xml");
+        String previous = Files.readString(metadata);
+        Path report = Files.createLink(directory.resolve("report.json"), metadata);
+
+        assertEquals(1, execute("validate", "-s", sources.toString(), "--exclusion-report", report.toString()));
+        assertEquals(previous, Files.readString(metadata));
+    }
+
+    @Test
     void validateCanUseAnExplicitReportAndFailsStrictValidationOnWarnings() throws Exception {
         Path project = project();
         Path config = config("""

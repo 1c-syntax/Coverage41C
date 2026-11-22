@@ -102,15 +102,13 @@ public final class UserTargets {
             }
         }
         boolean wanted = !isActive() || users.accepts(usersById.get(id));
-        if (wanted) {
-            matchedUser = true;
-        }
         return wanted && !attachedIds.contains(id);
     }
 
     // The target was attached; later announcements of it do not attach it again.
     public void attached(String targetId) {
         attachedIds.add(normalizeUuid(targetId));
+        matchedUser = true;
     }
 
     // A nameless packet may need a fresh list even if dbgs already announced the target id.
@@ -206,7 +204,7 @@ public final class UserTargets {
         return target == null ? null : target.getId();
     }
 
-    // True without a filter; with a filter, true once a target of an allowed user has been seen.
+    // True without a filter; with a filter, true after attaching an allowed target or receiving its measures.
     public boolean matchedAnyTarget() {
         return !isActive() || matchedUser;
     }

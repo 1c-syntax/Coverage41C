@@ -50,10 +50,8 @@ public final class SubsystemFilter {
         indexSubsystems(configuration, subsystemsByName, subsystemsByPath);
 
         String subsystemName = name == null ? "" : name.trim();
-        List<Subsystem> matches = subsystemsByPath.getOrDefault(subsystemName, Collections.emptyList());
-        if (matches.isEmpty() && !subsystemName.contains(".")) {
-            matches = subsystemsByName.getOrDefault(subsystemName, Collections.emptyList());
-        }
+        Map<String, List<Subsystem>> index = subsystemName.contains(".") ? subsystemsByPath : subsystemsByName;
+        List<Subsystem> matches = index.getOrDefault(subsystemName, Collections.emptyList());
         if (matches.isEmpty()) {
             if (allowMissing) {
                 return Collections.emptySet();

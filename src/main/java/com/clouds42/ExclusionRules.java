@@ -25,11 +25,16 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.cfg.CoercionAction;
+import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
+import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.databind.type.LogicalType;
 import com.github._1c_syntax.bsl.mdclasses.CF;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.DirectoryStream;
+import java.nio.file.FileSystemLoopException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -51,8 +56,13 @@ import java.util.stream.Collectors;
 
 final class ExclusionRules {
 
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper()
-            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+    private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder()
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+            .withCoercionConfig(LogicalType.Textual, config -> config
+                    .setCoercion(CoercionInputShape.Boolean, CoercionAction.Fail)
+                    .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
+                    .setCoercion(CoercionInputShape.Float, CoercionAction.Fail))
+            .build();
     private static final int LINE_PATTERN_FLAGS = Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE;
     // Default comment styles: //++ … //-- and //{{ … //}}; "// -----" is a separator, not an end.
     private static final String[][] DEFAULT_CHANGE_MARKERS = {
@@ -275,7 +285,15 @@ final class ExclusionRules {
         try (DirectoryStream<Path> links = Files.newDirectoryStream(directory,
                 path -> isConfigFileName(path.toFile()) && Files.isSymbolicLink(path))) {
             for (Path link : links) {
-                if (ConfiguredCoverage.sameFile(link, report.toPath())) {
+                Path linkedTarget;
+                try {
+                    linkedTarget = ConfiguredCoverage.resolveOutput(link);
+                } catch (FileSystemLoopException ignored) {
+                    // A cyclic rule link is not loaded. The report path was checked before this loop.
+                    continue;
+                }
+                if (linkedTarget.equals(target)
+                        || Files.exists(linkedTarget) && Files.exists(target) && Files.isSameFile(linkedTarget, target)) {
                     throw new IllegalArgumentException(source + ": " + report + " is the target of " + link);
                 }
             }
@@ -776,6 +794,11 @@ final class ExclusionRules {
 
         String getTeam() {
             return team;
+        }
+
+        boolean mayMatchAt(String text, int start) {
+            return begin.matcher(text).region(start, text.length()).find()
+                    || end.matcher(text).region(start, text.length()).find();
         }
 
         boolean isBegin(String text) {

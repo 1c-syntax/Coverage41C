@@ -22,7 +22,10 @@
 package com.clouds42;
 
 import com.github._1c_syntax.bsl.mdclasses.CF;
+import com.github._1c_syntax.bsl.mdclasses.Configuration;
 import com.github._1c_syntax.bsl.mdclasses.MDClasses;
+import com.github._1c_syntax.bsl.mdo.Subsystem;
+import com.github._1c_syntax.bsl.types.MdoReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -208,6 +211,21 @@ class ExclusionRulesTest {
     }
 
     @Test
+    void unrelatedCyclicConfigLinkDoesNotPreventWritingTheReport() throws Exception {
+        Path rules = Files.createDirectory(tempDir.resolve("rules"));
+        Files.writeString(rules.resolve("active.json"), "{\"exclusionReport\":\"out/report.json\"}");
+        createSymbolicLink(rules.resolve("old.json"), Path.of("old.json"));
+
+        assertEquals(tempDir.resolve("out/report.json").toFile(), load(rules.toFile()).getExclusionReportFile());
+    }
+
+    @Test
+    void exclusionReportKeepsSpacesInTheFileName() throws Exception {
+        File file = write("rules.json", "{'exclusionReport':' reports/out .json'}");
+        assertEquals(tempDir.resolve(" reports/out .json").toFile(), load(file).getExclusionReportFile());
+    }
+
+    @Test
     void absoluteExclusionReportIsKept() throws Exception {
         Path report = tempDir.resolve("elsewhere/x.json").toAbsolutePath();
         File file = tempDir.resolve("a.json").toFile();
@@ -377,6 +395,33 @@ class ExclusionRulesTest {
         assertEquals(List.of("a.json → changeMarkers[0]", "b.json → changeMarkers[0]"),
                 load(tempDir.toFile()).getChangeMarkers().stream().map(ExclusionRules.ChangeMarker::getSource)
                         .collect(Collectors.toList()));
+    }
+
+    @Test
+    void rejectsBooleanAndNumericRuleValuesButAcceptsStringPatterns() throws Exception {
+        for (String value : List.of("true", "42", "1.5")) {
+            File file = write("rules.json", "{'exclude':{'lines':[" + value + "]}}");
+            assertThrows(IllegalArgumentException.class, () -> load(file), value);
+        }
+        ExclusionRules rules = load(write("rules.json", "{'exclude':{'lines':['true','42','1.5']}}"));
+        assertEquals(3, rules.getRules().size());
+    }
+
+    @Test
+    void rejectsAmbiguousShortNameEvenWhenItMatchesARootPath() {
+        Subsystem nested = Subsystem.builder().name("Sales")
+                .mdoReference(MdoReference.create("Subsystem.Operations.Subsystem.Sales")).build();
+        Subsystem root = Subsystem.builder().name("Sales")
+                .mdoReference(MdoReference.create("Subsystem.Sales")).build();
+        Subsystem parent = Subsystem.builder().name("Operations")
+                .mdoReference(MdoReference.create("Subsystem.Operations")).subsystem(nested).build();
+        CF tree = Configuration.EMPTY.toBuilder().subsystems(List.of(root, parent)).build();
+
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> SubsystemFilter.resolve(tree, "Sales"));
+        assertEquals("Ambiguous subsystem name: Sales", error.getMessage());
+        assertEquals(Set.of("Subsystem.Operations.Subsystem.Sales"),
+                SubsystemFilter.resolve(tree, "Operations.Sales"));
     }
 
     @Test

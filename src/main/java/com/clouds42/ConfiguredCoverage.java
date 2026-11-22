@@ -28,6 +28,8 @@ import com.github._1c_syntax.bsl.mdclasses.MDClasses;
 import com.github._1c_syntax.bsl.mdo.MD;
 import com.github._1c_syntax.bsl.mdo.Module;
 import com.github._1c_syntax.bsl.support.SupportVariant;
+import com.github._1c_syntax.bsl.types.ConfigurationSource;
+import com.github._1c_syntax.bsl.types.MDOType;
 import com.github._1c_syntax.bsl.types.MdoReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,16 +40,22 @@ import java.math.BigDecimal;
 import java.net.URI;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.NoSuchFileException;
 import java.nio.file.FileSystemLoopException;
+import java.nio.file.FileVisitOption;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -151,6 +159,7 @@ public final class ConfiguredCoverage {
             if (reportFile == null) {
                 reportFile = rules.getExclusionReportFile();
             }
+            rejectMetadataReport(root, configuration.getConfigurationSource(), reportFile);
             rules.getIncludeSources().forEach(report::addScopeSource);
             if (!rules.getPrefixes().isEmpty()) {
                 report.setPrefixScope(rules.getPrefixScope());
@@ -262,6 +271,57 @@ public final class ConfiguredCoverage {
             ModuleId id = new ModuleId(modulePath(projectUri, uri), List.of(), Set.of());
             addCoverageData(coverageData, uri, id, rules, report);
         }
+    }
+
+    private static void rejectMetadataReport(Path root, ConfigurationSource format, File report) throws IOException {
+        // A new file cannot alias existing metadata. Check existing reports by file identity, including hard links.
+        if (report == null || !report.isFile()) {
+            return;
+        }
+        Path output = report.toPath().toRealPath();
+        if (format == ConfigurationSource.EDT) {
+            rejectMetadataIn(root.resolve("src"), output, Set.of("mdo", "form", "xml"));
+        } else {
+            Path dumpInfo = root.resolve("ConfigDumpInfo.xml");
+            if (Files.isRegularFile(dumpInfo)) {
+                rejectSame(dumpInfo.toFile(), report);
+            }
+            Set<String> metadataDirectories = new HashSet<>();
+            metadataDirectories.add("Ext");
+            MDOType.valuesWithoutChildren().forEach(type -> metadataDirectories.add(type.groupName()));
+            metadataDirectories.remove("");
+            for (String directory : metadataDirectories) {
+                rejectMetadataIn(root.resolve(directory), output, Set.of("xml"));
+            }
+        }
+    }
+
+    private static void rejectMetadataIn(Path directory, Path output, Set<String> extensions) throws IOException {
+        if (!Files.isDirectory(directory)) {
+            return;
+        }
+        Files.walkFileTree(directory, EnumSet.of(FileVisitOption.FOLLOW_LINKS), Integer.MAX_VALUE,
+                new SimpleFileVisitor<>() {
+                    @Override
+                    public FileVisitResult visitFile(Path input, BasicFileAttributes attributes) throws IOException {
+                        String name = input.getFileName().toString();
+                        int dot = name.lastIndexOf('.');
+                        if (attributes.isRegularFile() && dot >= 0
+                                && extensions.contains(name.substring(dot + 1).toLowerCase(Locale.ROOT))
+                                && Files.isSameFile(input, output)) {
+                            throw new IllegalArgumentException("Report output would overwrite metadata: " + input);
+                        }
+                        return FileVisitResult.CONTINUE;
+                    }
+
+                    @Override
+                    public FileVisitResult visitFileFailed(Path file, IOException error) throws IOException {
+                        if (error instanceof FileSystemLoopException) {
+                            return FileVisitResult.CONTINUE;
+                        }
+                        throw error;
+                    }
+                });
     }
 
     private static void checkOutputs(File config, File raw, File coverage, File report, Set<URI> sources)

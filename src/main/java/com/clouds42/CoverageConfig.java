@@ -103,7 +103,7 @@ public class CoverageConfig {
     }
 
     public String getExclusionReport() {
-        return exclusionReport == null ? "" : exclusionReport.trim();
+        return exclusionReport == null || exclusionReport.isBlank() ? "" : exclusionReport;
     }
 
     public void setExclusionReport(String exclusionReport) {

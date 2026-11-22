@@ -131,9 +131,8 @@ final class ChangeBlocks {
 
     private static boolean mayHoldMarker(String text, List<ExclusionRules.ChangeMarker> markers) {
         for (int index = text.indexOf("//"); index >= 0; index = text.indexOf("//", index + 1)) {
-            String tail = text.substring(index);
             for (ExclusionRules.ChangeMarker marker : markers) {
-                if (marker.isBegin(tail) || marker.isEnd(tail)) {
+                if (marker.mayMatchAt(text, index)) {
                     return true;
                 }
             }

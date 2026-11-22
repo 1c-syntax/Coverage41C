@@ -97,6 +97,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     private DebugClient client;
     private UserTargets targets = new UserTargets(IncludeUsers.NONE);
     private final Map<URI, Set<BigDecimal>> autoLines = new HashMap<>();
+    private volatile boolean useConfiguredAutoLines;
 
     private final Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<>() {
         @Override
@@ -146,17 +147,20 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         if (users.isActive()) {
             logger.info(users.describe());
         }
-        getServerSocket();
         UUID measureUuid = UUID.randomUUID();
         rawMode = metadataOptions.isRawMode();
+        useConfiguredAutoLines = !rawMode
+                && (metadataOptions.getConfigFile() != null || metadataOptions.getExclusionReportFile() != null);
 
-        Map<String, URI> uriListByKey;
+        ConfiguredCoverage.Prepared prepared;
         try {
-            ConfiguredCoverage.Prepared prepared = ConfiguredCoverage.prepare(metadataOptions,
-                    filterOptions.getExtensionName(), coverageData, outputOptions.getOutputFile(), null, users.isActive());
-            uriListByKey = prepared.modules();
-            if (metadataOptions.getConfigFile() != null || metadataOptions.getExclusionReportFile() != null) {
-                rememberAutoLines();
+            synchronized (coverageData) {
+                getServerSocket();
+                prepared = ConfiguredCoverage.prepare(metadataOptions, filterOptions.getExtensionName(),
+                        coverageData, outputOptions.getOutputFile(), null, users.isActive());
+                if (useConfiguredAutoLines) {
+                    rememberAutoLines();
+                }
             }
             prepared.writeReport();
         } catch (Exception failure) {
@@ -185,7 +189,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         Set<String> externalDataProcessorsUriSet = new HashSet<>();
 
         try {
-            mainLoop(uriListByKey, externalDataProcessorsUriSet);
+            mainLoop(prepared.modules(), externalDataProcessorsUriSet);
         } catch (RuntimeDebugClientException e) {
             logger.error("Can't send ping to debug server. Coverage analyzing finished");
             logger.error(e.getLocalizedMessage());
@@ -436,8 +440,14 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
 
     @Override
     protected void cleanCoverageData() {
-        super.cleanCoverageData();
-        autoLines.forEach((uri, lines) -> lines.forEach(line -> coverageData.get(uri).put(line, -1)));
+        if (!useConfiguredAutoLines) {
+            super.cleanCoverageData();
+            return;
+        }
+        synchronized (coverageData) {
+            super.cleanCoverageData();
+            autoLines.forEach((uri, lines) -> lines.forEach(line -> coverageData.get(uri).put(line, -1)));
+        }
     }
 
     @Override

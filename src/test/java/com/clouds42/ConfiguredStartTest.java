@@ -23,9 +23,13 @@ package com.clouds42;
 
 import com._1c.g5.v8.dt.debug.model.base.data.DebugTargetId;
 import com._1c.g5.v8.dt.debug.model.base.data.DebugTargetType;
+import com.clouds42.Commands.CoverageCommand;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
+import picocli.CommandLine;
+
+import java.net.ServerSocket;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -34,15 +38,18 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static com.clouds42.ConfiguredCoverageTest.MODULE;
 import static com.clouds42.ConfiguredCoverageTest.OBJECT_ID;
 import static com.clouds42.ConfiguredCoverageTest.PROPERTY_ID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Timeout(60)
@@ -102,6 +109,47 @@ class ConfiguredStartTest {
             assertEquals(Map.of(2, false, 6, false),
                     ConfiguredCoverageTest.coverage(output, "configuration/" + MODULE));
         }
+    }
+
+    @Test
+    void earlyCleanWaitsForConfiguredAutoLines() throws Exception {
+        Path project = TestUtils.copyConfiguration(directory);
+        Files.writeString(project.resolve("configuration").resolve(MODULE), ConfiguredCoverageTest.SOURCE);
+        Path config = Files.writeString(directory.resolve("coverage41c.json"), "{\"auto\":{\"lines\":[\"Второй\"]}}");
+        CountDownLatch done = new CountDownLatch(1);
+        AtomicBoolean waitedForPreparation = new AtomicBoolean();
+        AtomicBoolean autoLinePreserved = new AtomicBoolean();
+        CoverageCommand command = new CoverageCommand() {
+            @Override
+            protected ServerSocket getServerSocket() {
+                Thread thread = Thread.ofPlatform().daemon().start(() -> {
+                    try {
+                        cleanCoverageData();
+                        autoLinePreserved.set(getCoverageData().values().stream()
+                                .anyMatch(lines -> lines.containsValue(-1)));
+                    } finally {
+                        done.countDown();
+                    }
+                });
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (done.getCount() != 0 && System.nanoTime() < deadline) {
+                    if (thread.getState() == Thread.State.BLOCKED) {
+                        waitedForPreparation.set(true);
+                        break;
+                    }
+                    Thread.yield();
+                }
+                return null;
+            }
+        };
+
+        int result = new CommandLine(command).execute("-P", project.toString(), "-s", "configuration",
+                "--config", config.toString(), "-o", directory.resolve("coverage.xml").toString(),
+                "-u", "http://127.0.0.1:0");
+        assertNotEquals(0, result);
+        assertTrue(done.await(5, TimeUnit.SECONDS));
+        assertTrue(waitedForPreparation.get());
+        assertTrue(autoLinePreserved.get());
     }
 
     private static Future<Integer> launch(ExecutorService executor, FakeDebugServer debugger,

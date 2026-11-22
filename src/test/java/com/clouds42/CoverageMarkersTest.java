@@ -145,6 +145,22 @@ class CoverageMarkersTest {
     }
 
     @Test
+    void inlineMarkerOnThenCoversMultilineIfButNotWhenItFollowsABodyStatement() {
+        CoverageMarkers markers = parse("Процедура А()",
+                "Если Готово", "И Проверено Тогда // Cover:off", "Б();", "КонецЕсли;",
+                "Если Готово", "Тогда В(); // Cover:off", "Г();", "КонецЕсли;", "КонецПроцедуры");
+
+        assertEquals(List.of("OFF Cover:off 2..5", "OFF Cover:off 7..7"), ranges(markers));
+    }
+
+    @Test
+    void warnsThatUnclosedAutoRemainsOptional() {
+        CoverageMarkers markers = parse("Процедура А()", "// Cover:auto", "Б();", "КонецПроцедуры");
+        assertEquals(List.of("2: Cover:auto is not closed, lines are optional up to end of module"),
+                markers.getWarnings());
+    }
+
+    @Test
     void inlineMarkerOnTryExcludesWholeTry() {
         CoverageMarkers markers = parse("Процедура П()", "\tПопытка // Cover:off", "\t\tБ();",
                 "\tИсключение", "\t\tВ();", "\tКонецПопытки;", "\tД();", "КонецПроцедуры");

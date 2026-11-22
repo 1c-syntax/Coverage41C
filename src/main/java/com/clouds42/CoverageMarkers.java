@@ -30,7 +30,6 @@ import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.antlr.v4.runtime.tree.TerminalNode;
 import org.antlr.v4.runtime.tree.Trees;
-import org.apache.commons.lang3.Range;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -71,7 +70,8 @@ final class CoverageMarkers {
         List<CoverageMarker> markers = new ArrayList<>();
         List<Warning> warnings = new ArrayList<>();
         Deque<Open> open = new ArrayDeque<>();
-        Map<Integer, Range<Integer>> blocks = null;
+        Map<Integer, BlockRange> blocks = null;
+        Map<Integer, BlockRange> thenTokens = new HashMap<>();
         int firstCodeIndex = firstCodeIndex(tokens);
 
         for (Token token : activeLineComments(tokens)) {
@@ -101,18 +101,27 @@ final class CoverageMarkers {
             }
             CoverageMarker.Kind kind = OFF.contains(word) ? CoverageMarker.Kind.OFF : CoverageMarker.Kind.AUTO;
             String reason = reason(token.getText().substring(matcher.end()));
-            if (isInline(tokens, token)) {
+            Token previousCode = previousCodeTokenOnLine(tokens, token);
+            if (previousCode != null) {
                 if (blocks == null) {
                     blocks = new HashMap<>();
                     for (BlockRange block : blockRanges(tokenizer.getAst())) {
                         if (block.complete) {
-                            addBlock(blocks, block.begin, block.end);
+                            blocks.merge(block.begin, block,
+                                    (current, candidate) -> current.end >= candidate.end ? current : candidate);
+                            if (block.thenToken >= 0) {
+                                thenTokens.put(block.thenToken, block);
+                            }
                         }
                     }
                 }
-                Range<Integer> block = blocks.get(line);
-                int endLine = block == null ? line : block.getMaximum();
-                markers.add(new CoverageMarker(kind, label, line, line, endLine, reason));
+                BlockRange block = blocks.get(line);
+                if (block == null) {
+                    block = thenTokens.get(previousCode.getTokenIndex());
+                }
+                int firstLine = block == null ? line : block.begin;
+                int endLine = block == null ? line : block.end;
+                markers.add(new CoverageMarker(kind, label, line, firstLine, endLine, reason));
             } else {
                 open.push(new Open(kind, label, line, reason));
             }
@@ -120,8 +129,9 @@ final class CoverageMarkers {
         while (!open.isEmpty()) {
             Open unclosed = open.pop();
             markers.add(unclosed.close(lastLine));
+            String effect = unclosed.kind == CoverageMarker.Kind.AUTO ? "lines are optional" : "excluded";
             warnings.add(new Warning(unclosed.line, lastLine,
-                    unclosed.label + " is not closed, excluded up to end of module"));
+                    unclosed.label + " is not closed, " + effect + " up to end of module"));
         }
         markers.sort(Comparator.comparingInt(CoverageMarker::getLine));
         return new CoverageMarkers(markers, warnings);
@@ -184,16 +194,20 @@ final class CoverageMarkers {
     }
 
     static boolean isInline(List<Token> tokens, Token comment) {
+        return previousCodeTokenOnLine(tokens, comment) != null;
+    }
+
+    private static Token previousCodeTokenOnLine(List<Token> tokens, Token comment) {
         for (int index = comment.getTokenIndex() - 1; index >= 0; index--) {
             Token token = tokens.get(index);
             if (endLine(token) < comment.getLine()) {
-                return false;
+                break;
             }
             if (token.getChannel() == Token.DEFAULT_CHANNEL && token.getType() != Token.EOF) {
-                return true;
+                return token;
             }
         }
-        return false;
+        return null;
     }
 
     private static int endLine(Token token) {
@@ -233,7 +247,11 @@ final class CoverageMarkers {
                     || context instanceof BSLParser.WhileStatementContext
                     || context instanceof BSLParser.ForStatementContext
                     || context instanceof BSLParser.ForEachStatementContext)) {
-                blocks.add(new BlockRange(context.getStart().getLine(), context.getStop().getLine(), "statement", true));
+                TerminalNode then = context instanceof BSLParser.IfStatementContext condition && condition.ifBranch() != null
+                        ? condition.ifBranch().THEN_KEYWORD() : null;
+                int thenToken = then == null ? -1 : then.getSymbol().getTokenIndex();
+                blocks.add(new BlockRange(context.getStart().getLine(), context.getStop().getLine(),
+                        "statement", true, thenToken));
             }
         }
         methods.sort(Comparator.comparingInt(method -> method.begin));
@@ -272,12 +290,18 @@ final class CoverageMarkers {
         final int end;
         final String kind;
         final boolean complete;
+        final int thenToken;
 
         BlockRange(int begin, int end, String kind, boolean complete) {
+            this(begin, end, kind, complete, -1);
+        }
+
+        private BlockRange(int begin, int end, String kind, boolean complete, int thenToken) {
             this.begin = begin;
             this.end = end;
             this.kind = kind;
             this.complete = complete;
+            this.thenToken = thenToken;
         }
     }
 
@@ -294,11 +318,6 @@ final class CoverageMarkers {
             }
         }
         return block.getStart().getLine();
-    }
-
-    private static void addBlock(Map<Integer, Range<Integer>> blocks, int startLine, int endLine) {
-        blocks.merge(startLine, Range.between(startLine, endLine),
-                (current, candidate) -> current.getMaximum() >= candidate.getMaximum() ? current : candidate);
     }
 
     private static final class Open {

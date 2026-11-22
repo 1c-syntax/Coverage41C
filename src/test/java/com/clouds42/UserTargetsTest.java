@@ -156,9 +156,11 @@ class UserTargetsTest {
     void failedAttachIsRetriedOnNextAnnouncement() throws Exception {
         UserTargets targets = new UserTargets(IncludeUsers.load(null, List.of("unit")));
         assertTrue(targets.register(target("a", "unit")));
+        assertFalse(targets.matchedAnyTarget());
         assertTrue(targets.register(target("a", "unit")));
         targets.attached("a");
         assertFalse(targets.register(target("a", "unit")));
+        assertTrue(targets.matchedAnyTarget());
     }
 
     // Пакет без имени требует поиска, пока имя предмета неизвестно.

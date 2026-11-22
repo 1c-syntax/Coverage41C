@@ -79,7 +79,14 @@ final class CoverMapBuilder {
         }
         CoverageMarkers markers = CoverageMarkers.parse(tokenizer);
         // Cover:file-off in a module outside coverage keeps it out of the totals, as today.
-        if (outside && markers.getMarkers().stream().anyMatch(CoverageMarker::isFileOff)) {
+        List<CoverageMarker> fileOff = outside
+                ? markers.getMarkers().stream().filter(CoverageMarker::isFileOff).toList()
+                : List.of();
+        if (!fileOff.isEmpty()) {
+            for (CoverageMarker marker : fileOff) {
+                Source source = Source.marker(module, marker);
+                report.record(source.name, source.team, source.reason, source.kind, module.getPath(), 0);
+            }
             recordMarkerWarnings(markers, blocks, found, module, report, outside);
             recordChangeBlocks(blocks, module, report, Map.of());
             recordPrefixRoutines(found, module, report, Map.of(), 0, false);

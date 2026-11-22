@@ -75,7 +75,7 @@ class PrefixRoutinesTest {
 
     @Test
     void prefixIsCaseSensitiveAndComparedWithStartOfName() {
-        PrefixRoutines routines = parse("Процедура ТестХ()", "КонецПроцедуры", "Процедура подмодульХ()", "КонецПроцедуры",
+        PrefixRoutines routines = parse("Процедура ТестХ()", "КонецПроцедуры", "Процедура префикстестХ()", "КонецПроцедуры",
                 "Процедура тест()", "КонецПроцедуры", "Процедура тестХ_Ещё()", "КонецПроцедуры");
 
         assertEquals(List.of("тест", "тестХ_Ещё"), names(routines));
