@@ -84,6 +84,16 @@ class PrefixRoutinesTest {
     }
 
     @Test
+    void deletionBetweenMethodKeywordAndNameDoesNotDefeatPrecheck() {
+        assertEquals(List.of("тестПодготовить"), names(parse("Процедура", "#Удаление", "СтароеИмя()",
+                "#КонецУдаления", "тестПодготовить()", "ВыполнитьШаг();", "КонецПроцедуры")));
+        assertEquals(List.of("demoBuild"), names(parse("Function", "# Delete", "OldName()",
+                "#EndDelete", "demoBuild()", "Return 1;", "EndFunction")));
+        assertEquals(List.of(), names(parse("Процедура", "#Удаление", "тестСтароеИмя()",
+                "#КонецУдаления", "НовоеИмя()", "ВыполнитьШаг();", "КонецПроцедуры")));
+    }
+
+    @Test
     void prefixIsCaseSensitiveAndComparedWithStartOfName() {
         PrefixRoutines routines = parse("Процедура ТестХ()", "КонецПроцедуры", "Процедура префикстестХ()", "КонецПроцедуры",
                 "Процедура тест()", "КонецПроцедуры", "Процедура тестХ_Ещё()", "КонецПроцедуры");

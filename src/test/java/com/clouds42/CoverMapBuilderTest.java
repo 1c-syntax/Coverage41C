@@ -715,15 +715,28 @@ class CoverMapBuilderTest {
     }
 
     @Test
-    void lineInMethodAndChangeBlockIsCountedOnce() throws Exception {
+    void lineInPrefixedMethodIsNotReportedAsReturnedByChangeBlock() throws Exception {
         ExclusionReport report = new ExclusionReport();
         ExclusionRules rules = scoped("{'includePrefix':['тест'],'prefixScope':{'routines':true},'changeMarkers':{}}");
 
         assertEquals(Map.of(3, 0, 5, 0, 6, 0), outsideScope(rules, report, text("Процедура тестХ()", "\t// ++ уч",
                 "\tА();", "\t// -- уч", "\tБ();", "КонецПроцедуры")));
         assertEquals(3, report.getTotalLines());
-        assertEquals(1, report.getIncludedLines());
+        assertEquals(0, report.getIncludedLines());
+        assertEquals(0, report.getChangeBlocks().iterator().next().getIncludedLines());
         assertEquals(3, report.getPrefixRoutines().iterator().next().getIncludedLines());
+    }
+
+    @Test
+    void automaticBlockReportsOnlyLinesItReturnsToScope() throws Exception {
+        ExclusionReport report = new ExclusionReport();
+        ExclusionRules rules = scoped("{'includePrefix':['тест'],'prefixScope':{'routines':true},"
+                + "'changeMarkers':{},'unclosedBlocks':{'enabled':true}}");
+        String module = text("//++", "Процедура тестХ()", "А();", "КонецПроцедуры", "Б();");
+        assertEquals(Map.of(3, 0, 4, 0, 5, 0), outsideScope(rules, report, module));
+        assertEquals(1, report.getIncludedLines());
+        assertEquals(1, report.getChangeBlocks().iterator().next().getIncludedLines());
+        assertEquals(1, report.getAutomaticallyClosedBlocks().getFirst().getIncludedLines());
     }
 
     @Test

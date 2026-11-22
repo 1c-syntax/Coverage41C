@@ -667,6 +667,16 @@ class ExclusionRulesTest {
     }
 
     @Test
+    void pathGlobPreservesPaddingCompatibilityAndMatchesExplicitSpaces() throws Exception {
+        ModuleId plain = module("src/CommonModules/Module.bsl");
+        ModuleId withLeadingSpace = module(" src/CommonModules/Module.bsl");
+        assertTrue(pathRule("  src/**  ").matches(plain));
+        assertFalse(pathRule("  src/**  ").matches(withLeadingSpace));
+        assertTrue(pathRule("[ ]src/**").matches(withLeadingSpace));
+        assertFalse(pathRule("[ ]src/**").matches(plain));
+    }
+
+    @Test
     void pathGlobEscapesWildcardsLiterally() throws Exception {
         assertTrue(pathRule("src/literal\\*/Module.bsl").matches(module("src/literal*/Module.bsl")));
         assertFalse(pathRule("src/literal\\*/Module.bsl").matches(module("src/literalA/Module.bsl")));

@@ -240,9 +240,12 @@ final class ExclusionRules {
     static Pattern routinePrecheck(List<ScopePrefix> prefixes) {
         // The lexer hides insertion directives, just like comments between a method keyword and its name.
         String hiddenTokens = "(?:\\s++|//[^\\r\\n]*+|(?iu:#[ \\t]*(?:вставка|конецвставки|insert|endinsert)))*+";
+        String possibleNames = prefixes.stream().map(prefix -> Pattern.quote(prefix.getPrefix()))
+                .collect(Collectors.joining("|"));
+        // A deletion may hide arbitrary text before the actual name. Let the parser select the active name.
+        String deletion = "(?iu:#[ \\t]*(?:удаление|delete)(?![\\p{L}\\p{N}_]))";
         return Pattern.compile("(?iu:процедура|функция|procedure|function)(?=\\s|//|#)"
-                + hiddenTokens + "(?:" + prefixes.stream()
-                .map(prefix -> Pattern.quote(prefix.getPrefix())).collect(Collectors.joining("|")) + ")");
+                + hiddenTokens + "(?:" + possibleNames + "|" + deletion + ")");
     }
 
     boolean needsSubsystemMembership() {

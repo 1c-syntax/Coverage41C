@@ -136,6 +136,18 @@ class ConfiguredCoverageTest {
         assertEquals(Map.of(2, true, 4, false, 6, false), coverage(output, MODULE));
     }
 
+    @Test
+    void rawCannotLoadAnExternalDtd() throws Exception {
+        Path dtd = Files.writeString(directory.resolve("coverage.dtd"), "<!ELEMENT coverage ANY>");
+        assertRejectedBeforePublishing("<!DOCTYPE coverage SYSTEM \"%s\"><coverage/>"
+                .formatted(dtd.toUri().toASCIIString()));
+    }
+
+    @Test
+    void rawAllowsASelfContainedDocumentType() throws Exception {
+        assertNoHits("<!DOCTYPE coverage [<!ELEMENT coverage EMPTY>]><coverage/>");
+    }
+
     private void assertRejectedBeforePublishing(String xml) throws Exception {
         Path project = project();
         Path input = Files.writeString(directory.resolve("internal.xml"), xml);
@@ -424,6 +436,26 @@ class ConfiguredCoverageTest {
                 "-o", form.toString(), "--exclusion-report", report.toString()));
         assertEquals(descriptor, Files.readString(form));
         assertFalse(Files.exists(report));
+    }
+
+    @Test
+    void externalProcessorAndFormCannotLoadAnExternalDtd() throws Exception {
+        Path processor = externalProcessor();
+        Path form = directory.resolve("Sample/Forms/Main.xml");
+        Path dtd = Files.writeString(directory.resolve("descriptor.dtd"), "<!ELEMENT MetaDataObject ANY>");
+        String doctype = "<!DOCTYPE MetaDataObject SYSTEM \"%s\">".formatted(dtd.toUri().toASCIIString());
+        String descriptor = Files.readString(processor);
+        Path report = directory.resolve("exclusions.json");
+        Files.writeString(processor, doctype + descriptor);
+        assertEquals(1, execute("validate", "-s", processor.toString(), "--exclusion-report", report.toString()));
+        assertFalse(Files.exists(report));
+
+        Files.writeString(processor, descriptor);
+        Files.writeString(form, doctype + """
+                <MetaDataObject><Form uuid="form-id"><Properties><Name>Main</Name></Properties></Form></MetaDataObject>
+                """);
+        assertEquals(1, execute("validate", "-s", processor.toString(), "--strict", "--exclusion-report", report.toString()));
+        assertTrue(new ObjectMapper().readTree(report.toFile()).path("warnings").toString().contains("Main.xml"));
     }
 
     @Test

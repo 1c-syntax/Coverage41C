@@ -291,6 +291,29 @@ class ChangeBlocksTest {
     }
 
     @Test
+    void markerAfterModuleStatementOnMethodEndLineClosesAtModuleEnd() throws Exception {
+        ChangeBlocks blocks = parse("{'changeMarkers':{},'unclosedBlocks':{'enabled':true}}",
+                "Процедура Подготовка()", "Шаг();",
+                "КонецПроцедуры Инициализация(); //++", "НашКод();");
+        ChangeBlocks.Block block = blocks.bySource().values().iterator().next().getFirst();
+        assertEquals("module", block.getBoundary());
+        assertEquals(4, block.getEndLine());
+        assertTrue(blocks.covers(3));
+        assertTrue(blocks.covers(4));
+        assertFalse(blocks.covers(2));
+        assertTrue(blocks.getWarnings().isEmpty());
+    }
+
+    @Test
+    void markerImmediatelyAfterMethodEndKeepsTheMethodBoundary() throws Exception {
+        ChangeBlocks blocks = parse("{'changeMarkers':{},'unclosedBlocks':{'enabled':true}}",
+                "Процедура Подготовка()", "Шаг();", "КонецПроцедуры //++", "ЧужойКод();");
+        assertEquals("method", blocks.bySource().values().iterator().next().getFirst().getBoundary());
+        assertTrue(blocks.covers(3));
+        assertFalse(blocks.covers(4));
+    }
+
+    @Test
     void skipsAstWithoutUnclosedBlocks() throws Exception {
         String config = "{'changeMarkers':{},'unclosedBlocks':{'enabled':true}}";
         Supplier<ParseTree> unusedAst = () -> {

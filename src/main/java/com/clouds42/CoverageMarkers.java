@@ -198,11 +198,7 @@ final class CoverageMarkers {
         return comments;
     }
 
-    static boolean isInline(List<Token> tokens, Token comment) {
-        return previousCodeTokenOnLine(tokens, comment) != null;
-    }
-
-    private static Token previousCodeTokenOnLine(List<Token> tokens, Token comment) {
+    static Token previousCodeTokenOnLine(List<Token> tokens, Token comment) {
         for (int index = comment.getTokenIndex() - 1; index >= 0; index--) {
             Token token = tokens.get(index);
             if (endLine(token) < comment.getLine()) {
@@ -269,7 +265,8 @@ final class CoverageMarkers {
             // A recovered method without a real end must also guard comments after its last statement.
             int end = method.complete ? method.end
                     : index + 1 < methods.size() ? methods.get(index + 1).begin - 1 : Integer.MAX_VALUE;
-            blocks.add(new BlockRange(method.begin, end, "method", method.complete, method.headerEndToken));
+            blocks.add(new BlockRange(method.begin, end, "method", method.complete,
+                    method.headerEndToken, method.endToken));
         }
         regions.sort(Comparator.comparingInt(region -> region.getStart().getTokenIndex()));
         Deque<ParserRuleContext> regionStarts = new ArrayDeque<>();
@@ -292,7 +289,8 @@ final class CoverageMarkers {
         boolean complete = isComplete(context) && end != null && end.getSymbol().getTokenIndex() >= 0;
         int headerEndToken = isComplete(declaration) ? declaration.getStop().getTokenIndex() : -1;
         methods.add(new BlockRange(keywordLine(declaration, keyword, context),
-                complete ? end.getSymbol().getLine() : Integer.MAX_VALUE, "method", complete, headerEndToken));
+                complete ? end.getSymbol().getLine() : Integer.MAX_VALUE, "method", complete, headerEndToken,
+                complete ? end.getSymbol().getTokenIndex() : -1));
     }
 
     static final class BlockRange {
@@ -301,17 +299,28 @@ final class CoverageMarkers {
         final String kind;
         final boolean complete;
         final int headerEndToken;
+        private final int endToken;
 
         BlockRange(int begin, int end, String kind, boolean complete) {
             this(begin, end, kind, complete, -1);
         }
 
         private BlockRange(int begin, int end, String kind, boolean complete, int headerEndToken) {
+            this(begin, end, kind, complete, headerEndToken, -1);
+        }
+
+        private BlockRange(int begin, int end, String kind, boolean complete, int headerEndToken, int endToken) {
             this.begin = begin;
             this.end = end;
             this.kind = kind;
             this.complete = complete;
             this.headerEndToken = headerEndToken;
+            this.endToken = endToken;
+        }
+
+        boolean containsMarker(int line, int precedingCodeToken) {
+            return begin <= line && line <= end
+                    && (line < end || endToken < 0 || precedingCodeToken <= endToken);
         }
     }
 

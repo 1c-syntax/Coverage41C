@@ -90,7 +90,7 @@ final class CoverMapBuilder {
             recordMarkerWarnings(markers, blocks, found, module, report, outside);
             recordChangeBlocks(blocks, module, report, Map.of());
             recordPrefixRoutines(found, module, report, Map.of(), 0, false);
-            recordAutomaticallyClosedBlocks(blocks, module, report, Map.of(), false);
+            recordAutomaticallyClosedBlocks(blocks, module, report, Set.of());
             return new HashMap<>();
         }
 
@@ -100,14 +100,14 @@ final class CoverMapBuilder {
             Arrays.sort(linesToCover);
         }
         List<Source> sources = new ArrayList<>();
-        boolean excludedWhole = outside;
+        boolean hasModuleRule = false;
         // Rules over the whole module exclude lines of prefixed methods, but not lines of change blocks.
         if (!outside || !found.isEmpty()) {
             for (ExclusionRules.Rule rule : rules.getRules()) {
                 if (!rule.isLineRule() && rule.matches(module)) {
                     // Change blocks take their lines back from a rule that excludes the whole module.
                     sources.add(Source.rule(rule, true, line -> !blocks.covers(line)));
-                    excludedWhole = true;
+                    hasModuleRule = true;
                 }
             }
         }
@@ -126,7 +126,7 @@ final class CoverMapBuilder {
         int counted = 0;
         int excluded = 0;
         int auto = 0;
-        int included = 0;
+        Set<Integer> linesReturnedByBlocks = blocks.isEmpty() ? Set.of() : new HashSet<>();
         int prefixedLines = 0;
         Map<String, Integer> routineLines = new HashMap<>();
         List<Source> matchedSources = new ArrayList<>();
@@ -148,8 +148,8 @@ final class CoverMapBuilder {
             } else {
                 coverMap.put(new BigDecimal(line), 0);
             }
-            if (excludedWhole && inBlock) {
-                included++;
+            if (inBlock && (hasModuleRule || (outside && prefixSources.isEmpty()))) {
+                linesReturnedByBlocks.add(line);
                 blocks.sourcesCovering(line).forEach(source -> includedBySource.merge(source, 1, Integer::sum));
             }
             if (!prefixSources.isEmpty()) {
@@ -159,11 +159,11 @@ final class CoverMapBuilder {
         }
         recordMarkerWarnings(markers, blocks, found, module, report, outside);
         report.addModuleTotals(counted, excluded, auto);
-        report.addIncludedLines(module.getPath(), included);
+        report.addIncludedLines(module.getPath(), linesReturnedByBlocks.size());
         recordChangeBlocks(blocks, module, report, includedBySource);
         recordPrefixRoutines(found, module, report, routineLines, prefixedLines, true);
 
-        recordAutomaticallyClosedBlocks(blocks, module, report, coverMap, excludedWhole);
+        recordAutomaticallyClosedBlocks(blocks, module, report, linesReturnedByBlocks);
         for (Source source : sources) {
             if (source.matched || source.recordWithoutHits) {
                 report.record(source.name, source.team, source.reason, source.kind, module.getPath(), source.hits);
@@ -207,14 +207,11 @@ final class CoverMapBuilder {
 
     private static void recordAutomaticallyClosedBlocks(ChangeBlocks blocks, ModuleId module,
                                                          ExclusionReport report,
-                                                         Map<BigDecimal, Integer> coverMap, boolean excludedWhole) {
+                                                         Set<Integer> linesReturnedByBlocks) {
         blocks.bySource().values().forEach(sourceBlocks -> sourceBlocks.stream()
                 .filter(ChangeBlocks.Block::isAutomaticallyClosed).forEach(block -> {
                     Set<Integer> included = new HashSet<>();
-                    if (excludedWhole) {
-                        coverMap.keySet().stream().map(BigDecimal::intValue).filter(block::covers)
-                                .forEach(included::add);
-                    }
+                    linesReturnedByBlocks.stream().filter(block::covers).forEach(included::add);
                     report.recordAutomaticallyClosedBlock(module.getPath(), block, included);
                 }));
     }

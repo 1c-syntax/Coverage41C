@@ -21,6 +21,7 @@
  */
 package com.clouds42;
 
+import com.github._1c_syntax.bsl.parser.BSLLexer;
 import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.tree.ParseTree;
 
@@ -81,7 +82,7 @@ final class ChangeBlocks {
                         if (scope.kind.equals("statement")) {
                             continue;
                         }
-                        if (scope.begin <= begin && begin <= scope.end
+                        if (scope.containsMarker(begin, beginComment.precedingCodeToken)
                                 && (!boundary.kind.equals("method") || scope.kind.equals("method"))) {
                             if (scope.kind.equals("method") || scope.begin >= boundary.begin) {
                                 boundary = scope;
@@ -123,7 +124,13 @@ final class ChangeBlocks {
             }
             Token token = lineComments.get(index + 1);
             if (token != null) {
-                comments.add(new Comment(index + 1, token.getText(), CoverageMarkers.isInline(tokens, token)));
+                Token code = CoverageMarkers.previousCodeTokenOnLine(tokens, token);
+                boolean inline = code != null;
+                while (code != null && code.getType() == BSLLexer.SEMICOLON) {
+                    code = CoverageMarkers.previousCodeTokenOnLine(tokens, code);
+                }
+                comments.add(new Comment(index + 1, token.getText(), inline,
+                        code == null ? -1 : code.getTokenIndex()));
             }
         }
         return comments;
@@ -175,11 +182,13 @@ final class ChangeBlocks {
         private final String text;
         // The comment follows code on the same line.
         private final boolean inline;
+        private final int precedingCodeToken;
 
-        private Comment(int line, String text, boolean inline) {
+        private Comment(int line, String text, boolean inline, int precedingCodeToken) {
             this.line = line;
             this.text = text;
             this.inline = inline;
+            this.precedingCodeToken = precedingCodeToken;
         }
     }
 

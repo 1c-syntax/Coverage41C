@@ -37,7 +37,6 @@ import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
 
-import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 import java.io.File;
 import java.io.FileInputStream;
@@ -163,7 +162,7 @@ public class ConvertCommand implements Callable<Integer> {
             throws IOException, ParserConfigurationException, SAXException {
         Document document;
         try (FileInputStream stream = new FileInputStream(input)) {
-            document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(stream);
+            document = Utils.newInputXmlBuilder().parse(stream);
         }
         Element coverage = document.getDocumentElement();
         if (!coverage.getTagName().equals("coverage")) {
