@@ -25,6 +25,7 @@ import com.github._1c_syntax.bsl.parser.BSLTokenizer;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -76,15 +77,21 @@ final class CoverMapBuilder {
         if (outside && blocks.isEmpty() && found.isEmpty()) {
             return new HashMap<>();
         }
-        int[] linesToCover = LinesToCoverage.getLines(tokenizer.getAst());
         CoverageMarkers markers = CoverageMarkers.parse(tokenizer);
         // Cover:file-off in a module outside coverage keeps it out of the totals, as today.
         if (outside && markers.getMarkers().stream().anyMatch(CoverageMarker::isFileOff)) {
+            recordMarkerWarnings(markers, blocks, found, module, report, outside);
             recordChangeBlocks(blocks, module, report, Map.of());
+            recordPrefixRoutines(found, module, report, Map.of(), 0, false);
             recordAutomaticallyClosedBlocks(blocks, module, report, Map.of(), false);
             return new HashMap<>();
         }
 
+        int[] linesToCover = LinesToCoverage.getLines(tokenizer.getAst());
+        PrefixRoutines.LineSweep routineSweep = found.isEmpty() ? null : found.lineSweep();
+        if (routineSweep != null) {
+            Arrays.sort(linesToCover);
+        }
         List<Source> sources = new ArrayList<>();
         boolean excludedWhole = outside;
         // Rules over the whole module exclude lines of prefixed methods, but not lines of change blocks.
@@ -118,8 +125,8 @@ final class CoverMapBuilder {
         List<Source> matchedSources = new ArrayList<>();
         for (int line : linesToCover) {
             boolean inBlock = blocks.covers(line);
-            PrefixRoutines.Routine routine = found.routineAt(line);
-            if (outside && !inBlock && routine == null) {
+            Set<String> prefixSources = routineSweep == null ? Set.of() : routineSweep.prefixSourcesAt(line);
+            if (outside && !inBlock && prefixSources.isEmpty()) {
                 continue;
             }
             counted++;
@@ -138,28 +145,16 @@ final class CoverMapBuilder {
                 included++;
                 blocks.sourcesCovering(line).forEach(source -> includedBySource.merge(source, 1, Integer::sum));
             }
-            if (routine != null) {
+            if (!prefixSources.isEmpty()) {
                 prefixedLines++;
-                routine.getPrefixes().forEach(prefix -> routineLines.merge(prefix.getSource(), 1, Integer::sum));
+                prefixSources.forEach(source -> routineLines.merge(source, 1, Integer::sum));
             }
         }
-        // Parse the whole module so markers can pair across scope boundaries. Report only
-        // diagnostics whose location or affected range intersects a selected block or method.
-        List<String> markerWarnings = outside
-                ? markers.getWarningsIntersecting((first, last) -> blocks.intersects(first, last)
-                        || found.intersects(first, last))
-                : markers.getWarnings();
-        markerWarnings.forEach(warning -> report.warn(module.getPath() + ":" + warning));
+        recordMarkerWarnings(markers, blocks, found, module, report, outside);
         report.addModuleTotals(counted, excluded, auto);
         report.addIncludedLines(module.getPath(), included);
         recordChangeBlocks(blocks, module, report, includedBySource);
-
-        Map<String, Integer> routinesBySource = new LinkedHashMap<>();
-        found.getRoutines().forEach(routine -> routine.getPrefixes()
-                .forEach(prefix -> routinesBySource.merge(prefix.getSource(), 1, Integer::sum)));
-        report.addPrefixRoutineTotals(found.getRoutines().size(), prefixedLines);
-        routinesBySource.forEach((source, count) -> report.recordPrefixRoutines(source, module.getPath(), count,
-                routineLines.getOrDefault(source, 0)));
+        recordPrefixRoutines(found, module, report, routineLines, prefixedLines, true);
 
         recordAutomaticallyClosedBlocks(blocks, module, report, coverMap, excludedWhole);
         for (Source source : sources) {
@@ -170,6 +165,30 @@ final class CoverMapBuilder {
             }
         }
         return coverMap;
+    }
+
+    private static void recordMarkerWarnings(CoverageMarkers markers, ChangeBlocks blocks, PrefixRoutines found,
+                                             ModuleId module, ExclusionReport report, boolean outside) {
+        // Parse the whole module so markers can pair across scope boundaries. Report only
+        // diagnostics whose location or affected range intersects a selected block or method.
+        List<String> warnings = outside
+                ? markers.getWarningsIntersecting((first, last) -> blocks.intersects(first, last)
+                        || found.intersects(first, last))
+                : markers.getWarnings();
+        warnings.forEach(warning -> report.warn(module.getPath() + ":" + warning));
+    }
+
+    private static void recordPrefixRoutines(PrefixRoutines found, ModuleId module, ExclusionReport report,
+                                             Map<String, Integer> routineLines, int prefixedLines, boolean inScope) {
+        if (found.isEmpty()) {
+            return;
+        }
+        Map<String, Integer> routinesBySource = new LinkedHashMap<>();
+        found.getRoutines().forEach(routine -> routine.getPrefixes()
+                .forEach(prefix -> routinesBySource.merge(prefix.getSource(), 1, Integer::sum)));
+        report.addPrefixRoutineTotals(module.getPath(), found.getRoutines().size(), prefixedLines, inScope);
+        routinesBySource.forEach((source, count) -> report.recordPrefixRoutines(source, module.getPath(), count,
+                routineLines.getOrDefault(source, 0)));
     }
 
     private static void recordChangeBlocks(ChangeBlocks blocks, ModuleId module, ExclusionReport report,

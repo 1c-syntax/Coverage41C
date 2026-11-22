@@ -221,6 +221,7 @@ class ValidateCommandTest {
 
     @Test
     void resolvesParentTraversalAfterDirectoryLinkBeforeCheckingExport() throws Exception {
+        assumeTrue(tempDir.getFileSystem().supportedFileAttributeViews().contains("posix"));
         Path project = TestUtils.copyConfiguration(tempDir);
         Path source = project.resolve("configuration");
         Path other = Files.createDirectory(project.resolve("other"));
@@ -737,15 +738,23 @@ class ValidateCommandTest {
     }
 
     @Test
-    void markersInsideModuleExcludedByAnotherTeamPassStrictMode() throws Exception {
+    void markersInAnotherTeamsModuleOutsideCoverageScopePassStrictMode() throws Exception {
         Path project = TestUtils.copyConfiguration(tempDir);
         Files.writeString(project.resolve(SIMPLE_MODULE),
-                "Процедура А()\n\t// Cover:off\n\tБ();\n\t// Cover:on\n\t// Cover:auto\n\tВ();\n\t// Cover:on\nКонецПроцедуры\n");
-        File config = config("{'team':'Склад','exclude':{'objects':['CommonModule.ПростойОбщийМодуль']}}");
+                "Процедура А()\n\t// Cover:off\n\tБ();\nКонецПроцедуры\n");
+        Path report = tempDir.resolve("exclusions.json");
+        assertEquals(CommandLine.ExitCode.SOFTWARE, validateProject(project, new StringWriter(),
+                "--strict", "--exclusion-report", report.toString()));
+        assertEquals(List.of(SIMPLE_MODULE + ":2: Cover:off is not closed, excluded up to end of module"),
+                warnings(report));
+
+        File config = config("{'team':'Склад','includeSubsystems':['ПодчиненнаяПодсистема'],"
+                + "'exclude':{'objects':['CommonModule.ПростойОбщийМодуль']}}");
         StringWriter stderr = new StringWriter();
 
-        assertEquals(CommandLine.ExitCode.OK,
-                validateProject(project, stderr, "--config", config.getPath(), "--strict"), stderr.toString());
+        assertEquals(CommandLine.ExitCode.OK, validateProject(project, stderr, "--config", config.getPath(),
+                "--strict", "--exclusion-report", report.toString()), stderr.toString());
+        assertEquals(List.of(), warnings(report));
     }
 
     @Test
@@ -904,6 +913,26 @@ class ValidateCommandTest {
         assertEquals(5, root.get("totalLines").asInt());
         assertEquals(SIMPLE_MODULE, root.get("prefixRoutines").get(0).get("modules").get(0).asText());
         assertTrue(root.get("scope").get("modulesOutOfScope").asInt() > 0);
+    }
+
+    @Test
+    void fileOffDoesNotMakePrefixUnmatchedOrBringModuleIntoScope() throws Exception {
+        Path project = TestUtils.copyConfiguration(tempDir);
+        Files.writeString(project.resolve(SIMPLE_MODULE), "// Cover:file-off\n" + ROUTINE_MODULE_TEXT);
+        File config = config("{'includePrefix':['тест'],'prefixScope':{'routines':true}}");
+        Path report = tempDir.resolve("exclusions.json");
+
+        assertEquals(CommandLine.ExitCode.SOFTWARE, validateProject(project, new StringWriter(), "--config",
+                config.getPath(), "--strict", "--exclusion-report", report.toString()));
+
+        assertEquals(List.of("Coverage scope is empty: no module matches includeSubsystems or includePrefix"),
+                warnings(report));
+        JsonNode root = new ObjectMapper().readTree(report.toFile());
+        assertEquals(0, root.path("totalLines").asInt());
+        JsonNode entry = root.path("prefixRoutines").get(0);
+        assertEquals(2, entry.path("routines").asInt());
+        assertEquals(0, entry.path("includedLines").asInt());
+        assertEquals(0, entry.path("modules").size());
     }
 
     @Test

@@ -74,8 +74,9 @@ class ConversionFileLimitTest {
         Path coverage = directory.resolve("coverage.xml");
         List<String> args = convertTo(coverage);
         assertEquals(0, Coverage41C.getCommandLine().execute(args.toArray(new String[0])));
-        byte[] previous = Files.readAllBytes(coverage);
-        assertTrue(previous.length > 4096);
+        assertTrue(Files.size(coverage) > 4096);
+        byte[] previous = "<coverage/>".getBytes(StandardCharsets.UTF_8);
+        Files.write(coverage, previous);
 
         runUnderFileSizeLimit(args);
         assertArrayEquals(previous, Files.readAllBytes(coverage));
@@ -87,8 +88,9 @@ class ConversionFileLimitTest {
         List<String> args = List.of("validate", "-s", "src/test/resources/configuration",
                 "--config", unmatchedPrefixes().toString(), "--exclusion-report", report.toString());
         assertEquals(0, Coverage41C.getCommandLine().execute(args.toArray(new String[0])));
-        byte[] previous = Files.readAllBytes(report);
-        assertTrue(previous.length > 4096);
+        assertTrue(Files.size(report) > 4096);
+        byte[] previous = "{}".getBytes(StandardCharsets.UTF_8);
+        Files.write(report, previous);
 
         runUnderFileSizeLimit(args);
         assertArrayEquals(previous, Files.readAllBytes(report));

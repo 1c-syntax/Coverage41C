@@ -380,12 +380,13 @@ class ExternalDataProcessorTest {
         try {
             Files.setPosixFilePermissions(forms, PosixFilePermissions.fromString("---------"));
             assumeTrue(!Files.isReadable(forms), "Forms permissions are ineffective for the current user");
-            var conversion = Utils.prepareConversion(metadata, "", "", coverage, null, coverageFile.toFile());
-            Files.delete(outside);
-            Files.createSymbolicLink(outside, export);
+            try (var conversion = Utils.prepareConversion(metadata, "", "", coverage, null, coverageFile.toFile())) {
+                Files.delete(outside);
+                Files.createSymbolicLink(outside, export);
 
-            assertThrows(IllegalArgumentException.class, () -> conversion.writeConversion(coverage, metadata, output));
-            assertFalse(Files.exists(export.resolve("coverage.xml")));
+                assertThrows(IllegalArgumentException.class, () -> conversion.writeConversion(coverage, metadata, output));
+                assertFalse(Files.exists(export.resolve("coverage.xml")));
+            }
         } finally {
             Files.setPosixFilePermissions(forms, permissions);
         }

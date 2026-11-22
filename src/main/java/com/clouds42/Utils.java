@@ -1021,7 +1021,7 @@ public class Utils {
                         }
                         // prefixScope.routines: a module outside scope is partly in it when it has prefixed methods.
                         addModuleOutsideScope(coverageData, module.getUri(), moduleId, rules, report);
-                        if (report.moduleHasPrefixRoutines(moduleId.getPath())) {
+                        if (report.moduleInScopeByPrefixRoutines(moduleId.getPath())) {
                             modulesInScope++;
                             sourceModulesInScope++;
                         } else {
@@ -1103,8 +1103,8 @@ public class Utils {
         // The collector's coverageOutput hook supplies coverage only. A JSON report explicitly
         // addressed to /dev/stdout still goes to the process descriptor.
         OutputStream requestedStream = null;
-        if (coverageToStdout || !measuring && reportToStdout) {
-            // A metadata-only call can name /dev/stdout for JSON before it chooses any coverage stream.
+        if (coverageToStdout || !measuring && (reportToStdout || allowFreshOutputs && stdoutSupplier != null)) {
+            // Prepared conversions may select stdout later. Metadata-only calls can also name /dev/stdout for JSON.
             requestedStream = stdoutSupplier == null ? StandardOutputFile.PROCESS_OUTPUT : stdoutSupplier.get();
         }
         OutputStream reportOutput = measuring && reportToStdout ? StandardOutputFile.PROCESS_OUTPUT : requestedStream;

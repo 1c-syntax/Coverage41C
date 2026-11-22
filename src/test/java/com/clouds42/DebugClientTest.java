@@ -116,7 +116,9 @@ class DebugClientTest {
             protected HttpClient createHttpClient() {
                 return new HttpClient() {
                     @Override
-                    protected void doStart() { }
+                    protected void doStart() {
+                        // Keep the transport idle so this test exercises disposal and its retry.
+                    }
                     @Override
                     protected void doStop() throws Exception {
                         if (stopCalls.incrementAndGet() == 1) {

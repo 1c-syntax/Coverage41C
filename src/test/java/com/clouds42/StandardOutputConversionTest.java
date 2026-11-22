@@ -54,6 +54,23 @@ class StandardOutputConversionTest {
     @TempDir Path directory;
 
     @Test
+    void preparedConversionKeepsTheExplicitStreamWhenAnExistingOutputChangesToStdout() throws Exception {
+        var options = CommandLine.populateCommand(new MetadataOptions(), "-s", "src/test/resources/configuration");
+        var data = new HashMap<URI, Map<BigDecimal, Integer>>();
+        var stream = new ByteArrayOutputStream();
+        Path existing = Files.writeString(directory.resolve("output.xml"), "previous report");
+        Path raw = Path.of("src/test/resources/coverage/internal.xml");
+
+        try (var conversion = Utils.prepareConversion(options, "", "", data, raw.toFile(), existing.toFile(), stream)) {
+            conversion.writeConversion(data, options,
+                    CommandLine.populateCommand(new OutputOptions(), "-f", "GENERIC_COVERAGE"));
+        }
+
+        assertCoverage(stream.toByteArray());
+        assertEquals("previous report", Files.readString(existing));
+    }
+
+    @Test
     void rejectsJsonAtRedirectedStandardOutput() throws Exception {
         Path output = directory.resolve("report.json");
         Process process = convert("--exclusion-report", output.toString())
@@ -214,6 +231,7 @@ class StandardOutputConversionTest {
         Path alias = Files.writeString(directory.resolve("alias"), "previous report");
         Files.createLink(named, alias);
         checkExit(embedded(mode, alias, named).start(), 1);
+        assertTrue(log().contains("must use different files"), log());
         assertEquals("previous report", Files.readString(named));
         assertTrue(Files.isSameFile(named, alias));
     }
@@ -259,6 +277,10 @@ class StandardOutputConversionTest {
                 assertTrue(new String(bytes, StandardCharsets.UTF_8).contains("end_of_record"));
             } else {
                 assertCoverage(bytes);
+                if (format.equals("COBERTURA")) {
+                    var root = Utils.newInputXmlBuilder().parse(new ByteArrayInputStream(bytes)).getDocumentElement();
+                    assertTrue(root.hasAttribute("line-rate"), "Expected Cobertura coverage");
+                }
             }
         }
     }

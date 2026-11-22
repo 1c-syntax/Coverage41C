@@ -371,6 +371,6 @@ Validate coverage configuration and markers without measuring
 >
 > Для интеграционного прогона с установленной платформой 1С, `dbgs`, OneScript и `vrunner` используйте `./gradlew integrationTest`.
 >
-> При встраивании Java-клиент может переопределить `CoverServer.statisticsOutput()` и вернуть `OutputStream`, который передаёт ошибки через `IOException`. Поток заимствуется, сбрасывается после записи и остаётся открытым. CLI отправляет статистику в системный stderr; `System.setErr` управляет потоком журналирования. Для отчётов сборщика в stdout можно переопределить `CoverServer.coverageOutput()` с тем же контрактом. Для `start`, `convert` и `validate` Java-клиент может передать свой поток через `Coverage41C.getCommandLine(OutputStream)`. Без явного потока используется `System.out`.
+> При встраивании Java-клиент может переопределить `CoverServer.statisticsOutput()` и вернуть `OutputStream`, который передаёт ошибки через `IOException`. Поток заимствуется, сбрасывается после записи и остаётся открытым. CLI отправляет статистику в системный stderr; `System.setErr` управляет потоком журналирования. Для отчётов сборщика в stdout можно переопределить `CoverServer.coverageOutput()` с тем же контрактом. Для `start`, `convert` и `validate` Java-клиент может передать через `Coverage41C.getCommandLine(OutputStream)` поток, который передаёт ошибки через `IOException`. Перегрузка с аргументом отклоняет `PrintStream`. Для записи в `System.out` используйте `getCommandLine()`.
 
 </details>

@@ -21,6 +21,7 @@
  */
 package com.clouds42;
 
+import com.sun.jna.Platform;
 import com.sun.nio.file.ExtendedOpenOption;
 
 
@@ -65,8 +66,18 @@ import java.util.function.Function;
 final class ConversionOutput {
     private ConversionOutput() { }
 
-    private static final FileKeys SYSTEM_FILE_KEYS =
-            new FileKeys(true, BasicFileAttributes::fileKey, ConversionOutput::windowsFileKey);
+    private static final FileKeys SYSTEM_FILE_KEYS = Platform.isLinux()
+            ? new FileKeys(true, attributes -> null, ConversionOutput::linuxFileKey)
+            : new FileKeys(true, BasicFileAttributes::fileKey, ConversionOutput::windowsFileKey);
+
+    private static Object linuxFileKey(Path path, LinkOption... options) throws IOException {
+        if (path.getFileSystem() != FileSystems.getDefault()) {
+            return Files.readAttributes(path, BasicFileAttributes.class, options).fileKey();
+        }
+        var attributes = Files.readAttributes(path, "unix:dev,ino", options);
+        return StandardOutputFile.fileKey(((Number) attributes.get("dev")).longValue(),
+                ((Number) attributes.get("ino")).longValue());
+    }
 
     @FunctionalInterface
     interface NativeFileKey {
@@ -122,6 +133,37 @@ final class ConversionOutput {
             WindowsFiles.writeCheckedReport(path, identity, writer);
         } else {
             PosixFiles.writeCheckedReport(path, identity, writer);
+        }
+    }
+
+    static PosixFiles.OpenReport openLinuxMeasurementOutput(Path path, Object expected) throws IOException {
+        synchronized (Destination.class) {
+            Destination.rejectActive(path, expected);
+            PosixFiles.OpenReport report = PosixFiles.openReport(path, true);
+            Object actual = null;
+            boolean identified = false;
+            try {
+                actual = report.linuxFileKey();
+                identified = true;
+                if (!expected.equals(actual)) {
+                    throw new IOException("Coverage output changed before it could be written: " + path);
+                }
+                report.lockOnLinux();
+                return report;
+            } catch (IOException | RuntimeException error) {
+                try {
+                    // Even a rejected open can land on an inode already locked by this JVM.
+                    if (!identified && !Destination.ACTIVE.isEmpty()) {
+                        Destination.REJECTED_CHANNELS.add(new Destination.RejectedChannel(report, path,
+                                Set.of(expected), Set.copyOf(Destination.ACTIVE)));
+                    } else {
+                        Destination.closeAfterUse(actual, report);
+                    }
+                } catch (IOException cleanup) {
+                    error.addSuppressed(cleanup);
+                }
+                throw error;
+            }
         }
     }
 
@@ -1041,7 +1083,7 @@ final class ConversionOutput {
         private static final Set<Destination> ACTIVE = new HashSet<>();
         private static final List<RejectedChannel> REJECTED_CHANNELS = new ArrayList<>();
 
-        private record RejectedChannel(FileChannel channel, Path path, Set<Object> observedKeys,
+        private record RejectedChannel(Closeable channel, Path path, Set<Object> observedKeys,
                                        Set<Destination> possibleOwners) {}
 
         private final Object fileKey;
@@ -1049,7 +1091,7 @@ final class ConversionOutput {
         private final FileChannel channel;
         private final FileLock lock;
         private boolean keepChannel;
-        private final List<FileChannel> deferredClose = new ArrayList<>();
+        private final List<Closeable> deferredClose = new ArrayList<>();
         private final Access access;
         private final Temporary privateName;
         private final WindowsFiles.PendingOutput pendingOutput;
@@ -1222,9 +1264,9 @@ final class ConversionOutput {
         }
 
         // Closing a second descriptor can release this JVM's POSIX lock on the same inode.
-        private static synchronized void closeAfterUse(Object fileKey, FileChannel channel) throws IOException {
+        private static synchronized void closeAfterUse(Object fileKey, Closeable channel) throws IOException {
             for (Destination active : ACTIVE) {
-                if (fileKey.equals(active.fileKey)) {
+                if (fileKey != null && fileKey.equals(active.fileKey)) {
                     active.deferredClose.add(channel);
                     return;
                 }
@@ -1448,7 +1490,7 @@ final class ConversionOutput {
                     return true;
                 });
                 IOException failure = null;
-                for (FileChannel descriptor : deferredClose) {
+                for (Closeable descriptor : deferredClose) {
                     try {
                         descriptor.close();
                     } catch (IOException error) {

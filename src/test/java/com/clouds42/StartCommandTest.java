@@ -144,11 +144,14 @@ class StartCommandTest {
     void newTargetAttachFailureDoesNotDiscardLaterMeasures() throws Exception {
         Future<Integer> start = start();
         dbgs.fail("attachDetachDbgTargets", 503);
-        dbgs.deliver(FakeDebugServer.targetStarted(UUID.randomUUID()));
+        UUID target = UUID.randomUUID();
+        dbgs.deliver(FakeDebugServer.targetStarted(target));
         dbgs.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 10, 1));
         assertEquals(0, send(PipeMessages.EXIT_COMMAND));
         assertEquals(0, start.get(TIMEOUT, TimeUnit.SECONDS));
         assertEquals(Map.of(2, false, 10, true, 11, false), coverage());
+        assertTrue(dbgs.requests("attachDetachDbgTargets").stream()
+                .anyMatch(request -> request.body.contains(target.toString())), "No attachment request for the new target");
     }
 
     @Test
@@ -763,12 +766,37 @@ class StartCommandTest {
         } finally {
             dbgs.resume("pingDebugUIParams");
             dbgs.resume("getDbgTargets");
-            clock.resumeRealTime();
         }
 
         assertEquals(CommandLine.ExitCode.OK, stop.get(TIMEOUT, TimeUnit.SECONDS));
         assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
         assertEquals(Map.of(2, false, 10, true, 11, false), coverage());
+    }
+
+    @Test
+    void timelyQuietFinalPollIsConfirmedBeforeADeferredAttachment() throws Exception {
+        FinalPollClock clock = new FinalPollClock();
+        Future<Integer> collector = start(startCommandLine(System::nanoTime, clock));
+        UUID target = UUID.randomUUID();
+        dbgs.pause("pingDebugUIParams");
+        dbgs.pause("attachDetachDbgTargets", body -> body.contains(target.toString()));
+
+        try {
+            dbgs.awaitPaused("pingDebugUIParams");
+            dbgs.deliverAcrossFinalPolls(List.of(List.of(), List.of(FakeDebugServer.targetStarted(target))));
+            Future<Integer> stop = executor.submit(() -> send(PipeMessages.EXIT_COMMAND));
+            waitForFinalMeasureThread();
+            clock.advance(AFTER_OBSERVATION_WINDOW);
+            dbgs.resume("pingDebugUIParams");
+            dbgs.awaitPaused("attachDetachDbgTargets");
+            clock.advance(TEST_FINAL_CONFIRMATION_TIMEOUT);
+
+            assertEquals(CommandLine.ExitCode.OK, stop.get(TIMEOUT, TimeUnit.SECONDS));
+        } finally {
+            dbgs.resume("pingDebugUIParams");
+            dbgs.resume("attachDetachDbgTargets");
+        }
+        assertEquals(CommandLine.ExitCode.OK, collector.get(TIMEOUT, TimeUnit.SECONDS));
     }
 
     @Test
@@ -3195,8 +3223,10 @@ class StartCommandTest {
                 if (expectFailure && !args[1].equals("device")) {
                     broken[0] = false;
                     collected.reset();
-                    if (closed[0]) {
+                    if (args[1].equals("closed")) {
                         statisticsSink = collected;
+                    } else if (closed[0]) {
+                        throw new AssertionError("Collector closed the borrowed statistics stream");
                     }
                     recovered = Coverage41C.getCommandLine().execute("stats", "-i", alias, "-u", server.url());
                     if (!collected.toString().contains("Covered lines")) {
@@ -3423,8 +3453,7 @@ class StartCommandTest {
             NodeList lineNodes = file.getElementsByTagName("lineToCover");
             for (int j = 0; j < lineNodes.getLength(); j++) {
                 Element line = (Element) lineNodes.item(j);
-                lines.put(Integer.parseInt(line.getAttribute("lineNumber")),
-                        Boolean.parseBoolean(line.getAttribute("covered")));
+                lines.put(Integer.parseInt(line.getAttribute("lineNumber")), TestUtils.parseCovered(line));
             }
             return lines;
         }

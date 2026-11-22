@@ -38,7 +38,7 @@ final class EdtProbeOptions {
             "--add-modules", "--limit-modules", "--add-reads", "--add-exports", "--add-opens",
             "--patch-module", "--enable-native-access", "--source");
 
-    private enum Syntax { JVM_ENVIRONMENT, ARGUMENT_FILE, SHELL_OPTIONS }
+    private enum Syntax { JVM_ENVIRONMENT, ARGUMENT_FILE }
 
     private EdtProbeOptions() { }
 
@@ -46,9 +46,10 @@ final class EdtProbeOptions {
         List<String> options = fromVmArguments(tokens(readOptionGroup(input), Syntax.JVM_ENVIRONMENT));
         List<String> launcher = tokens(readOptionGroup(input), Syntax.JVM_ENVIRONMENT);
         options.addAll(fromVmArguments(tokens(readOptionGroup(input), Syntax.JVM_ENVIRONMENT)));
-        // The launcher splits on shell whitespace and rejoins the words before eval parses the quotes.
-        String scriptOptions = readOptionGroup(input).replaceAll("[ \t\n]+", " ");
-        launcher.addAll(tokens(scriptOptions, Syntax.SHELL_OPTIONS));
+        int scriptArgCount = Integer.parseInt(readOptionGroup(input));
+        for (int i = 0; i < scriptArgCount; i++) {
+            launcher.add(readOptionGroup(input));
+        }
         addLauncherOptions(launcher, options);
         return options;
     }
@@ -171,10 +172,6 @@ final class EdtProbeOptions {
                 } else {
                     token.append(unescape(c));
                 }
-            } else if (syntax == Syntax.SHELL_OPTIONS && c == '\\' && i + 1 < text.length()
-                    && shellEscapes(text.charAt(i + 1), quote)) {
-                token.append(text.charAt(++i));
-                started = true;
             } else if (whitespace(c, syntax) && (quote == 0 || (argumentFile && (c == '\r' || c == '\n')))) {
                 if (started) {
                     result.add(token.toString());
@@ -193,14 +190,9 @@ final class EdtProbeOptions {
         return result;
     }
 
-    private static boolean shellEscapes(char next, char quote) {
-        return quote == 0 || (quote == '"' && (next == '"' || next == '\\' || next == '$' || next == '`'));
-    }
-
     private static boolean whitespace(char c, Syntax syntax) {
         // OpenJDK also treats vertical tab as whitespace in environment variables.
-        return c == ' ' || c == '\t' || c == '\n'
-                || (syntax != Syntax.SHELL_OPTIONS && (c == '\r' || c == '\f'))
+        return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f'
                 || (syntax == Syntax.JVM_ENVIRONMENT && c == 0x0b);
     }
 

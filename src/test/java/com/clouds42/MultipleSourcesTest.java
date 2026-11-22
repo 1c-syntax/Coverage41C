@@ -698,34 +698,48 @@ class MultipleSourcesTest {
     }
 
     @Test
+    void sourceFormatMarkerCanAlsoBeAnOrdinaryObjectIdentifier() {
+        String key = SourceKey.moduleKey("source-v1", "module.2");
+
+        assertFalse(SourceKey.isQualified(key));
+        assertEquals("source-v1/module.2", SourceKey.normalizeRawKey(key, false));
+        assertThrows(IllegalArgumentException.class,
+                () -> SourceKey.normalizeRawKey("source-v1/-/-/object", true));
+    }
+
+    @Test
     void allFormatsKeepBothPathsAndUncoveredLines() throws Exception {
         assertEquals(0, convert("--source", "=configuration", "--source", "A=extensions/A", "-f", "LCOV"));
         List<List<String>> lcovRecords = Arrays.stream(Files.readString(output).split("end_of_record"))
                 .map(record -> record.lines().toList()).toList();
         List<String> paths = List.of("configuration/" + MODULE, "extensions/A/" + MODULE);
-        for (String path : paths) {
+        for (int index = 0; index < paths.size(); index++) {
+            String path = paths.get(index);
             List<String> record = lcovRecords.stream().filter(lines -> lines.contains("SF:" + path))
                     .findFirst().orElseThrow(() -> new AssertionError("Missing LCOV record for " + path));
+            assertTrue(record.contains("DA:2," + index), path);
+            assertTrue(record.contains("DA:4," + (1 - index)), path);
             assertTrue(record.contains("DA:6,0"), path);
         }
 
         assertEquals(0, convert("--source", "=configuration", "--source", "A=extensions/A", "-f", "COBERTURA"));
         NodeList classes = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(output.toFile())
                 .getElementsByTagName("class");
-        Map<String, String> hitsByPath = new LinkedHashMap<>();
+        Map<String, Map<String, String>> hitsByPath = new LinkedHashMap<>();
         for (int i = 0; i < classes.getLength(); i++) {
             Element coberturaClass = (Element) classes.item(i);
             NodeList lines = coberturaClass.getElementsByTagName("line");
+            Map<String, String> hits = new LinkedHashMap<>();
             for (int j = 0; j < lines.getLength(); j++) {
                 Element line = (Element) lines.item(j);
-                if ("6".equals(line.getAttribute("number"))) {
-                    hitsByPath.put(coberturaClass.getAttribute("filename"), line.getAttribute("hits"));
-                }
+                assertNull(hits.put(line.getAttribute("number"), line.getAttribute("hits")));
             }
+            assertNull(hitsByPath.put(coberturaClass.getAttribute("filename"), hits));
         }
-        for (String path : paths) {
-            assertEquals("0", hitsByPath.get(path), path);
-        }
+        assertEquals(Map.of("2", "0", "4", "1", "6", "0"),
+                hitsByPath.get(paths.get(0)), paths.get(0));
+        assertEquals(Map.of("2", "1", "4", "0", "6", "0"),
+                hitsByPath.get(paths.get(1)), paths.get(1));
     }
 
     void writeRaw(String first, int firstLine, String second, int secondLine) throws Exception {
@@ -753,7 +767,9 @@ class MultipleSourcesTest {
             NodeList lineNodes = element.getElementsByTagName("lineToCover");
             for (int j = 0; j < lineNodes.getLength(); j++) {
                 Element line = (Element) lineNodes.item(j);
-                lines.put(Integer.valueOf(line.getAttribute("lineNumber")), Boolean.valueOf(line.getAttribute("covered")));
+                int number = Integer.parseInt(line.getAttribute("lineNumber"));
+                assertNull(lines.put(number, TestUtils.parseCovered(line)),
+                        "Duplicate line " + number + " in " + element.getAttribute("path"));
             }
             assertNull(result.put(element.getAttribute("path"), lines), "Duplicate file in coverage");
         }

@@ -242,6 +242,63 @@ for type in RDBGSetMeasureModeRequest impl/RDBGSetMeasureModeRequestImpl; do
     done
 done
 
+# Exercise constructor linkage without initializing the application callers.
+mkdir -p "$fixture/linkage/lib" "$fixture/linkage/classes/META-INF/coverage41c"
+for jar in "$application_lib"/*.jar; do
+    case "${jar##*/}" in
+        Coverage41C-*) cp "$jar" "$fixture/linkage/lib/"; linkage_jar="$fixture/linkage/lib/${jar##*/}" ;;
+        *) ln -s "$jar" "$fixture/linkage/lib/" ;;
+    esac
+done
+cat > "$fixture/linkage/Callers.java" <<'JAVA'
+package fixture;
+import com._1c.g5.v8.dt.debug.core.runtime.client.RuntimeDebugClientException;
+class SuperCall extends RuntimeDebugClientException {
+    SuperCall() { super("fixture"); }
+}
+class Allocation extends RuntimeDebugClientException {
+    Allocation() { super("fixture"); }
+    RuntimeDebugClientException create() { return new RuntimeDebugClientException("fixture"); }
+}
+class ConstructorHandle extends RuntimeDebugClientException {
+    ConstructorHandle() { super("fixture"); }
+    java.util.function.Function<String, RuntimeDebugClientException> factory() {
+        return RuntimeDebugClientException::new;
+    }
+}
+JAVA
+"${java_bin}javac" -proc:none --release 11 -cp "$fixture/second/plugins/*" \
+    -d "$fixture/linkage/classes" "$fixture/linkage/Callers.java"
+cat > "$fixture/linkage/RuntimeDebugClientException.java" <<'JAVA'
+package com._1c.g5.v8.dt.debug.core.runtime.client;
+public class RuntimeDebugClientException extends Exception {
+    protected RuntimeDebugClientException(String message) { super(message); }
+}
+JAVA
+"${java_bin}javac" -proc:none --release 11 -d "$fixture/linkage/sdk" "$fixture/linkage/RuntimeDebugClientException.java"
+for jar in "$fixture/first/plugins"/com._1c.g5.v8.dt.debug.core_[0-9]*.jar; do
+    "${java_bin}jar" uf "$jar" -C "$fixture/linkage/sdk" .
+done
+member='com._1c.g5.v8.dt.debug.core.runtime.client.RuntimeDebugClientException <init> (Ljava/lang/String;)V'
+for invocation in SuperCall Allocation ConstructorHandle; do
+    manifest="$fixture/linkage/classes/META-INF/coverage41c/required-members.txt"
+    printf '%s\n' "invokespecial $member fixture.$invocation" > "$manifest"
+    if [ "$invocation" = ConstructorHandle ]; then
+        printf '%s\n' "newinvokespecial $member fixture.$invocation" >> "$manifest"
+    fi
+    "${java_bin}jar" uf "$linkage_jar" -C "$fixture/linkage/classes" .
+    linked=1
+    "$REAL_JAVA" --add-opens=java.base/java.net=ALL-UNNAMED -cp "$fixture/linkage/lib/*" com.clouds42.EdtLocation \
+        --probe "$fixture/first/plugins" "$fixture/first/plugins/"*.jar && linked=0
+    case "$invocation:$linked" in
+        SuperCall:0|Allocation:1|ConstructorHandle:1) echo "PASS protected EDT constructor $invocation" ;;
+        *) echo "FAIL protected EDT constructor $invocation" >&2; exit 1 ;;
+    esac
+done
+for jar in "$fixture/first/plugins"/com._1c.g5.v8.dt.debug.core_[0-9]*.jar; do
+    cp "$fixture/second/plugins/${jar##*/}" "$jar"
+done
+
 # Exercise broken static initialization in a fresh probe JVM. The first candidate
 # must neither poison EMF's registry for the second one nor block discovery.
 mkdir -p "$fixture/replacement"

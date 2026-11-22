@@ -115,6 +115,18 @@ class CommandLineOptionsTest {
     }
 
     @Test
+    void readingInferredProjectDoesNotDiscardTheConfiguredSource() throws Exception {
+        MetadataOptions options = new MetadataOptions();
+        options.setSrcDirName("configuration");
+
+        assertEquals("configuration", options.getProjectDirName());
+        assertEquals("", options.getSrcDirName());
+
+        options.setProjectDirName("project");
+        assertEquals(Path.of("project", "configuration"), options.getSourceDirectories("").get(""));
+    }
+
+    @Test
     void debuggerUrlComesFromFile() throws Exception {
         Path file = tempDir.resolve("dbgs.url");
         Files.writeString(file, "127.0.0.1:1561\n");

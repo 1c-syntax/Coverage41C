@@ -87,8 +87,10 @@ class PrefixRoutinesTest {
 
         assertEquals(List.of(DEMO_LATIN), routines.getRoutines().get(0).getPrefixes());
         assertEquals(List.of(DEMO), routines.getRoutines().get(1).getPrefixes());
-        assertEquals(List.of(DEMO), routines.routineAt(3).getPrefixes());
-        assertEquals(null, routines.routineAt(5));
+        PrefixRoutines.LineSweep sweep = routines.lineSweep();
+        assertEquals(Set.of(DEMO_LATIN.getSource()), sweep.prefixSourcesAt(2));
+        assertEquals(Set.of(DEMO.getSource()), sweep.prefixSourcesAt(3));
+        assertEquals(Set.of(), sweep.prefixSourcesAt(5));
     }
 
     @Test

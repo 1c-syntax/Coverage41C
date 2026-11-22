@@ -214,7 +214,8 @@ public abstract class CoverServer {
 
     private static final class UnixSocketLock implements AutoCloseable {
         private static final NativeFileLock NATIVE = Native.load(Platform.C_LIBRARY_NAME, NativeFileLock.class);
-        private static final int O_NOFOLLOW = OS.contains("linux") ? 0x20000 : 0x100;
+        private static final int LINUX_NOFOLLOW = Platform.isARM() || Platform.isPPC() ? 0x8000 : 0x20000;
+        private static final int O_NOFOLLOW = Platform.isLinux() ? LINUX_NOFOLLOW : 0x100;
         private static final int LOCK_EXCLUSIVE_NONBLOCKING = 2 | 4;
         private static final int EWOULDBLOCK = OS.contains("linux") ? 11 : 35;
         // Closing any descriptor of this inode can release this JVM's POSIX compatibility lock.
@@ -337,7 +338,7 @@ public abstract class CoverServer {
             Map<String, Object> attributes = Files.readAttributes(path, "unix:mode,fileKey", LinkOption.NOFOLLOW_LINKS);
             int mode = (Integer) attributes.get("mode");
             // The high mode bits distinguish a socket from regular files and symbolic links.
-            return (mode & 0170000) == 0140000 ? attributes.get("fileKey") : null;
+            return (mode & 0_170000) == 0_140000 ? attributes.get("fileKey") : null;
         } catch (NoSuchFileException e) {
             return null;
         }

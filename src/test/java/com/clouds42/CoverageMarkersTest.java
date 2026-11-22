@@ -189,8 +189,7 @@ class CoverageMarkersTest {
     void brokenModuleDoesNotBreakInlineMarker() {
         CoverageMarkers markers = assertDoesNotThrow(() -> parse(
                 "Процедура А(", "\tБ(); // Cover:off", "\tЕсли Тогда", "КонецПроцедуры"));
-        assertEquals(1, markers.getMarkers().size());
-        assertEquals(2, markers.getMarkers().get(0).getStartLine());
+        assertEquals(List.of("OFF Cover:off 2..2"), ranges(markers));
     }
 
     @Test

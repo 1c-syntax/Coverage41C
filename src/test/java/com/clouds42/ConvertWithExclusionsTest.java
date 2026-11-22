@@ -38,6 +38,7 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -695,6 +696,12 @@ class ConvertWithExclusionsTest {
         var permissions = Files.getPosixFilePermissions(directory);
         Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("r-x------"));
         try {
+            try {
+                Files.delete(Files.createFile(directory.resolve("permission-probe")));
+                assumeTrue(false, "Directory permissions are ineffective for the current user");
+            } catch (AccessDeniedException expected) {
+                // The converter must update both existing files without creating a file here.
+            }
             StringWriter stderr = new StringWriter();
             assertEquals(CommandLine.ExitCode.OK, convert(project, Path.of(INTERNAL_XML), output, stderr,
                     "--exclusion-report", report.toString()), stderr.toString());
@@ -1099,10 +1106,11 @@ class ConvertWithExclusionsTest {
             NodeList lineNodes = file.getElementsByTagName("lineToCover");
             for (int j = 0; j < lineNodes.getLength(); j++) {
                 Element line = (Element) lineNodes.item(j);
-                lines.put(Integer.parseInt(line.getAttribute("lineNumber")),
-                        Boolean.parseBoolean(line.getAttribute("covered")));
+                int number = Integer.parseInt(line.getAttribute("lineNumber"));
+                assertNull(lines.put(number, TestUtils.parseCovered(line)),
+                        "Duplicate line " + number + " in " + file.getAttribute("path"));
             }
-            result.put(file.getAttribute("path"), lines);
+            assertNull(result.put(file.getAttribute("path"), lines), "Duplicate file in coverage");
         }
         return result;
     }

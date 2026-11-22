@@ -72,8 +72,11 @@ class ExclusionConfigTest {
         Files.createDirectory(configDir.resolve("nested"));
         write(configDir.resolve("nested/broken.json"), "{'includeSubsystems':['НесуществующаяПодсистема']}");
 
-        assertEquals(coveredFiles(new File("src/test/resources/config/coverage-child-subsystems.json")),
-                coveredFiles(configDir.toFile()));
+        Set<String> covered = coveredFiles(configDir.toFile());
+        assertEquals(coveredFiles(new File("src/test/resources/config/coverage-child-subsystems.json")), covered);
+        assertTrue(covered.stream().anyMatch(path -> path.contains("/Catalogs/Справочник1/")), covered.toString());
+        assertTrue(covered.stream().anyMatch(path -> path.contains("/ChartsOfAccounts/ПланСчетов1/")), covered.toString());
+        assertFalse(covered.stream().anyMatch(path -> path.contains("/Documents/Документ1/")), covered.toString());
     }
 
     @Test
@@ -226,7 +229,17 @@ class ExclusionConfigTest {
         assertEquals(0, convert(config, output, stderr, "-f", "LCOV"), stderr.toString());
 
         String lcov = Files.readString(output);
-        assertTrue(lcov.contains("/Catalogs/Справочник1/"), lcov);
+        String hitModule = "/Catalogs/Справочник1/Ext/ObjectModule.bsl";
+        String noHitModule = "/Catalogs/Справочник1/Forms/ФормаВыбора/Ext/Form/Module.bsl";
+        String recordWithHits = Arrays.stream(lcov.split("end_of_record"))
+                .filter(record -> record.lines().anyMatch(line -> line.startsWith("SF:") && line.endsWith(hitModule)))
+                .findFirst().orElseThrow(() -> new AssertionError("Missing LCOV record for " + hitModule));
+        assertTrue(recordWithHits.lines().anyMatch(line -> line.startsWith("DA:3,") && !line.equals("DA:3,0")),
+                recordWithHits);
+        String recordWithoutHits = Arrays.stream(lcov.split("end_of_record"))
+                .filter(record -> record.lines().anyMatch(line -> line.startsWith("SF:") && line.endsWith(noHitModule)))
+                .findFirst().orElseThrow(() -> new AssertionError("Missing LCOV record for " + noHitModule));
+        assertFalse(recordWithoutHits.lines().anyMatch(line -> line.startsWith("DA:")), recordWithoutHits);
         for (String record : lcov.split("end_of_record")) {
             if (!record.contains("SF:")) {
                 continue;

@@ -30,7 +30,9 @@ import org.antlr.v4.runtime.tree.Trees;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
@@ -114,20 +116,15 @@ final class PrefixRoutines {
     }
 
     boolean covers(int line) {
-        return routineAt(line) != null;
+        return intersects(line, line);
     }
 
     boolean intersects(int firstLine, int lastLine) {
         return routines.stream().anyMatch(routine -> routine.beginLine <= lastLine && firstLine <= routine.endLine);
     }
 
-    Routine routineAt(int line) {
-        for (Routine routine : routines) {
-            if (routine.beginLine <= line && line <= routine.endLine) {
-                return routine;
-            }
-        }
-        return null;
+    LineSweep lineSweep() {
+        return new LineSweep(routines);
     }
 
     List<Routine> getRoutines() {
@@ -136,6 +133,35 @@ final class PrefixRoutines {
 
     List<String> getWarnings() {
         return warnings;
+    }
+
+    static final class LineSweep {
+        private final List<Routine> routines;
+        private final List<Routine> active = new ArrayList<>();
+        private final Set<String> sources = new HashSet<>();
+        private int next;
+
+        private LineSweep(List<Routine> routines) {
+            this.routines = routines;
+        }
+
+        // Call with ascending line numbers. The result is reused on the next call.
+        Set<String> prefixSourcesAt(int line) {
+            active.removeIf(routine -> routine.endLine < line);
+            while (next < routines.size() && routines.get(next).beginLine <= line) {
+                Routine routine = routines.get(next++);
+                if (routine.endLine >= line) {
+                    active.add(routine);
+                }
+            }
+            sources.clear();
+            for (Routine routine : active) {
+                for (ExclusionRules.ScopePrefix prefix : routine.prefixes) {
+                    sources.add(prefix.getSource());
+                }
+            }
+            return sources;
+        }
     }
 
     static final class Routine {

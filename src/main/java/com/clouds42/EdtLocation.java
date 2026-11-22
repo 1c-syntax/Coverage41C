@@ -31,6 +31,7 @@ import java.io.UncheckedIOException;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.lang.management.ManagementFactory;
+import java.lang.reflect.Modifier;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.URLClassLoader;
@@ -313,7 +314,6 @@ public final class EdtLocation {
                 String name = member[2];
                 String descriptor = member[3];
                 Class<?> caller = Class.forName(member[4], false, loader);
-                // In particular, a public lookup cannot resolve a protected super constructor.
                 MethodHandles.Lookup lookup = MethodHandles.privateLookupIn(caller, MethodHandles.lookup());
                 String opcode = member[0];
                 if (descriptor.startsWith("(")) {
@@ -334,9 +334,12 @@ public final class EdtLocation {
                         case "invokestatic":
                             lookup.findStatic(owner, name, signature);
                             break;
+                        case "newinvokespecial":
+                            lookup.findConstructor(owner, signature);
+                            break;
                         case "invokespecial":
                             if ("<init>".equals(name)) {
-                                lookup.findConstructor(owner, signature);
+                                linkConstructor(lookup, owner, signature);
                             } else {
                                 lookup.findSpecial(owner, name, signature, caller);
                             }
@@ -367,6 +370,27 @@ public final class EdtLocation {
             return true;
         } catch (ReflectiveOperationException | LinkageError | RuntimeException e) {
             return false;
+        }
+    }
+
+    private static void linkConstructor(MethodHandles.Lookup lookup, Class<?> owner, MethodType signature)
+            throws ReflectiveOperationException {
+        try {
+            lookup.findConstructor(owner, signature);
+        } catch (IllegalAccessException e) {
+            Class<?> caller = lookup.lookupClass();
+            if (caller.getSuperclass() != owner) {
+                throw e;
+            }
+            lookup.accessClass(owner);
+            MethodHandles.Lookup ownerLookup = MethodHandles.privateLookupIn(owner, MethodHandles.lookup());
+            int modifiers = ownerLookup.revealDirect(ownerLookup.findConstructor(owner, signature)).getModifiers();
+            if (!Modifier.isProtected(modifiers)) {
+                throw e;
+            }
+            // Verify the caller without running its code. The verifier rejects new Owner()
+            // on a protected constructor across packages and permits the subclass's super().
+            caller.getDeclaredConstructors();
         }
     }
 

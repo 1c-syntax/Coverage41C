@@ -175,7 +175,7 @@ class CoverageTest {
                     "--additional", additionalTestManagerArguments,
                     "--vanessasettings", vbParamsFile.getAbsolutePath());
             Process vrunnerVanessaProcess = vrunnerVanessaProcessBuilder.inheritIO().start();
-            vrunnerVanessaProcess.waitFor();
+            assertEquals(0, vrunnerVanessaProcess.waitFor(), "Vanessa scenario failed");
 
             Thread.sleep(1500); // wait for measure results
             assertEquals(0, send(PipeMessages.DUMP_COMMAND));

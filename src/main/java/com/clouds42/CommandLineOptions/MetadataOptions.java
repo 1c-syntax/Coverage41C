@@ -46,10 +46,10 @@ public class MetadataOptions {
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     @Option(names = {"-s", "--srcDir"}, description = "Directory with sources exported to xml", defaultValue = "")
-    private String srcDirName;
+    private String srcDirName = "";
 
     @Option(names = {"-P", "--projectDir"}, description = "Directory with project", defaultValue = "")
-    private String projectDirName;
+    private String projectDirName = "";
 
     @Option(names = {"-r", "--removeSupport"}, description = "Remove support values: ${COMPLETION-CANDIDATES}. Default - ${DEFAULT-VALUE}", defaultValue = "NONE")
     private SupportVariant removeSupport;
@@ -176,42 +176,35 @@ public class MetadataOptions {
         }
     }
 
-    private void updatePaths() {
-        if (hasMultipleSources()) {
-            return;
+    private record SourcePaths(String project, String source) { }
+
+    private SourcePaths sourcePaths() {
+        if (hasMultipleSources() || !projectDirName.isEmpty() || srcDirName.isEmpty()) {
+            return new SourcePaths(projectDirName, srcDirName);
         }
-        if (projectDirName.isEmpty() && !srcDirName.isEmpty()) {
-            Path source = Path.of(srcDirName);
-            if (Files.isRegularFile(source)) {
-                Path descriptor = source.toAbsolutePath();
-                if (Files.isSymbolicLink(descriptor)) {
-                    try {
-                        projectDirName = descriptor.toRealPath().getParent().toString();
-                    } catch (IOException error) {
-                        throw new IllegalArgumentException("Cannot resolve source file: " + descriptor, error);
-                    }
-                    // Keep the supplied path as an input even though report paths use the physical directory.
-                    srcDirName = descriptor.toString();
-                } else {
-                    projectDirName = descriptor.getParent().toString();
-                    srcDirName = descriptor.getFileName().toString();
-                }
-            } else {
-                // With only -s, a directory defines both project and source roots.
-                projectDirName = srcDirName;
-                srcDirName = "";
-            }
+        Path source = Path.of(srcDirName);
+        if (!Files.isRegularFile(source)) {
+            // With only -s, a directory defines both project and source roots.
+            return new SourcePaths(srcDirName, "");
+        }
+        Path descriptor = source.toAbsolutePath();
+        if (!Files.isSymbolicLink(descriptor)) {
+            return new SourcePaths(descriptor.getParent().toString(), descriptor.getFileName().toString());
+        }
+        try {
+            // Preserve the supplied path as an input while anchoring report paths to its physical directory.
+            return new SourcePaths(descriptor.toRealPath().getParent().toString(), descriptor.toString());
+        } catch (IOException error) {
+            throw new IllegalArgumentException("Cannot resolve source file: " + descriptor, error);
         }
     }
 
     public String getSrcDirName() {
-        updatePaths();
-        return srcDirName;
+        return sourcePaths().source();
     }
 
     public String getProjectDirName() {
-        updatePaths();
-        return projectDirName;
+        return sourcePaths().project();
     }
 
     public SupportVariant getRemoveSupport() {

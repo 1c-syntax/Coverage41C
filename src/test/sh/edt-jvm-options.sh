@@ -23,6 +23,10 @@ cat > "$fixture/bin/java" <<'JAVA'
 case " $* " in
     *' com.clouds42.EdtLocation '*)
         case " $* " in *private-marker*) echo 'Private options reached selector argv' >&2; exit 1 ;; esac
+        if [ -n "${JAVA_TOOL_OPTIONS+x}${JDK_JAVA_OPTIONS+x}${_JAVA_OPTIONS+x}${JAVA_OPTS+x}${COVERAGE41_C_OPTS+x}" ]; then
+            echo 'Options reached selector environment' >&2
+            exit 1
+        fi
         [ "${EDT_SELECTOR_NOISE:-}" != 1 ] || printf '%s\n' 'unrelated selector stdout'
         [ "${EDT_SELECTOR_DUPLICATE:-}" != 1 ] || printf '%s\n' 'COVERAGE41C_EDT_LOCATION=/untrusted'
         [ "${EDT_SELECTOR_FAIL:-}" != 1 ] || exit 23
@@ -65,7 +69,7 @@ for source in JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS JAVA_OPTS; do
             agent) flags= ;;
         esac
         marker="$fixture/$source-$kind.agent"
-        flags="$flags -javaagent:$fixture/agent.jar=$marker -Dcoverage41c.option=preserved"
+        flags="$flags \"-javaagent:$fixture/agent.jar=$marker\" -Dcoverage41c.option=preserved"
         if run_launcher env "$source=$flags" > "$fixture/output" 2> "$fixture/errors" \
                 && grep -Fxq "$version" "$fixture/output" \
                 && [ "$(cat "$marker")" = preserved ] && assert_clean_ipc; then
@@ -173,6 +177,13 @@ check_sdk() {
     fi
 }
 case $(uname) in CYGWIN*|MSYS*|MINGW*) separator=';' ;; *) separator=: ;; esac
+literal="$fixture/literal-\$HOME"
+mkdir -p "$literal/plugins"
+cp "$fixture/first/plugins/"*.jar "$literal/plugins/"
+scenario='ring preserves a literal dollar sign in the SDK path'
+check_sdk "$literal" EDT_FIXTURE_FIRST="$literal"
+scenario='explicit EDT preserves a literal dollar sign in the SDK path'
+check_sdk "$literal" EDT_LOCATION="$literal/plugins" EDT_EMPTY_RING=1
 shifted="$fixture/first${separator}EDT"
 mv "$fixture/first" "$shifted"
 scenario='ring skips a classpath separator in the installation root'
@@ -263,7 +274,7 @@ for source in JAVA_TOOL_OPTIONS _JAVA_OPTIONS JDK_JAVA_OPTIONS JAVA_OPTS COVERAG
 done
 marker="$fixture/module-access.agent"
 printf '%s\n' '--add-opens' "\"$opens\"" "--add-exports=$exports" \
-    "-javaagent:$fixture/agent.jar=$marker" '-Dcoverage41c.option=preserved' > "$fixture/module options"
+    "\"-javaagent:$fixture/agent.jar=$marker\"" '-Dcoverage41c.option=preserved' > "$fixture/module options"
 for source in JAVA_OPTS JDK_JAVA_OPTIONS COVERAGE41_C_OPTS; do
     scenario="module permissions from $source argument file"
     rm -f "$marker"
@@ -316,7 +327,7 @@ marker="$fixture/multiline.agent"
 for source in JAVA_OPTS COVERAGE41_C_OPTS; do
     for expected in second first; do
         scenario="multiline property in $source selects $expected SDK"
-        flags="$multiline -javaagent:$fixture/agent.jar=$marker"
+        flags="$multiline \"-javaagent:$fixture/agent.jar=$marker\""
         if [ "$expected" = first ]; then flags="$flags --enable-preview"; fi
         rm -f "$marker"
         check_sdk "$fixture/$expected" "$source=$flags"
@@ -329,7 +340,7 @@ done
 # Java launcher options can expand an argument file without sharing it with the probe JVM.
 mkdir "$fixture/args directory"
 agent_marker="$fixture/argfile.agent"
-printf '# comment\r\n"--enable-preview"\r\n-javaagent:%s=%s\r\n-Dcoverage41c.option=preserved\r\n' \
+printf '# comment\r\n"--enable-preview"\r\n"-javaagent:%s=%s"\r\n-Dcoverage41c.option=preserved\r\n' \
     "$fixture/agent.jar" "$agent_marker" > "$fixture/args directory/preview"
 for source in JAVA_OPTS JDK_JAVA_OPTIONS COVERAGE41_C_OPTS; do
     rm -f "$agent_marker"
@@ -345,6 +356,26 @@ for source in JAVA_OPTS JDK_JAVA_OPTIONS COVERAGE41_C_OPTS; do
         status=1
     fi
 done
+for source in JAVA_OPTS COVERAGE41_C_OPTS; do
+    scenario="shell expands an argument file in $source"
+    rm -f "$agent_marker"
+    check_sdk "$fixture/first" HOME="$fixture" "$source="'"@$HOME/args directory/preview"'
+    if [ "$(cat "$agent_marker" 2>/dev/null || :)" != preserved ]; then
+        echo "FAIL application argument file for $scenario" >&2
+        status=1
+    fi
+done
+
+scenario='shell expands argument file substitutions once'
+expansions="$fixture/expansions"
+rm -f "$agent_marker"
+flags='"@$(printf x >> "$EDT_EXPANSIONS"; printf "%s" "$HOME/args directory/preview")"'
+check_sdk "$fixture/first" HOME="$fixture" EDT_EXPANSIONS="$expansions" "JAVA_OPTS=$flags"
+if [ "$(cat "$expansions" 2>/dev/null || :)" != x ] || [ "$(cat "$agent_marker" 2>/dev/null || :)" != preserved ]; then
+    echo "FAIL $scenario" >&2
+    status=1
+fi
+
 flags='"@args
 directory/preview"'
 rm -f "$agent_marker"

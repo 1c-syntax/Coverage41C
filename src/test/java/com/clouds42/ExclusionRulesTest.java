@@ -210,8 +210,9 @@ class ExclusionRulesTest {
     @Test
     void absoluteExclusionReportIsKept() throws Exception {
         Path report = tempDir.resolve("elsewhere/x.json").toAbsolutePath();
-        File file = write("a.json", "{'exclusionReport':'" + report.toString().replace("\\", "\\\\")
-                + "','exclude':{'objects':['Catalog.А']}}");
+        File file = tempDir.resolve("a.json").toFile();
+        new ObjectMapper().writeValue(file, Map.of("exclusionReport", report.toString(),
+                "exclude", Map.of("objects", List.of("Catalog.А"))));
 
         assertEquals(report.toFile(), load(file).getExclusionReportFile());
     }

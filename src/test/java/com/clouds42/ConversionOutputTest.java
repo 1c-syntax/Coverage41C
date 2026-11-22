@@ -25,6 +25,7 @@ import com.clouds42.CommandLineOptions.MetadataOptions;
 import com.clouds42.CommandLineOptions.OutputOptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
+import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
@@ -980,6 +981,73 @@ class ConversionOutputTest {
     }
 
     @Test
+    @EnabledOnOs(OS.LINUX)
+    void measurementOutputCannotOverwriteAReportThatConversionMayRestore() throws Exception {
+        Path xml = Files.writeString(directory.resolve("coverage.xml"), "old coverage");
+        Path alias = Files.createLink(directory.resolve("alias.xml"), xml);
+        Path moved = directory.resolve("moved.xml");
+        Path json = Files.writeString(directory.resolve("report.json"), "old report");
+        Object identity = StandardOutputFile.regularFileKey(alias);
+        ProcessBuilder checker = lockChecker(alias);
+        IOException serializationFailure = new IOException("conversion failed");
+
+        IOException failure = assertThrows(IOException.class, () -> ConversionOutput.publish(xml, json, out -> {
+            out.write('c');
+            Files.move(xml, moved);
+            assertThrows(IOException.class,
+                    () -> ConversionOutput.writeMeasurementOutput(alias, identity, false, dump -> dump.write('d')));
+            assertLocked(checker);
+            throw serializationFailure;
+        }, out -> out.write('j'), OutputStream.nullOutputStream()));
+
+        assertSame(serializationFailure, failure);
+        assertEquals("old coverage", Files.readString(moved));
+        assertEquals("old report", Files.readString(json));
+        ConversionOutput.writeMeasurementOutput(alias, identity, false, out -> out.write('d'));
+        assertEquals("d", Files.readString(moved));
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void measurementOutputKeepsTheReportLockedUntilItFinishesWriting() throws Exception {
+        Path xml = Files.writeString(directory.resolve("coverage.xml"), "old coverage");
+        Path alias = Files.createLink(directory.resolve("alias.xml"), xml);
+        Object identity = StandardOutputFile.regularFileKey(xml);
+        ProcessBuilder checker = lockChecker(alias);
+
+        ConversionOutput.writeMeasurementOutput(xml, identity, false, out -> {
+            assertThrows(IOException.class, () -> ConversionOutput.publish(alias, null,
+                    conversion -> conversion.write('c'), null, OutputStream.nullOutputStream()));
+            assertLocked(checker);
+            out.write('d');
+        });
+
+        assertEquals("d", Files.readString(alias));
+        ConversionOutput.publish(alias, null, out -> out.write('c'), null, OutputStream.nullOutputStream());
+        assertEquals("c", Files.readString(xml));
+    }
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    void measurementOutputRejectsAReplacementWithoutDroppingItsActiveLock() throws Exception {
+        Path xml = Files.writeString(directory.resolve("coverage.xml"), "old coverage");
+        Path dump = Files.writeString(directory.resolve("dump.xml"), "old dump");
+        Object identity = StandardOutputFile.regularFileKey(dump);
+        ProcessBuilder checker = lockChecker(xml);
+
+        ConversionOutput.publish(xml, null, out -> {
+            Files.move(dump, directory.resolve("saved.xml"));
+            Files.createLink(dump, xml);
+            assertThrows(IOException.class,
+                    () -> ConversionOutput.writeMeasurementOutput(dump, identity, false, bytes -> bytes.write('d')));
+            assertLocked(checker);
+            out.write('c');
+        }, null, OutputStream.nullOutputStream());
+
+        assertEquals("c", Files.readString(dump));
+    }
+
+    @Test
     void rejectedPosixChannelDoesNotBlockIndependentPublications() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeTrue(directory.getFileSystem().supportedFileAttributeViews().contains("posix"));
         Path active = Files.writeString(directory.resolve("active.xml"), "old");
@@ -1065,12 +1133,13 @@ class ConversionOutputTest {
         var output = picocli.CommandLine.populateCommand(new com.clouds42.CommandLineOptions.OutputOptions(),
                 "-o", coveragePath.toString());
         var coverage = new java.util.HashMap<java.net.URI, java.util.Map<java.math.BigDecimal, Integer>>();
-        var conversion = Utils.prepareConversion(source, "", "", coverage, null, coveragePath.toFile());
         Path generated = config.resolve("generated.json");
-        Files.delete(reportLink);
-        Files.createSymbolicLink(reportLink, generated);
+        try (var conversion = Utils.prepareConversion(source, "", "", coverage, null, coveragePath.toFile())) {
+            Files.delete(reportLink);
+            Files.createSymbolicLink(reportLink, generated);
 
-        assertThrows(IllegalArgumentException.class, () -> conversion.writeConversion(coverage, source, output));
+            assertThrows(IllegalArgumentException.class, () -> conversion.writeConversion(coverage, source, output));
+        }
         assertFalse(Files.exists(generated));
         assertFalse(Files.exists(coveragePath));
     }

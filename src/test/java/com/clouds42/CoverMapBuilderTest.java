@@ -659,8 +659,39 @@ class CoverMapBuilderTest {
         assertEquals(Map.of(), outsideScope(scoped(ROUTINES), report,
                 text("// Cover:file-off", "Процедура тестХ()", "\tА();", "КонецПроцедуры")));
         assertEquals(0, report.getTotalLines());
-        assertTrue(report.getPrefixRoutines().isEmpty());
-        assertFalse(report.moduleHasPrefixRoutines("Module.bsl"));
+        ExclusionReport.PrefixRoutinesEntry entry = report.prefixRoutines("team.json → includePrefix[0]");
+        assertTrue(report.hasPrefixRoutines("team.json → includePrefix[0]"));
+        assertEquals(1, entry.getRoutines());
+        assertEquals(0, entry.getIncludedLines());
+        assertTrue(entry.getModules().isEmpty());
+    }
+
+    @Test
+    void fileOffOutsideKeepsDiagnosticsOnlyInSelectedBlocksAndMethods() throws Exception {
+        ExclusionReport report = new ExclusionReport();
+        ExclusionRules rules = scoped("{'includePrefix':['тест'],'prefixScope':{'routines':true},'changeMarkers':{}}");
+
+        assertEquals(Map.of(), outsideScope(rules, report, text("// Cover:file-off", "// Cover:on",
+                "Процедура тестХ()", "// Cover:on", "А();", "КонецПроцедуры",
+                "Процедура Другая()", "// ++", "// Cover:on", "Б();", "// --", "КонецПроцедуры")));
+        assertEquals(List.of("Module.bsl:4: Cover:on without open Cover:off or Cover:auto",
+                "Module.bsl:9: Cover:on without open Cover:off or Cover:auto"), report.getWarnings());
+        assertEquals(0, report.getTotalLines());
+    }
+
+    @Test
+    void sharedMethodBoundaryCountsOncePerMatchingPrefix() throws Exception {
+        ExclusionReport report = new ExclusionReport();
+        ExclusionRules rules = scoped("{'includePrefix':['Team_','Team_First','Team_Second'],"
+                + "'prefixScope':{'routines':true}}");
+
+        assertEquals(Map.of(2, 0, 3, 0, 4, 0), outsideScope(rules, report,
+                text("Procedure Team_First()", "Call();", "EndProcedure Procedure Team_Second() Call();",
+                        "EndProcedure")));
+        assertEquals(3, report.getTotalLines());
+        assertEquals(3, report.prefixRoutines("team.json → includePrefix[0]").getIncludedLines());
+        assertEquals(2, report.prefixRoutines("team.json → includePrefix[1]").getIncludedLines());
+        assertEquals(2, report.prefixRoutines("team.json → includePrefix[2]").getIncludedLines());
     }
 
     @Test

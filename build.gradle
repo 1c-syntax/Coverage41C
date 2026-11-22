@@ -131,7 +131,10 @@ def testEdtDiscovery = tasks.register('testEdtDiscovery', Exec) {
     onlyIf { File.separator == '/' }
     commandLine 'sh', file('src/test/sh/edt-discovery.sh'),
             layout.buildDirectory.file('install/Coverage41C/bin/Coverage41C').get().asFile
-    doFirst { args(configurations.providedCompile.files) }
+    doFirst {
+        environment 'JAVA_HOME', System.getProperty('java.home')
+        args(configurations.providedCompile.files)
+    }
 }
 tasks.named('check') { dependsOn testEdtDiscovery }
 
@@ -195,7 +198,7 @@ def edtClassList = tasks.register('generateEdtClassList') {
         def handleInstructions = [getField: 'getfield', getStatic: 'getstatic', putField: 'putfield',
                                   putStatic: 'putstatic', invokeVirtual: 'invokevirtual',
                                   invokeInterface: 'invokeinterface', invokeStatic: 'invokestatic',
-                                  invokeSpecial: 'invokespecial', newInvokeSpecial: 'invokespecial']
+                                  invokeSpecial: 'invokespecial', newInvokeSpecial: 'newinvokespecial']
         String caller
         bytecode.toString().eachLine { line ->
             if (line.startsWith('Classfile ')) {

@@ -322,9 +322,11 @@ class SubsystemFilterTest {
                 .newDocumentBuilder()
                 .parse(coverageFile.toFile());
         NodeList files = document.getElementsByTagName("file");
-        return IntStream.range(0, files.getLength())
+        Set<String> paths = IntStream.range(0, files.getLength())
                 .mapToObj(files::item)
                 .map(node -> node.getAttributes().getNamedItem("path").getTextContent())
                 .collect(Collectors.toSet());
+        assertEquals(files.getLength(), paths.size(), "Duplicate file path in coverage");
+        return paths;
     }
 }

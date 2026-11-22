@@ -234,13 +234,18 @@ class UtilsTest {
             synchronized (output) {
                 worker.submit(() -> {
                     Utils.writeCoverageStats(Map.of(), output);
+                    return null;
+                }).get(5, TimeUnit.SECONDS);
+                assertTrue(bytes.toString().contains("Covered lines"));
+                bytes.reset();
+
+                worker.submit(() -> {
                     Utils.writeCoverageStats(Map.of(), metadata, output);
                     return null;
                 }).get(5, TimeUnit.SECONDS);
+                assertTrue(bytes.toString().contains("Total"));
             }
         }
-        assertTrue(bytes.toString().contains("Covered lines"));
-        assertTrue(bytes.toString().contains("Total"));
     }
 
     @Test

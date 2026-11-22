@@ -397,6 +397,7 @@ class ChangeBlocksTest {
         ChangeBlocks blocks = parse("{'changeMarkers':{},'unclosedBlocks':{'enabled':true}}",
                 "#Область тестХ // ++", "А();", "#КонецОбласти", "Б();");
         assertEquals("region", blocks.bySource().values().iterator().next().get(0).getBoundary());
+        assertTrue(blocks.covers(1));
         assertTrue(blocks.covers(2));
         assertTrue(blocks.covers(3));
         assertFalse(blocks.covers(4));

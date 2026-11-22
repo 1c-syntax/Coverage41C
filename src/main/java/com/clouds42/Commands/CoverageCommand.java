@@ -238,6 +238,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
             coverageData.forEach((uri, coverMap) -> initialCoverageData.put(uri, new HashMap<>(coverMap)));
             startSystem(UUID.randomUUID());
         } catch (Exception e) {
+            closeCollectionCommands();
             try {
                 closeSocket();
             } catch (IOException closeError) {
@@ -402,20 +403,25 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
             }
             List<? extends DBGUIExtCmdInfoBase> commandsList = response.get();
             logger.info("Ping result commands size: {}", commandsList.size());
-            boolean hasMeasures = false;
-            if (!commandsList.isEmpty()) {
-                PendingPoll pending;
-                // Admit and merge the local part of this response before stop can take its final snapshot.
-                synchronized (coverageData) {
-                    if (stopExecution.get()) {
-                        return;
-                    }
+            PendingPoll pending = null;
+            boolean stopAfterPoll;
+            synchronized (coverageData) {
+                if (stopExecution.get()) {
+                    return;
+                }
+                boolean hasMeasures = false;
+                if (!commandsList.isEmpty()) {
+                    // Admit and merge the local part before stop can take its final snapshot.
                     pending = new PendingPoll(coverageGeneration);
                     hasMeasures = collectReceivedPoll(commandsList, uriListByKey, externalDataProcessorsUriSet, pending);
                 }
+                // A timely quiet poll confirms the drain even if optional target work takes longer.
+                stopAfterPoll = shouldStopAfterFinalPoll(pollStarted, pollReceived.get(), !hasMeasures);
+            }
+            if (pending != null) {
                 completePendingPoll(uriListByKey, externalDataProcessorsUriSet, pending);
             }
-            if (shouldStopAfterFinalPoll(pollStarted, pollReceived.get(), !hasMeasures)) {
+            if (stopAfterPoll) {
                 return;
             }
         }
@@ -592,7 +598,8 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
             return false;
         }
         synchronized (coverageData) {
-            if (stopExecution.get() || finalMeasureClock.getAsLong() - windowEnd >= finalConfirmationTimeoutNanos) {
+            long decisionTime = quiet ? pollReceived : finalMeasureClock.getAsLong();
+            if (stopExecution.get() || decisionTime - windowEnd >= finalConfirmationTimeoutNanos) {
                 return true;
             }
             if (!quiet) {

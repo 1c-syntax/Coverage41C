@@ -111,20 +111,17 @@ final class PosixFiles {
             }
             return;
         }
-        // O_WRONLY | O_NOFOLLOW | O_CLOEXEC. The original file is untouched until the open inode is verified.
-        // A regular destination replaced by a FIFO must fail without waiting for a reader.
-        int flags = noFollowCloseOnExec() | 1 | (expected == null ? 0 : nonBlocking());
-        int descriptor = LibC.INSTANCE.open(nativePath(path), flags);
-        if (descriptor < 0) {
-            throw reportError(path, "open");
-        }
-        try (OutputStream output = new OpenReport(descriptor, path)) {
-            Object actual = darwin ? StandardOutputFile.darwinOpenFileKey(descriptor, path)
-                    : linuxOpenFileKey(descriptor, path);
-            if (!Objects.equals(expected, actual)) {
-                throw new IOException("Coverage output changed before it could be written: " + path);
+        boolean lock = !darwin && expected != null;
+        try (OpenReport output = lock ? ConversionOutput.openLinuxMeasurementOutput(path, expected)
+                : openReport(path, expected != null)) {
+            int descriptor = output.descriptor;
+            if (!lock) {
+                Object actual = darwin ? StandardOutputFile.darwinOpenFileKey(descriptor, path) : output.linuxFileKey();
+                if (!Objects.equals(expected, actual)) {
+                    throw new IOException("Coverage output changed before it could be written: " + path);
+                }
             }
-            if (actual != null) {
+            if (expected != null) {
                 NativeLong start = new NativeLong(0);
                 if (LibC.INSTANCE.lseek(descriptor, start, 0).longValue() < 0) { // SEEK_SET
                     throw reportError(path, "seek in");
@@ -137,6 +134,17 @@ final class PosixFiles {
             writer.copyTo(buffered);
             buffered.flush();
         }
+    }
+
+    static OpenReport openReport(Path path, boolean regular) throws IOException {
+        // O_WRONLY | O_NOFOLLOW | O_CLOEXEC. The original file is untouched until the open inode is verified.
+        // A regular destination replaced by a FIFO must fail without waiting for a reader.
+        int flags = noFollowCloseOnExec() | 1 | (regular ? nonBlocking() : 0);
+        int descriptor = LibC.INSTANCE.open(nativePath(path), flags);
+        if (descriptor < 0) {
+            throw reportError(path, "open");
+        }
+        return new OpenReport(descriptor, path);
     }
 
     private static Object linuxOpenFileKey(int descriptor, Path path) throws IOException {
@@ -165,7 +173,7 @@ final class PosixFiles {
         if ((info.getInt(0) & typeAndInode) != typeAndInode) {
             throw new IOException("Incomplete file identity for " + path);
         }
-        if ((info.getShort(28) & 0170000) != 0100000) {
+        if ((info.getShort(28) & 0_170000) != 0_100000) {
             return null;
         }
         long major = Integer.toUnsignedLong(info.getInt(136));
@@ -186,13 +194,38 @@ final class PosixFiles {
         return new FileSystemException(path.toString(), null, "Cannot " + operation + " report (errno " + error + ")");
     }
 
-    private static final class OpenReport extends OutputStream {
+    static final class OpenReport extends OutputStream {
         private final int descriptor;
         private final Path path;
 
         private OpenReport(int descriptor, Path path) {
             this.descriptor = descriptor;
             this.path = path;
+        }
+
+        Object linuxFileKey() throws IOException {
+            return linuxOpenFileKey(descriptor, path);
+        }
+
+        void lockOnLinux() throws IOException {
+            // A whole-file open-description write lock interoperates with FileChannel's POSIX
+            // record lock and survives closes of unrelated descriptors in this process.
+            // Only the first field of struct flock is nonzero (l_type = F_WRLCK).
+            byte[] lock = new byte[64];
+            short writeLock = (short) (Platform.isSPARC() || Platform.ARCH.equals("alpha") ? 2 : 1);
+            ByteBuffer.wrap(lock).order(ByteOrder.nativeOrder()).putShort(writeLock);
+            if (LibC.INSTANCE.fcntl(descriptor, 37, lock) != 0) { // F_OFD_SETLK
+                int error = Native.getLastError();
+                if (error == 11 || error == 13) { // EAGAIN / EACCES
+                    throw new IOException("Another conversion is writing " + path);
+                }
+                if (error == 22 || error == 38 || error == 95) { // EINVAL / ENOSYS / EOPNOTSUPP
+                    throw new FileSystemException(path.toString(), null,
+                            "Report locking is unavailable (errno " + error
+                                    + "). Use a Linux kernel and filesystem that support open-file-description locks.");
+                }
+                throw reportError(path, "lock");
+            }
         }
 
         @Override
@@ -379,6 +412,8 @@ final class PosixFiles {
         int close(int descriptor);
 
         int flock(int descriptor, int operation);
+
+        int fcntl(int descriptor, int command, byte[] lock);
 
         int rmdir(byte[] name);
 

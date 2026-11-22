@@ -65,7 +65,8 @@ public final class SourceKey {
     }
 
     public static boolean isQualified(String key) {
-        return key.startsWith(PREFIX);
+        // A legacy key may have source-v1 as its object ID. Qualified keys contain more separators.
+        return key.startsWith(PREFIX) && key.indexOf('/', PREFIX.length()) >= 0;
     }
 
     public static String normalizeRawKey(String key, boolean declaredRaw) {

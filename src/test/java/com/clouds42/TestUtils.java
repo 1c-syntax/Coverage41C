@@ -21,6 +21,7 @@
  */
 package com.clouds42;
 
+import org.w3c.dom.Element;
 import org.xmlunit.builder.Input;
 import org.xmlunit.diff.DefaultNodeMatcher;
 import org.xmlunit.diff.ElementSelector;
@@ -34,6 +35,7 @@ import java.nio.file.Path;
 import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class TestUtils {
 
@@ -57,6 +59,14 @@ public class TestUtils {
                 }
             }
         }
+    }
+
+    static boolean parseCovered(Element line) {
+        String covered = line.getAttribute("covered");
+        Element file = (Element) line.getParentNode();
+        assertTrue("true".equals(covered) || "false".equals(covered),
+                () -> "Invalid covered attribute at " + file.getAttribute("path") + ":" + line.getAttribute("lineNumber"));
+        return "true".equals(covered);
     }
 
     public static void assertCoverageEqual(String expectedXmlFile, String controlXmlFile) {

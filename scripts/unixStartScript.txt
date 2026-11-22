@@ -102,84 +102,6 @@ Please set the JAVA_HOME variable in your environment to match the
 location of your Java installation."
 fi
 
-EDT_CLASSPATH=""
-if [ -n "\$EDT_LOCATION" ]; then
-    edt_explicit=\$EDT_LOCATION
-    edt_separator=:
-    if "\$cygwin" || "\$msys"; then
-        edt_explicit=\$(cygpath --unix -- "\$edt_explicit") || exit \$?
-        edt_separator=';'
-    fi
-    case "\$edt_explicit" in
-        *"\$edt_separator"*) echo "ERROR: EDT_LOCATION contains a classpath separator: \$EDT_LOCATION" >&2; exit 1 ;;
-    esac
-    for f in "\$edt_explicit"/com._1c.g5.v8.dt.debug.*; do
-        [ -e "\$f" ] || continue
-        case "\$f" in
-            *"\$edt_separator"*) continue ;;
-        esac
-        EDT_CLASSPATH=\$EDT_CLASSPATH:\$f
-    done
-elif command -v ring >/dev/null 2>&1; then
-    edt_lib="\$APP_HOME/lib"
-    if "\$cygwin" || "\$msys"; then
-        edt_lib=\$(cygpath --mixed "\$edt_lib")
-    fi
-    edt_roots() {
-        if "\$cygwin" || "\$msys"; then
-            ring edt locations list 2>/dev/null | cygpath --mixed --file -
-        else
-            ring edt locations list 2>/dev/null
-        fi
-    }
-    edt_select() (
-        # Pass the original quoting to the selector without shell evaluation.
-        edt_script_opts="\$DEFAULT_JVM_OPTS \$JAVA_OPTS \$${optsEnvironmentVar}"
-        edt_tool_opts=\$JAVA_TOOL_OPTIONS
-        edt_launcher_opts=\$JDK_JAVA_OPTIONS
-        edt_vm_opts=\$_JAVA_OPTIONS
-        unset JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS JAVA_OPTS ${optsEnvironmentVar}
-        # Options can contain credentials and newlines. Use stdin, ahead of the ring paths.
-        edt_output=\$(
-            {
-                printf '%s\\000' "\$edt_tool_opts" "\$edt_launcher_opts" "\$edt_vm_opts" "\$edt_script_opts"
-                edt_roots
-            } | "\$JAVACMD" -cp "\$edt_lib/*" com.clouds42.EdtLocation --launcher
-        ) || exit \$?
-        printf '%s\\n' "\$edt_output" | awk '
-            BEGIN { location = "COVERAGE41C_EDT_LOCATION="; classpath = "COVERAGE41C_EDT_CLASSPATH=" }
-            index(\$0, location) == 1 { selected = substr(\$0, length(location) + 1); locations++ }
-            index(\$0, classpath) == 1 { bundles = substr(\$0, length(classpath) + 1); classpaths++ }
-            END {
-                if (locations > 1 || locations != classpaths) exit 1
-                if (locations == 1) {
-                    gsub(/%0A/, "\\n", bundles)
-                    gsub(/%25/, "%", bundles)
-                    # The root is one ring line. Keep it last to preserve trailing newlines in filenames.
-                    print bundles
-                    print selected
-                }
-            }'
-    )
-    edt_selection=\$(edt_select) || exit \$?
-    if [ -n "\$edt_selection" ]; then
-        edt_newline='
-'
-        EDT_CLASSPATH=\${edt_selection%"\$edt_newline"*}
-        EDT_LOCATION=\${edt_selection##*"\$edt_newline"}
-        if "\$cygwin" || "\$msys"; then
-            # The selector returns native paths (C:/...;D:/...). Gradle converts the full POSIX list below.
-            EDT_CLASSPATH=\$(cygpath --unix --path -- "\$EDT_CLASSPATH") || exit \$?
-        fi
-        EDT_CLASSPATH=:\$EDT_CLASSPATH
-    fi
-fi
-if [ -z "\$EDT_CLASSPATH" ]; then
-    echo "ERROR: EDT debug jars (com._1c.g5.v8.dt.debug.*) not found. Set EDT_LOCATION to the directory that contains them." >&2
-    exit 1
-fi
-CLASSPATH="$classpath\$EDT_CLASSPATH"
-
 # Increase the maximum file descriptors if we can.
 if [ "\$cygwin" = "false" -a "\$darwin" = "false" -a "\$nonstop" = "false" ] ; then
     MAX_FD_LIMIT=`ulimit -H -n`
@@ -201,10 +123,10 @@ if \$darwin; then
     GRADLE_OPTS="\$GRADLE_OPTS \\"-Xdock:name=\$APP_NAME\\" \\"-Xdock:icon=\$APP_HOME/media/gradle.icns\\""
 fi
 
-# For Cygwin or MSYS, switch paths to Windows format before running java
+# Convert application paths for Cygwin and MSYS.
+edt_lib="\$APP_HOME/lib"
 if [ "\$cygwin" = "true" -o "\$msys" = "true" ] ; then
     APP_HOME=`cygpath --path --mixed "\$APP_HOME"`
-    CLASSPATH=`cygpath --path --mixed "\$CLASSPATH"`
     JAVACMD=`cygpath --unix "\$JAVACMD"`
 
     # We build the pattern for arguments to be converted via cygpath
@@ -253,7 +175,90 @@ save () {
 }
 APP_ARGS=`save "\$@"`
 
-# Collect all arguments for the java command, following the shell quoting and substitution rules
-eval set -- \$DEFAULT_JVM_OPTS \$JAVA_OPTS \$${optsEnvironmentVar} <% if ( appNameSystemProperty ) { %>"\"-D${appNameSystemProperty}=\$APP_BASE_NAME\"" <% } %>-classpath "\"\$CLASSPATH\"" ${mainClassName} "\$APP_ARGS"
+# Apply the launcher's shell quoting and substitutions once for both discovery and the application.
+eval set -- \$DEFAULT_JVM_OPTS \$JAVA_OPTS \$${optsEnvironmentVar} || exit \$?
+
+EDT_CLASSPATH=""
+if [ -n "\$EDT_LOCATION" ]; then
+    edt_explicit=\$EDT_LOCATION
+    edt_separator=:
+    if "\$cygwin" || "\$msys"; then
+        edt_explicit=\$(cygpath --unix -- "\$edt_explicit") || exit \$?
+        edt_separator=';'
+    fi
+    case "\$edt_explicit" in
+        *"\$edt_separator"*) echo "ERROR: EDT_LOCATION contains a classpath separator: \$EDT_LOCATION" >&2; exit 1 ;;
+    esac
+    for f in "\$edt_explicit"/com._1c.g5.v8.dt.debug.*; do
+        [ -e "\$f" ] || continue
+        case "\$f" in
+            *"\$edt_separator"*) continue ;;
+        esac
+        EDT_CLASSPATH=\$EDT_CLASSPATH:\$f
+    done
+elif command -v ring >/dev/null 2>&1; then
+    if "\$cygwin" || "\$msys"; then
+        edt_lib=\$(cygpath --mixed "\$edt_lib")
+    fi
+    edt_roots() {
+        if "\$cygwin" || "\$msys"; then
+            ring edt locations list 2>/dev/null | cygpath --mixed --file -
+        else
+            ring edt locations list 2>/dev/null
+        fi
+    }
+    edt_select() (
+        edt_tool_opts=\$JAVA_TOOL_OPTIONS
+        edt_launcher_opts=\$JDK_JAVA_OPTIONS
+        edt_vm_opts=\$_JAVA_OPTIONS
+        unset JAVA_TOOL_OPTIONS JDK_JAVA_OPTIONS _JAVA_OPTIONS JAVA_OPTS ${optsEnvironmentVar}
+        # Options can contain credentials and newlines. Use stdin, ahead of the ring paths.
+        edt_output=\$(
+            {
+                printf '%s\\000' "\$edt_tool_opts" "\$edt_launcher_opts" "\$edt_vm_opts" "\$#"
+                if [ "\$#" -gt 0 ]; then printf '%s\\000' "\$@"; fi
+                edt_roots
+            } | "\$JAVACMD" -cp "\$edt_lib/*" com.clouds42.EdtLocation --launcher
+        ) || exit \$?
+        printf '%s\\n' "\$edt_output" | awk '
+            BEGIN { location = "COVERAGE41C_EDT_LOCATION="; classpath = "COVERAGE41C_EDT_CLASSPATH=" }
+            index(\$0, location) == 1 { selected = substr(\$0, length(location) + 1); locations++ }
+            index(\$0, classpath) == 1 { bundles = substr(\$0, length(classpath) + 1); classpaths++ }
+            END {
+                if (locations > 1 || locations != classpaths) exit 1
+                if (locations == 1) {
+                    gsub(/%0A/, "\\n", bundles)
+                    gsub(/%25/, "%", bundles)
+                    # The root is one ring line. Keep it last to preserve trailing newlines in filenames.
+                    print bundles
+                    print selected
+                }
+            }'
+    )
+    edt_selection=\$(edt_select "\$@") || exit \$?
+    if [ -n "\$edt_selection" ]; then
+        edt_newline='
+'
+        EDT_CLASSPATH=\${edt_selection%"\$edt_newline"*}
+        EDT_LOCATION=\${edt_selection##*"\$edt_newline"}
+        if "\$cygwin" || "\$msys"; then
+            # The selector returns native paths (C:/...;D:/...). Gradle converts the full POSIX list below.
+            EDT_CLASSPATH=\$(cygpath --unix --path -- "\$EDT_CLASSPATH") || exit \$?
+        fi
+        EDT_CLASSPATH=:\$EDT_CLASSPATH
+    fi
+fi
+if [ -z "\$EDT_CLASSPATH" ]; then
+    echo "ERROR: EDT debug jars (com._1c.g5.v8.dt.debug.*) not found. Set EDT_LOCATION to the directory that contains them." >&2
+    exit 1
+fi
+CLASSPATH="$classpath\$EDT_CLASSPATH"
+
+if "\$cygwin" || "\$msys"; then
+    CLASSPATH=\$(cygpath --path --mixed "\$CLASSPATH") || exit \$?
+fi
+
+# Keep the shell values out of the eval source, including paths containing literal dollar signs.
+eval set -- '"\$@"' <% if ( appNameSystemProperty ) { %>'"-D${appNameSystemProperty}=\$APP_BASE_NAME"' <% } %>-classpath '"\$CLASSPATH"' ${mainClassName} "\$APP_ARGS"
 
 exec "\$JAVACMD" "\$@"
