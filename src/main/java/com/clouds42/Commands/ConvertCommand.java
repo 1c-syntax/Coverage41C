@@ -29,15 +29,19 @@ import com.clouds42.Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
+import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
+import org.xml.sax.SAXException;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
 
-import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
+import java.io.File;
 import java.io.FileInputStream;
+import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.math.BigDecimal;
 import java.net.URI;
@@ -45,6 +49,8 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -75,23 +81,17 @@ public class ConvertCommand implements Callable<Integer> {
         String srcDirExtensionName = convertOptions.getExtensionName();
         metadataOptions.validate(srcDirExtensionName);
 
+        File rawInput = convertOptions.getInputRawXmlFile();
+        Map<Element, String> rawFiles = readRawFiles(rawInput);
         Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<URI,Map<BigDecimal, Integer>>();
 
         ConfiguredCoverage.Prepared prepared = ConfiguredCoverage.prepare(metadataOptions, srcDirExtensionName,
-                coverageData, outputOptions.getOutputFile(), convertOptions.getInputRawXmlFile(), false);
+                coverageData, outputOptions.getOutputFile(), rawInput, false);
         Map<String, URI> uriListByKey = prepared.modules();
-
-        DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
-        DocumentBuilder builder = builderFactory.newDocumentBuilder();
-        Document xmlDocument;
-        try (FileInputStream fileIS = new FileInputStream(convertOptions.getInputRawXmlFile())) {
-            xmlDocument = builder.parse(fileIS);
-        }
-        NodeList fileNodeList = xmlDocument.getElementsByTagName("file");
 
         // without -e and --extension the extension attribute is ignored: -s may point to sources of any extension, as before
         boolean matchExtensions = !srcDirExtensionName.isEmpty() || !metadataOptions.getExtensionSources().isEmpty();
-        if (matchExtensions && !hasExtensionAttribute(fileNodeList)) {
+        if (matchExtensions && rawFiles.keySet().stream().noneMatch(file -> file.hasAttribute("extension"))) {
             logger.warn("RAW file doesn't contain modules of extensions: it was made by previous version" +
                     " or extensions code wasn't executed. All modules are treated as modules of --srcDir sources");
             matchExtensions = false;
@@ -103,15 +103,11 @@ public class ConvertCommand implements Callable<Integer> {
         metadataOptions.getExtensionSources().forEach(source -> sourcesExtensionNames.add(source.getName()));
         int skippedModulesCount = 0;
 
-        for(int fileNodeNumber = 0; fileNodeNumber < fileNodeList.getLength(); fileNodeNumber++) {
-            Node fileNode = fileNodeList.item(fileNodeNumber);
-            String fileKey = fileNode.getAttributes().getNamedItem("path").getTextContent();
-            if (fileKey.startsWith("/")) {
-                fileKey = fileKey.substring(1);
-            }
-            String extensionName = matchExtensions ? getExtensionName(fileNode) : srcDirExtensionName;
+        for (Map.Entry<Element, String> entry : rawFiles.entrySet()) {
+            Element fileNode = entry.getKey();
+            String extensionName = matchExtensions ? fileNode.getAttribute("extension") : srcDirExtensionName;
             boolean hasSources = sourcesExtensionNames.contains(extensionName);
-            fileKey = Utils.getExtensionUriKey(extensionName, fileKey);
+            String fileKey = Utils.getExtensionUriKey(extensionName, entry.getValue());
             URI fileUri = hasSources ? uriListByKey.get(fileKey) : null;
             if (fileUri == null) {
                 if (hasSources) {
@@ -160,18 +156,38 @@ public class ConvertCommand implements Callable<Integer> {
         return CommandLine.ExitCode.OK;
     }
 
-    private static boolean hasExtensionAttribute(NodeList fileNodeList) {
-        for (int fileNodeNumber = 0; fileNodeNumber < fileNodeList.getLength(); fileNodeNumber++) {
-            if (fileNodeList.item(fileNodeNumber).getAttributes().getNamedItem("extension") != null) {
-                return true;
+    private static Map<Element, String> readRawFiles(File input)
+            throws IOException, ParserConfigurationException, SAXException {
+        Document document;
+        try (FileInputStream stream = new FileInputStream(input)) {
+            document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(stream);
+        }
+        Element coverage = document.getDocumentElement();
+        if (!coverage.getTagName().equals("coverage")) {
+            throw new IllegalArgumentException("Expected a RAW coverage XML document");
+        }
+        Map<Element, String> files = new LinkedHashMap<>();
+        for (Node node = coverage.getFirstChild(); node != null; node = node.getNextSibling()) {
+            if (node instanceof Element file) {
+                if (!file.getTagName().equals("file")) {
+                    throw new IllegalArgumentException("Expected a file entry in the RAW coverage XML");
+                }
+                files.put(file, rawModuleKey(file));
             }
         }
-        return false;
+        return files;
     }
 
-    // no attribute - configuration
-    private static String getExtensionName(Node fileNode) {
-        Node extensionNode = fileNode.getAttributes().getNamedItem("extension");
-        return extensionNode == null ? "" : extensionNode.getTextContent();
+    private static String rawModuleKey(Element file) {
+        String path = file.getAttribute("path");
+        String key = path.startsWith("/") ? path.substring(1) : path;
+        String[] parts = key.split("/", -1);
+        // A RAW key has two IDs. Finished Generic Coverage reports contain BSL file paths.
+        if (parts.length != 2 || parts[0].isBlank() || parts[1].isBlank()
+                || parts[1].toLowerCase(Locale.ROOT).endsWith(".bsl")) {
+            throw new IllegalArgumentException("Unsupported RAW module path: " + path
+                    + ". Expected object ID/module type ID");
+        }
+        return key;
     }
 }

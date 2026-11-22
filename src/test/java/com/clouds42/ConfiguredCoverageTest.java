@@ -65,6 +65,65 @@ class ConfiguredCoverageTest {
     }
 
     @Test
+    void rejectsQualifiedRawAlongsideLegacyEntries() throws Exception {
+        assertRejectedBeforePublishing("""
+                <coverage>
+                  <file path="/%s/%s"><lineToCover covered="true" lineNumber="2"/></file>
+                  <file path="/source-v1/-/-/object/property"/>
+                </coverage>
+                """.formatted(OBJECT_ID, PROPERTY_ID));
+    }
+
+    @Test
+    void rejectsGenericCoverageXmlAsRaw() throws Exception {
+        assertRejectedBeforePublishing("<coverage><file path=\"Ext/Module.BSL\"/></coverage>");
+    }
+
+    @Test
+    void rejectsCoberturaXmlAsRaw() throws Exception {
+        assertRejectedBeforePublishing("<coverage><packages/></coverage>");
+    }
+
+    @Test
+    void rejectsUnrelatedXmlAsRaw() throws Exception {
+        assertRejectedBeforePublishing("<report/>");
+    }
+
+    private void assertRejectedBeforePublishing(String xml) throws Exception {
+        Path project = project();
+        Path input = Files.writeString(directory.resolve("internal.xml"), xml);
+        Path output = Files.writeString(directory.resolve("coverage.xml"), "previous coverage");
+        Path report = directory.resolve("exclusions.json");
+        assertEquals(1, execute("convert", "-s", project.resolve("configuration").toString(),
+                "-c", input.toString(), "-o", output.toString(), "--exclusion-report", report.toString()));
+        assertEquals("previous coverage", Files.readString(output));
+        assertFalse(Files.exists(report));
+    }
+
+    @Test
+    void acceptsEmptyLegacyRaw() throws Exception {
+        assertNoHits("<coverage/>");
+    }
+
+    @Test
+    void acceptsLegacyRawWithAnUnmappedModule() throws Exception {
+        assertNoHits("""
+                <coverage><file path="unknown-object/unknown-property">
+                  <lineToCover covered="true" lineNumber="2"/>
+                </file></coverage>
+                """);
+    }
+
+    private void assertNoHits(String xml) throws Exception {
+        Path project = project();
+        Path input = Files.writeString(directory.resolve("internal.xml"), xml);
+        Path output = directory.resolve("coverage.xml");
+        assertEquals(0, execute("convert", "-s", project.resolve("configuration").toString(),
+                "-c", input.toString(), "-o", output.toString()));
+        assertEquals(Map.of(2, false, 4, false, 6, false), coverage(output, MODULE));
+    }
+
+    @Test
     void usesRulesForConfiguredConversionAndWritesASeparateReport() throws Exception {
         Path project = project();
         Path input = raw("");
