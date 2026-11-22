@@ -22,6 +22,7 @@
 package com.clouds42;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -57,6 +58,7 @@ import java.util.stream.Collectors;
 final class ExclusionRules {
 
     private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder()
+            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             .withCoercionConfig(LogicalType.Textual, config -> config
                     .setCoercion(CoercionInputShape.Boolean, CoercionAction.Fail)
@@ -548,13 +550,20 @@ final class ExclusionRules {
     private static int appendClass(StringBuilder regex, String glob, int start) {
         regex.append("[[^/]&&[");
         int index = start;
-        if (index < glob.length() && glob.charAt(index) == '!') {
-            regex.append('^');
-            index++;
-        } else if (index < glob.length() && glob.charAt(index) == '^') {
-            regex.append("\\^");
-            index++;
+        if (index < glob.length() && glob.charAt(index) == '^') {
+            appendClassLiteral(regex, glob.charAt(index++));
+        } else {
+            if (index < glob.length() && glob.charAt(index) == '!') {
+                regex.append('^');
+                index++;
+            }
+            if (index < glob.length() && glob.charAt(index) == '-') {
+                appendClassLiteral(regex, glob.charAt(index++));
+            }
         }
+
+        boolean hasRangeStart = false;
+        char rangeStart = 0;
         while (index < glob.length()) {
             char c = glob.charAt(index++);
             if (c == ']') {
@@ -564,12 +573,37 @@ final class ExclusionRules {
             if (c == '/') {
                 throw new PatternSyntaxException("Explicit 'name separator' in class", glob, index - 1);
             }
-            if (c == '\\' || c == '[' || c == '&') {
-                regex.append('\\');
+            if (c != '-') {
+                appendClassLiteral(regex, c);
+                rangeStart = c;
+                hasRangeStart = true;
+                continue;
             }
-            regex.append(c);
+
+            int hyphen = index - 1;
+            if (!hasRangeStart) {
+                throw new PatternSyntaxException("Invalid range", glob, hyphen);
+            }
+            if (index < glob.length() && glob.charAt(index) != ']') {
+                char rangeEnd = glob.charAt(index++);
+                if (rangeEnd == '/' || rangeEnd < rangeStart) {
+                    throw new PatternSyntaxException("Invalid range", glob, hyphen);
+                }
+                regex.append('-');
+                appendClassLiteral(regex, rangeEnd);
+            } else {
+                appendClassLiteral(regex, '-');
+            }
+            hasRangeStart = false;
         }
         throw new PatternSyntaxException("Missing ']'", glob, glob.length() - 1);
+    }
+
+    private static void appendClassLiteral(StringBuilder regex, char c) {
+        if (c == '\\' || c == '[' || c == '&' || c == '^' || c == '-') {
+            regex.append('\\');
+        }
+        regex.append(c);
     }
 
     private static void appendLiteral(StringBuilder regex, char c) {

@@ -131,6 +131,7 @@ public final class ConfiguredCoverage {
 
         ExclusionReport report = new ExclusionReport();
         Map<String, URI> modules = new HashMap<>();
+        Set<URI> inputModules = new HashSet<>();
         Set<String> rulesOutsideScope = new HashSet<>();
         Map<String, Integer> prefixModules = new HashMap<>();
         Map<String, ExclusionRules.ScopePrefix> prefixes = new LinkedHashMap<>();
@@ -176,7 +177,11 @@ public final class ConfiguredCoverage {
             int sourceModulesInScope = 0;
             for (Module module : configuration.getAllModules()) {
                 URI uri = module.getUri();
-                if (module.isProtected() || !Files.exists(Path.of(uri))) {
+                if (!Files.exists(Path.of(uri))) {
+                    continue;
+                }
+                inputModules.add(uri);
+                if (module.isProtected()) {
                     continue;
                 }
                 MD owner = owners.get(uri);
@@ -243,7 +248,8 @@ public final class ConfiguredCoverage {
                 report.warn(rule.getSource() + ": rule does not match anything");
             }
         }
-        checkOutputs(config, rawInput, coverageFile, reportFile, new HashSet<>(modules.values()));
+        inputModules.addAll(modules.values());
+        checkOutputs(config, rawInput, coverageFile, reportFile, inputModules);
         for (Path root : roots.values()) {
             if (Files.isRegularFile(root)) {
                 rejectSame(root.toFile(), coverageFile);

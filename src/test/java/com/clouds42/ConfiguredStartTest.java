@@ -113,6 +113,15 @@ class ConfiguredStartTest {
 
     @Test
     void earlyCleanWaitsForConfiguredAutoLines() throws Exception {
+        assertEarlyCleanWaitsForPreparation(true);
+    }
+
+    @Test
+    void earlyCleanWaitsForLegacyPreparation() throws Exception {
+        assertEarlyCleanWaitsForPreparation(false);
+    }
+
+    private void assertEarlyCleanWaitsForPreparation(boolean configured) throws Exception {
         Path project = TestUtils.copyConfiguration(directory);
         Files.writeString(project.resolve("configuration").resolve(MODULE), ConfiguredCoverageTest.SOURCE);
         Path config = Files.writeString(directory.resolve("coverage41c.json"), "{\"auto\":{\"lines\":[\"Второй\"]}}");
@@ -143,13 +152,16 @@ class ConfiguredStartTest {
             }
         };
 
-        int result = new CommandLine(command).execute("-P", project.toString(), "-s", "configuration",
-                "--config", config.toString(), "-o", directory.resolve("coverage.xml").toString(),
-                "-u", "http://127.0.0.1:0");
+        List<String> arguments = new ArrayList<>(List.of("-P", project.toString(), "-s", "configuration",
+                "-o", directory.resolve("coverage.xml").toString(), "-u", "http://127.0.0.1:0"));
+        if (configured) {
+            arguments.addAll(List.of("--config", config.toString()));
+        }
+        int result = new CommandLine(command).execute(arguments.toArray(String[]::new));
         assertNotEquals(0, result);
         assertTrue(done.await(5, TimeUnit.SECONDS));
         assertTrue(waitedForPreparation.get());
-        assertTrue(autoLinePreserved.get());
+        assertEquals(configured, autoLinePreserved.get());
     }
 
     private static Future<Integer> launch(ExecutorService executor, FakeDebugServer debugger,

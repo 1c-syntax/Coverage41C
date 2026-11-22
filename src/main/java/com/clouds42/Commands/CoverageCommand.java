@@ -440,13 +440,11 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
 
     @Override
     protected void cleanCoverageData() {
-        if (!useConfiguredAutoLines) {
-            super.cleanCoverageData();
-            return;
-        }
         synchronized (coverageData) {
             super.cleanCoverageData();
-            autoLines.forEach((uri, lines) -> lines.forEach(line -> coverageData.get(uri).put(line, -1)));
+            if (useConfiguredAutoLines) {
+                autoLines.forEach((uri, lines) -> lines.forEach(line -> coverageData.get(uri).put(line, -1)));
+            }
         }
     }
 

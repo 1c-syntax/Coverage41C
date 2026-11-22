@@ -425,6 +425,18 @@ class ExclusionRulesTest {
     }
 
     @Test
+    void rejectsDuplicateJsonKeysAtTheTopLevelAndInNestedRules() throws Exception {
+        for (String json : List.of(
+                "{'includePrefix':['Demo'],'includePrefix':['Sample']}",
+                "{'includePrefix':['Demo'],'prefixScope':{'modules':false,'modules':true}}",
+                "{'exclude':{'lines':['First'],'lines':['First']}}")) {
+            File file = write("rules.json", json);
+            IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> load(file), json);
+            assertTrue(error.getMessage().contains("Duplicate field"), error.getMessage());
+        }
+    }
+
+    @Test
     void rejectsMalformedJson() throws Exception {
         File file = write("a.json", "{'exclude':");
 
@@ -679,8 +691,19 @@ class ExclusionRulesTest {
     }
 
     @Test
+    void pathGlobAcceptsValidRangesAndLiteralLeadingOrTrailingHyphens() throws Exception {
+        assertTrue(pathRule("src/[a-cd-f]/Module.bsl").matches(module("src/e/Module.bsl")));
+        assertFalse(pathRule("src/[a-c]/Module.bsl").matches(module("src/e/Module.bsl")));
+        assertTrue(pathRule("src/[-a-c]/Module.bsl").matches(module("src/-/Module.bsl")));
+        assertTrue(pathRule("src/[a-]/Module.bsl").matches(module("src/-/Module.bsl")));
+        assertFalse(pathRule("src/[!a-c]/Module.bsl").matches(module("src/b/Module.bsl")));
+        assertTrue(pathRule("src/[!a-c]/Module.bsl").matches(module("src/e/Module.bsl")));
+    }
+
+    @Test
     void rejectsMalformedGlobWithItsConfigurationSource() throws Exception {
-        for (String glob : List.of("src/trailing\\", "src/{A,{B,C}}/**", "src/{A,B/**", "src/[A/B]/**")) {
+        for (String glob : List.of("src/trailing\\", "src/{A,{B,C}}/**", "src/{A,B/**", "src/[A/B]/**",
+                "src/[a-c-e]/**", "src/[a-c-]/**", "src/[z-a]/**", "src/[a-/]/**")) {
             IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> pathRule(glob), glob);
             assertTrue(error.getMessage().startsWith("paths.json → exclude.paths[0]: invalid glob:"), error.getMessage());
         }

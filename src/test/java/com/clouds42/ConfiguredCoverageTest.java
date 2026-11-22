@@ -158,6 +158,41 @@ class ConfiguredCoverageTest {
     }
 
     @Test
+    void configuredConversionProtectsDesignerBinaryModulesFromCoverageOutput() throws Exception {
+        Path sources = project().resolve("configuration");
+        Path module = sources.resolve(MODULE);
+        Files.delete(module);
+        assertProtectedModuleCannotBeOverwritten(sources, module.resolveSibling("Module.bin"));
+    }
+
+    @Test
+    void configuredConversionProtectsEdtBinaryModulesWithBslExtension() throws Exception {
+        Path sources = directory.resolve("edt");
+        TestUtils.copyDirectory(Path.of("src/test/resources/edt/pc"), sources);
+        Path module = sources.resolve("src/CommonModules/ПростойОбщийМодуль/Module.bsl");
+        assertTrue(Files.exists(module));
+        assertProtectedModuleCannotBeOverwritten(sources, module);
+    }
+
+    private void assertProtectedModuleCannotBeOverwritten(Path sources, Path module) throws Exception {
+        byte[] original = {(byte) 0xff, (byte) 0xff, (byte) 0xff, 0x7f, 1};
+        Files.write(module, original);
+        Path input = raw("");
+        Path rules = config("{\"changeMarkers\":{}}");
+        Path report = directory.resolve("exclusions.json");
+        assertEquals(1, execute("convert", "-s", sources.toString(), "--config", rules.toString(),
+                "-c", input.toString(), "-o", module.toString(), "--exclusion-report", report.toString()));
+        assertArrayEquals(original, Files.readAllBytes(module));
+        assertFalse(Files.exists(report));
+
+        Path coverage = directory.resolve("coverage.xml");
+        assertEquals(1, execute("convert", "-s", sources.toString(), "--config", rules.toString(),
+                "-c", input.toString(), "-o", coverage.toString(), "--exclusion-report", module.toString()));
+        assertArrayEquals(original, Files.readAllBytes(module));
+        assertFalse(Files.exists(coverage));
+    }
+
+    @Test
     void configuredConversionProtectsObjectMetadataFromCoverageOutput() throws Exception {
         Path project = project();
         Path metadata = project.resolve("configuration/CommonModules/ПростойОбщийМодуль.xml");
