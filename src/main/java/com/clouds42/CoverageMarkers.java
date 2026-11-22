@@ -71,7 +71,7 @@ final class CoverageMarkers {
         List<Warning> warnings = new ArrayList<>();
         Deque<Open> open = new ArrayDeque<>();
         Map<Integer, BlockRange> blocks = null;
-        Map<Integer, BlockRange> thenTokens = new HashMap<>();
+        Map<Integer, BlockRange> blocksByHeaderEnd = new HashMap<>();
         int firstCodeIndex = firstCodeIndex(tokens);
 
         for (Token token : activeLineComments(tokens)) {
@@ -109,15 +109,15 @@ final class CoverageMarkers {
                         if (block.complete) {
                             blocks.merge(block.begin, block,
                                     (current, candidate) -> current.end >= candidate.end ? current : candidate);
-                            if (block.thenToken >= 0) {
-                                thenTokens.put(block.thenToken, block);
+                            if (block.headerEndToken >= 0) {
+                                blocksByHeaderEnd.put(block.headerEndToken, block);
                             }
                         }
                     }
                 }
                 BlockRange block = blocks.get(line);
                 if (block == null) {
-                    block = thenTokens.get(previousCode.getTokenIndex());
+                    block = blocksByHeaderEnd.get(previousCode.getTokenIndex());
                 }
                 int firstLine = block == null ? line : block.begin;
                 int endLine = block == null ? line : block.end;
@@ -247,11 +247,11 @@ final class CoverageMarkers {
                     || context instanceof BSLParser.WhileStatementContext
                     || context instanceof BSLParser.ForStatementContext
                     || context instanceof BSLParser.ForEachStatementContext)) {
-                TerminalNode then = context instanceof BSLParser.IfStatementContext condition && condition.ifBranch() != null
-                        ? condition.ifBranch().THEN_KEYWORD() : null;
-                int thenToken = then == null ? -1 : then.getSymbol().getTokenIndex();
+                TerminalNode headerEnd = context instanceof BSLParser.IfStatementContext condition && condition.ifBranch() != null
+                        ? condition.ifBranch().THEN_KEYWORD() : context.getToken(BSLLexer.DO_KEYWORD, 0);
+                int headerEndToken = headerEnd == null ? -1 : headerEnd.getSymbol().getTokenIndex();
                 blocks.add(new BlockRange(context.getStart().getLine(), context.getStop().getLine(),
-                        "statement", true, thenToken));
+                        "statement", true, headerEndToken));
             }
         }
         methods.sort(Comparator.comparingInt(method -> method.begin));
@@ -290,18 +290,18 @@ final class CoverageMarkers {
         final int end;
         final String kind;
         final boolean complete;
-        final int thenToken;
+        final int headerEndToken;
 
         BlockRange(int begin, int end, String kind, boolean complete) {
             this(begin, end, kind, complete, -1);
         }
 
-        private BlockRange(int begin, int end, String kind, boolean complete, int thenToken) {
+        private BlockRange(int begin, int end, String kind, boolean complete, int headerEndToken) {
             this.begin = begin;
             this.end = end;
             this.kind = kind;
             this.complete = complete;
-            this.thenToken = thenToken;
+            this.headerEndToken = headerEndToken;
         }
     }
 

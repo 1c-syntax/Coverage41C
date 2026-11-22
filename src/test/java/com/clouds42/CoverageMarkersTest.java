@@ -179,6 +179,22 @@ class CoverageMarkersTest {
     }
 
     @Test
+    void inlineMarkerOnLoopKeywordCoversMultilineLoop() {
+        for (String header : List.of("Пока Готово", "Для Сч = 1 По 2", "Для Каждого Эл Из Массив")) {
+            assertEquals(List.of("OFF Cover:off 2..5"), ranges(parse("Процедура П()",
+                    header, "Цикл // Cover:off", "Б();", "КонецЦикла;", "КонецПроцедуры")), header);
+        }
+        assertEquals(List.of("AUTO Cover:auto 2..5"), ranges(parse("Процедура П()",
+                "Пока Готово", "Цикл // Cover:auto", "Б();", "КонецЦикла;", "КонецПроцедуры")));
+    }
+
+    @Test
+    void inlineAutoAfterLoopBodyStatementRemainsSingleLine() {
+        assertEquals(List.of("AUTO Cover:auto 3..3"), ranges(parse("Процедура П()",
+                "Пока Готово", "Цикл Б(); // Cover:auto", "В();", "КонецЦикла;", "КонецПроцедуры")));
+    }
+
+    @Test
     void inlineMarkerOnRegionExcludesRegionWithNestedRegions() {
         CoverageMarkers markers = parse("#Область Внешняя // Cover:off", "#Область Внутренняя", "Процедура А()",
                 "\tБ();", "КонецПроцедуры", "#КонецОбласти", "#КонецОбласти", "", "Процедура В()", "\tГ();",
