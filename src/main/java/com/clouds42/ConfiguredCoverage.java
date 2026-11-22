@@ -159,6 +159,7 @@ public final class ConfiguredCoverage {
             if (reportFile == null) {
                 reportFile = rules.getExclusionReportFile();
             }
+            rejectMetadataReport(root, configuration.getConfigurationSource(), coverageFile);
             rejectMetadataReport(root, configuration.getConfigurationSource(), reportFile);
             rules.getIncludeSources().forEach(report::addScopeSource);
             if (!rules.getPrefixes().isEmpty()) {

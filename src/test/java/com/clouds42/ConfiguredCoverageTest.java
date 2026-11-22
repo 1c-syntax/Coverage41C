@@ -35,6 +35,7 @@ import java.nio.file.Path;
 import java.util.Map;
 import java.util.TreeMap;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -154,6 +155,22 @@ class ConfiguredCoverageTest {
         assertEquals(1, execute("convert", "-s", project.resolve("configuration").toString(), "-c", input.toString(),
                 "--config", config.toString(), "-o", output.toString(), "--exclusion-report", output.toString()));
         assertFalse(Files.exists(output));
+    }
+
+    @Test
+    void configuredConversionProtectsObjectMetadataFromCoverageOutput() throws Exception {
+        Path project = project();
+        Path metadata = project.resolve("configuration/CommonModules/ПростойОбщийМодуль.xml");
+        byte[] previous = Files.readAllBytes(metadata);
+        Path input = raw("");
+        Path config = config("{\"changeMarkers\":{}}");
+        Path report = directory.resolve("diagnostics.json");
+
+        assertEquals(1, execute("convert", "-P", project.toString(), "-s", "configuration",
+                "-c", input.toString(), "--config", config.toString(), "-o", metadata.toString(),
+                "--exclusion-report", report.toString()));
+        assertArrayEquals(previous, Files.readAllBytes(metadata));
+        assertFalse(Files.exists(report));
     }
 
     @Test

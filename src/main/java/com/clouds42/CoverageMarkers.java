@@ -115,9 +115,14 @@ final class CoverageMarkers {
                         }
                     }
                 }
+                int previousIndex = previousCode.getTokenIndex();
+                BlockRange endingHeader = blocksByHeaderEnd.get(previousIndex);
                 BlockRange block = blocks.get(line);
-                if (block == null) {
-                    block = blocksByHeaderEnd.get(previousCode.getTokenIndex());
+                // Keep the longest block starting on the line when a marker follows a nested header.
+                // A body statement after the header on that line limits the marker to the line.
+                if (block == null || (block.headerEndToken >= 0
+                        && previousIndex > block.headerEndToken && endingHeader == null)) {
+                    block = endingHeader;
                 }
                 int firstLine = block == null ? line : block.begin;
                 int endLine = block == null ? line : block.end;
@@ -247,8 +252,12 @@ final class CoverageMarkers {
                     || context instanceof BSLParser.WhileStatementContext
                     || context instanceof BSLParser.ForStatementContext
                     || context instanceof BSLParser.ForEachStatementContext)) {
-                TerminalNode headerEnd = context instanceof BSLParser.IfStatementContext condition && condition.ifBranch() != null
-                        ? condition.ifBranch().THEN_KEYWORD() : context.getToken(BSLLexer.DO_KEYWORD, 0);
+                TerminalNode headerEnd = switch (context) {
+                    case BSLParser.IfStatementContext condition when condition.ifBranch() != null ->
+                            condition.ifBranch().THEN_KEYWORD();
+                    case BSLParser.TryStatementContext attempt -> attempt.TRY_KEYWORD();
+                    default -> context.getToken(BSLLexer.DO_KEYWORD, 0);
+                };
                 int headerEndToken = headerEnd == null ? -1 : headerEnd.getSymbol().getTokenIndex();
                 blocks.add(new BlockRange(context.getStart().getLine(), context.getStop().getLine(),
                         "statement", true, headerEndToken));
@@ -260,7 +269,7 @@ final class CoverageMarkers {
             // A recovered method without a real end must also guard comments after its last statement.
             int end = method.complete ? method.end
                     : index + 1 < methods.size() ? methods.get(index + 1).begin - 1 : Integer.MAX_VALUE;
-            blocks.add(new BlockRange(method.begin, end, "method", method.complete));
+            blocks.add(new BlockRange(method.begin, end, "method", method.complete, method.headerEndToken));
         }
         regions.sort(Comparator.comparingInt(region -> region.getStart().getTokenIndex()));
         Deque<ParserRuleContext> regionStarts = new ArrayDeque<>();
@@ -281,8 +290,9 @@ final class CoverageMarkers {
         }
         TerminalNode end = context.getToken(endKeyword, 0);
         boolean complete = isComplete(context) && end != null && end.getSymbol().getTokenIndex() >= 0;
+        int headerEndToken = isComplete(declaration) ? declaration.getStop().getTokenIndex() : -1;
         methods.add(new BlockRange(keywordLine(declaration, keyword, context),
-                complete ? end.getSymbol().getLine() : Integer.MAX_VALUE, "method", complete));
+                complete ? end.getSymbol().getLine() : Integer.MAX_VALUE, "method", complete, headerEndToken));
     }
 
     static final class BlockRange {
@@ -306,7 +316,7 @@ final class CoverageMarkers {
     }
 
     private static boolean isComplete(ParserRuleContext context) {
-        return context.getStart() != null && context.getStop() != null
+        return context != null && context.getStart() != null && context.getStop() != null
                 && context.getStop().getTokenIndex() >= context.getStart().getTokenIndex();
     }
 

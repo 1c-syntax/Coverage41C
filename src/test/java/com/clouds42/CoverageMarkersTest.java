@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class CoverageMarkersTest {
@@ -142,6 +143,32 @@ class CoverageMarkersTest {
         CoverageMarkers markers = parse("Процедура П()", "\tЕсли А Тогда // Cover:off", "\t\tБ();",
                 "\tИначеЕсли В Тогда", "\t\tГ();", "\tКонецЕсли;", "\tД();", "КонецПроцедуры");
         assertEquals(List.of("OFF Cover:off 2..6"), ranges(markers));
+    }
+
+    @Test
+    void inlineMarkerAfterBodyStatementOnHeaderLineOnlyCoversThatLine() {
+        for (String header : List.of("Если Готово Тогда", "Пока Готово Цикл",
+                "Для Сч = 1 По 2 Цикл", "Для Каждого Эл Из Массив Цикл")) {
+            String end = header.startsWith("Если") ? "КонецЕсли;" : "КонецЦикла;";
+            assertEquals(List.of("OFF Cover:off 2..2"), ranges(parse("Процедура П()",
+                    header + " Первый(); // Cover:off", "Второй();", end, "КонецПроцедуры")), header);
+        }
+    }
+
+    @Test
+    void inlineMarkerAfterBodyStatementOnTryOrMethodHeaderOnlyCoversThatLine() {
+        assertAll(
+                () -> assertEquals(List.of("OFF Cover:off 2..2"), ranges(parse("Процедура П()",
+                        "Попытка Первый(); // Cover:off", "Второй();", "Исключение", "Третий();",
+                        "КонецПопытки;", "КонецПроцедуры")), "Try"),
+                () -> assertEquals(List.of("AUTO Cover:auto 1..1"), ranges(parse(
+                        "Процедура П() Первый(); // Cover:auto", "Второй();", "КонецПроцедуры")), "Procedure"));
+    }
+
+    @Test
+    void inlineMarkerOnEndOfMultilineMethodHeaderCoversMethod() {
+        assertEquals(List.of("OFF Cover:off 1..4"), ranges(parse("Процедура П(Первый,",
+                "Второй) Экспорт // Cover:off", "ВыполнитьШаг();", "КонецПроцедуры")));
     }
 
     @Test
