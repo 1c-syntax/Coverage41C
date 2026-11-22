@@ -90,6 +90,24 @@ class ConfiguredCoverageTest {
         assertRejectedBeforePublishing("<report/>");
     }
 
+    @Test
+    void rejectsInvalidRawLineInAModuleWithoutSourcesBeforePublishing() throws Exception {
+        assertRejectedBeforePublishing("""
+                <coverage><file path="unknown-object/unknown-property" extension="unselected">
+                  <lineToCover covered="yes" lineNumber="2"/>
+                </file></coverage>
+                """);
+    }
+
+    @Test
+    void rejectsInvalidRawLineNumberEvenForAnUncoveredLine() throws Exception {
+        assertRejectedBeforePublishing("""
+                <coverage><file path="/%s/%s">
+                  <lineToCover covered="false" lineNumber="missing"/>
+                </file></coverage>
+                """.formatted(OBJECT_ID, PROPERTY_ID));
+    }
+
     private void assertRejectedBeforePublishing(String xml) throws Exception {
         Path project = project();
         Path input = Files.writeString(directory.resolve("internal.xml"), xml);
@@ -139,6 +157,18 @@ class ConfiguredCoverageTest {
         var json = new ObjectMapper().readTree(report.toFile());
         assertTrue(json.path("excludedLines").asInt() > 0);
         assertFalse(json.path("changeBlocks").isEmpty());
+    }
+
+    @Test
+    void configuredConversionReportsCoverageWriteFailure() throws Exception {
+        Path sources = project().resolve("configuration");
+        Path outputDirectory = Files.createDirectory(directory.resolve("coverage.xml"));
+        Path input = raw("");
+        Path report = directory.resolve("exclusions.json");
+        for (String format : new String[]{"GENERIC_COVERAGE", "COBERTURA", "LCOV"}) {
+            assertEquals(1, execute("convert", "-s", sources.toString(), "-c", input.toString(),
+                    "-o", outputDirectory.toString(), "-f", format, "--exclusion-report", report.toString()), format);
+        }
     }
 
     @Test
@@ -299,6 +329,69 @@ class ConfiguredCoverageTest {
                 "--config", config.toString()));
         assertEquals(0, execute("validate", "-P", project.toString(), "-s", "configuration",
                 "--config", config.toString()));
+    }
+
+    @Test
+    void prefixedRoutineInFileOffModuleDoesNotMakeScopeNonempty() throws Exception {
+        Path project = project();
+        Files.writeString(project.resolve("configuration").resolve(MODULE), "// Cover:file-off\n" + SOURCE);
+        Path config = config("""
+                {"includePrefix":["Пример"],"prefixScope":{"subsystems":false,"modules":false,"routines":true}}
+                """);
+        Path report = directory.resolve("exclusions.json");
+        assertEquals(1, execute("validate", "-s", project.resolve("configuration").toString(), "--strict",
+                "--config", config.toString(), "--exclusion-report", report.toString()));
+        var warnings = new ObjectMapper().readTree(report.toFile()).path("warnings");
+        assertTrue(warnings.toString().contains("Coverage scope is empty"));
+        assertFalse(warnings.toString().contains("rule does not match anything"));
+    }
+
+    @Test
+    void validateAndConvertProtectExternalFormDescriptor() throws Exception {
+        Path processor = externalProcessor();
+        Path form = Files.createDirectories(directory.resolve("Sample/Forms")).resolve("Main.xml");
+        String descriptor = "<MetaDataObject><Form uuid=\"form-id\"><Properties><Name>Main</Name></Properties></Form></MetaDataObject>";
+        Files.writeString(form, descriptor);
+        assertEquals(1, execute("validate", "-s", processor.toString(), "--exclusion-report", form.toString()));
+        assertEquals(descriptor, Files.readString(form));
+
+        Path input = raw("");
+        Path report = directory.resolve("exclusions.json");
+        assertEquals(1, execute("convert", "-s", processor.toString(), "-c", input.toString(),
+                "-o", form.toString(), "--exclusion-report", report.toString()));
+        assertEquals(descriptor, Files.readString(form));
+        assertFalse(Files.exists(report));
+    }
+
+    @Test
+    void reportsUnreadableExternalModuleAndKeepsItsRawKeyUsable() throws Exception {
+        Path processor = externalProcessor();
+        Path objectModule = directory.resolve("Sample/Ext/ObjectModule.bsl");
+        Files.write(objectModule, new byte[]{(byte) 0xc3, 0x28});
+        Path report = directory.resolve("exclusions.json");
+        assertEquals(1, execute("validate", "-s", processor.toString(), "--strict",
+                "--exclusion-report", report.toString()));
+        var warnings = new ObjectMapper().readTree(report.toFile()).path("warnings");
+        assertTrue(warnings.toString().contains("ObjectModule.bsl: cannot read module"));
+
+        Path input = Files.writeString(directory.resolve("raw.xml"), """
+                <coverage><file path="/object-id/a637f77f-3840-441d-a1c3-699c8c5cb7e0">
+                  <lineToCover covered="true" lineNumber="2"/>
+                </file></coverage>
+                """);
+        Path output = directory.resolve("coverage.xml");
+        assertEquals(0, execute("convert", "-s", processor.toString(), "-c", input.toString(),
+                "-o", output.toString(), "--exclusion-report", report.toString()));
+        assertTrue(Files.isRegularFile(output));
+    }
+
+    private Path externalProcessor() throws Exception {
+        Files.createDirectories(directory.resolve("Sample/Forms"));
+        Path source = Files.createDirectories(directory.resolve("Sample/Ext")).resolve("ObjectModule.bsl");
+        Files.writeString(source, SOURCE);
+        return Files.writeString(directory.resolve("Sample.xml"), """
+                <MetaDataObject><ExternalDataProcessor uuid="object-id"/></MetaDataObject>
+                """);
     }
 
     private Path project() throws Exception {

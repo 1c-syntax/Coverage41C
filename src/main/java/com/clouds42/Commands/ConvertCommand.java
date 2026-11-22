@@ -149,7 +149,10 @@ public class ConvertCommand implements Callable<Integer> {
             logger.info("Skipped {} modules of configuration or extensions without sources", skippedModulesCount);
         }
         prepared.writeReport();
-        Utils.dumpCoverageFile(coverageData, metadataOptions, outputOptions);
+        boolean coverageWritten = Utils.tryDumpCoverageFile(coverageData, metadataOptions, outputOptions);
+        if (!coverageWritten && (metadataOptions.getConfigFile() != null || metadataOptions.getExclusionReportFile() != null)) {
+            return CommandLine.ExitCode.SOFTWARE;
+        }
         logger.info("Convert done");
 
         return CommandLine.ExitCode.OK;
@@ -171,10 +174,33 @@ public class ConvertCommand implements Callable<Integer> {
                 if (!file.getTagName().equals("file")) {
                     throw new IllegalArgumentException("Expected a file entry in the RAW coverage XML");
                 }
-                files.put(file, rawModuleKey(file));
+                String key = rawModuleKey(file);
+                validateRawLines(file, key);
+                files.put(file, key);
             }
         }
         return files;
+    }
+
+    private static void validateRawLines(Element file, String key) {
+        for (Node node = file.getFirstChild(); node != null; node = node.getNextSibling()) {
+            if (!(node instanceof Element line) || !line.getTagName().equals("lineToCover")) {
+                continue;
+            }
+            String covered = line.getAttribute("covered");
+            if (!covered.equals("true") && !covered.equals("false")) {
+                throw new IllegalArgumentException("Invalid RAW covered value in module " + key + ": " + covered);
+            }
+            String number = line.getAttribute("lineNumber");
+            try {
+                if (new BigDecimal(number).signum() > 0) {
+                    continue;
+                }
+            } catch (NumberFormatException ignored) {
+                // Report the offending module for malformed as well as non-positive line numbers.
+            }
+            throw new IllegalArgumentException("Invalid RAW line number in module " + key + ": " + number);
+        }
     }
 
     private static String rawModuleKey(Element file) {

@@ -131,7 +131,7 @@ public final class ConfiguredCoverage {
 
         ExclusionReport report = new ExclusionReport();
         Map<String, URI> modules = new HashMap<>();
-        Set<URI> inputModules = new HashSet<>();
+        Set<URI> inputFiles = new HashSet<>();
         Set<String> rulesOutsideScope = new HashSet<>();
         Map<String, Integer> prefixModules = new HashMap<>();
         Map<String, ExclusionRules.ScopePrefix> prefixes = new LinkedHashMap<>();
@@ -148,7 +148,7 @@ public final class ConfiguredCoverage {
                 if (config != null) {
                     throw new IllegalArgumentException("Coverage rules require a configuration or extension directory: " + root);
                 }
-                readProcessor(root, extension, projectUri, modules, coverageData, report);
+                readProcessor(root, extension, projectUri, modules, coverageData, report, inputFiles);
                 continue;
             }
             if (!(MDClasses.createConfiguration(root) instanceof CF configuration)
@@ -180,7 +180,7 @@ public final class ConfiguredCoverage {
                 if (!Files.exists(Path.of(uri))) {
                     continue;
                 }
-                inputModules.add(uri);
+                inputFiles.add(uri);
                 if (module.isProtected()) {
                     continue;
                 }
@@ -208,7 +208,7 @@ public final class ConfiguredCoverage {
                     addCoverageData(coverageData, uri, id, rules, report);
                 } else {
                     addModuleOutsideScope(coverageData, uri, id, rules, report);
-                    inScope = report.moduleHasPrefixRoutines(id.getPath());
+                    inScope = report.moduleInScopeByPrefixRoutines(id.getPath());
                     if (!inScope) {
                         report.addModuleOutOfScope();
                         rulesOutsideScope.addAll(moduleRuleSources(rules, id));
@@ -248,8 +248,8 @@ public final class ConfiguredCoverage {
                 report.warn(rule.getSource() + ": rule does not match anything");
             }
         }
-        inputModules.addAll(modules.values());
-        checkOutputs(config, rawInput, coverageFile, reportFile, inputModules);
+        inputFiles.addAll(modules.values());
+        checkOutputs(config, rawInput, coverageFile, reportFile, inputFiles);
         for (Path root : roots.values()) {
             if (Files.isRegularFile(root)) {
                 rejectSame(root.toFile(), coverageFile);
@@ -269,14 +269,19 @@ public final class ConfiguredCoverage {
     }
 
     private static void readProcessor(Path root, String extension, URI projectUri, Map<String, URI> modules,
-                                      Map<URI, Map<BigDecimal, Integer>> coverageData, ExclusionReport report)
-            throws Exception {
-        Map<URI, Map<BigDecimal, Integer>> processorModules = new HashMap<>();
-        Utils.readExternalDataProcessorSources(root, extension, modules, processorModules);
+                                      Map<URI, Map<BigDecimal, Integer>> coverageData, ExclusionReport report,
+                                      Set<URI> inputFiles) throws Exception {
+        Map<String, URI> processorModules = Utils.discoverExternalDataProcessorSources(root, inputFiles::add);
+        processorModules.forEach((key, uri) -> modules.put(Utils.getExtensionUriKey(extension, key), uri));
         ExclusionRules rules = ExclusionRules.empty();
-        for (URI uri : processorModules.keySet()) {
-            ModuleId id = new ModuleId(modulePath(projectUri, uri), List.of(), Set.of());
-            addCoverageData(coverageData, uri, id, rules, report);
+        for (URI uri : new LinkedHashSet<>(processorModules.values())) {
+            if (Files.notExists(Path.of(uri))) {
+                // An external processor may be exported without an empty object or form module.
+                coverageData.put(uri, new HashMap<>());
+            } else {
+                ModuleId id = new ModuleId(modulePath(projectUri, uri), List.of(), Set.of());
+                addCoverageData(coverageData, uri, id, rules, report);
+            }
         }
     }
 

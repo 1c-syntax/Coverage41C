@@ -52,6 +52,7 @@ import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.transform.OutputKeys;
 import javax.xml.transform.Transformer;
 import javax.xml.transform.TransformerFactory;
+import javax.xml.transform.TransformerException;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
 import javax.xml.xpath.XPath;
@@ -70,6 +71,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.*;
+import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -323,28 +325,26 @@ public class Utils {
                                                          Map<URI, Map<BigDecimal, Integer>> coverageData)
             throws IOException, ParserConfigurationException, SAXException, XPathExpressionException {
 
-        DocumentBuilder builder = DocumentBuilderFactory.newInstance().newDocumentBuilder();
-        Document xmlDocument = builder.parse(rootPath.toFile());
-        String documentRootTagName = xmlDocument.getDocumentElement().getTagName();
-
-        Map<String, URI> externalDataProcessorUriListByKey;
-        if (documentRootTagName.equals("MetaDataObject")) {
-            externalDataProcessorUriListByKey = readConfiguratorExternalDataProcessor(rootPath, xmlDocument, builder);
-        } else if (documentRootTagName.equals("mdclass:ExternalDataProcessor")) {
-            externalDataProcessorUriListByKey = readEdtExternalDataProcessor(rootPath, xmlDocument);
-        } else {
-            throw new IllegalArgumentException("Unknown source format: " + rootPath);
-        }
-
-        externalDataProcessorUriListByKey.forEach((key, uri) -> {
+        discoverExternalDataProcessorSources(rootPath, ignored -> {}).forEach((key, uri) -> {
             uriListByKey.put(getExtensionUriKey(extensionName, key), uri);
             addCoverageData(coverageData, uri);
         });
     }
 
-    private static Map<String, URI> readConfiguratorExternalDataProcessor(Path rootPath,
-                                                                          Document xmlDocument,
-                                                                          DocumentBuilder builder)
+    static Map<String, URI> discoverExternalDataProcessorSources(Path rootPath, Consumer<URI> formDescriptor)
+            throws IOException, ParserConfigurationException, SAXException, XPathExpressionException {
+        DocumentBuilder builder = DocumentBuilderFactory.newInstance().newDocumentBuilder();
+        Document xmlDocument = builder.parse(rootPath.toFile());
+        return switch (xmlDocument.getDocumentElement().getTagName()) {
+            case "MetaDataObject" -> readConfiguratorExternalDataProcessor(rootPath, xmlDocument, builder, formDescriptor);
+            case "mdclass:ExternalDataProcessor" -> readEdtExternalDataProcessor(rootPath, xmlDocument);
+            default -> throw new IllegalArgumentException("Unknown source format: " + rootPath);
+        };
+    }
+
+    private static Map<String, URI> readConfiguratorExternalDataProcessor(Path rootPath, Document xmlDocument,
+                                                                           DocumentBuilder builder,
+                                                                           Consumer<URI> formDescriptor)
             throws XPathExpressionException {
 
         Map<String, URI> uriListByKey = new HashMap<>();
@@ -362,6 +362,7 @@ public class Utils {
         try (Stream<Path> walk = Files.list(formsPath)) {
             walk.filter(formXmlFile -> formXmlFile.toString().endsWith(".xml"))
                     .forEach(formXmlFile -> {
+                        formDescriptor.accept(formXmlFile.toUri());
                         try {
                             Document formXmlDocument = builder.parse(formXmlFile.toFile());
                             String formUuid = (String) formUuidExpression.evaluate(formXmlDocument, XPathConstants.STRING);
@@ -420,20 +421,26 @@ public class Utils {
     public static void dumpCoverageFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
                                         MetadataOptions metadataOptions,
                                         OutputOptions outputOptions) {
-        if (outputOptions.getOutputFormat() == OutputOptions.OutputFormat.GENERIC_COVERAGE) {
-            dumpGenericCoverageFile(coverageData, metadataOptions, outputOptions);
-        } else if (outputOptions.getOutputFormat() == OutputOptions.OutputFormat.LCOV) {
-            dumpLcovFile(coverageData, metadataOptions, outputOptions);
-        } else if (outputOptions.getOutputFormat() == OutputOptions.OutputFormat.COBERTURA) {
-            dumpCoberturaFile(coverageData, metadataOptions, outputOptions);
-        } else {
-            logger.info("Unknown format");
-        }
+        tryDumpCoverageFile(coverageData, metadataOptions, outputOptions);
     }
 
-    private static void dumpCoberturaFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
-                                          MetadataOptions metadataOptions,
-                                          OutputOptions outputOptions) {
+    public static boolean tryDumpCoverageFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
+                                               MetadataOptions metadataOptions, OutputOptions outputOptions) {
+        if (outputOptions.getOutputFormat() == OutputOptions.OutputFormat.GENERIC_COVERAGE) {
+            return dumpGenericCoverageFile(coverageData, metadataOptions, outputOptions);
+        }
+        if (outputOptions.getOutputFormat() == OutputOptions.OutputFormat.LCOV) {
+            return dumpLcovFile(coverageData, metadataOptions, outputOptions);
+        }
+        if (outputOptions.getOutputFormat() == OutputOptions.OutputFormat.COBERTURA) {
+            return dumpCoberturaFile(coverageData, metadataOptions, outputOptions);
+        }
+        logger.info("Unknown format");
+        return false;
+    }
+
+    private static boolean dumpCoberturaFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
+                                             MetadataOptions metadataOptions, OutputOptions outputOptions) {
         DocumentBuilderFactory icFactory = DocumentBuilderFactory.newInstance();
         DocumentBuilder icBuilder;
         try {
@@ -526,22 +533,15 @@ public class Utils {
                     }
                 });
             });
-            Transformer transformer = TransformerFactory.newInstance().newTransformer();
-            transformer.setOutputProperty(OutputKeys.INDENT, "yes");
-            DOMSource source = new DOMSource(doc);
-            StreamResult outputStream;
-            if (outputOptions.getOutputFile() == null) {
-                outputStream = new StreamResult(System.out);
-            } else {
-                outputStream = new StreamResult(new FileOutputStream(outputOptions.getOutputFile()));
-            }
-            transformer.transform(source, outputStream);
+            writeCoverageXml(doc, outputOptions.getOutputFile());
+            return true;
         } catch (Exception e) {
             logger.error(e.getLocalizedMessage());
+            return false;
         }
     }
 
-    private static void dumpGenericCoverageFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
+    private static boolean dumpGenericCoverageFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
                                                 MetadataOptions metadataOptions,
                                                 OutputOptions outputOptions) {
         DocumentBuilderFactory icFactory = DocumentBuilderFactory.newInstance();
@@ -586,18 +586,24 @@ public class Utils {
             if (linesToCover > 0) {
                 logger.info("Coverage: {}%", Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100.);
             }
-            Transformer transformer = TransformerFactory.newInstance().newTransformer();
-            transformer.setOutputProperty(OutputKeys.INDENT, "yes");
-            DOMSource source = new DOMSource(doc);
-            StreamResult outputStream;
-            if (outputOptions.getOutputFile() == null) {
-                outputStream = new StreamResult(System.out);
-            } else {
-                outputStream = new StreamResult(new FileOutputStream(outputOptions.getOutputFile()));
-            }
-            transformer.transform(source, outputStream);
+            writeCoverageXml(doc, outputOptions.getOutputFile());
+            return true;
         } catch (Exception e) {
             logger.error(e.getLocalizedMessage());
+            return false;
+        }
+    }
+
+    private static void writeCoverageXml(Document document, File destination) throws TransformerException, IOException {
+        Transformer transformer = TransformerFactory.newInstance().newTransformer();
+        transformer.setOutputProperty(OutputKeys.INDENT, "yes");
+        DOMSource source = new DOMSource(document);
+        if (destination == null) {
+            transformer.transform(source, new StreamResult(System.out));
+        } else {
+            try (OutputStream output = new FileOutputStream(destination)) {
+                transformer.transform(source, new StreamResult(output));
+            }
         }
     }
 
@@ -640,7 +646,7 @@ public class Utils {
         return result;
     }
 
-    private static void dumpLcovFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
+    private static boolean dumpLcovFile(Map<URI, Map<BigDecimal, Integer>> coverageData,
                                      MetadataOptions metadataOptions,
                                      OutputOptions outputOptions) {
 
@@ -683,8 +689,14 @@ public class Utils {
             }
 
             writer.close();
+            if (outputOptions.getOutputFile() != null && writer.checkError()) {
+                logger.error("Cannot write coverage file: {}", outputOptions.getOutputFile());
+                return false;
+            }
+            return true;
         } catch (Exception e) {
             logger.error(e.getLocalizedMessage());
+            return false;
         }
     }
 

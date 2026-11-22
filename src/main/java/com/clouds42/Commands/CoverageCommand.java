@@ -98,6 +98,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     private UserTargets targets = new UserTargets(IncludeUsers.NONE);
     private final Map<URI, Set<BigDecimal>> autoLines = new HashMap<>();
     private volatile boolean useConfiguredAutoLines;
+    private boolean coveragePrepared;
 
     private final Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<>() {
         @Override
@@ -155,14 +156,16 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         ConfiguredCoverage.Prepared prepared;
         try {
             synchronized (coverageData) {
+                coveragePrepared = false;
                 getServerSocket();
                 prepared = ConfiguredCoverage.prepare(metadataOptions, filterOptions.getExtensionName(),
                         coverageData, outputOptions.getOutputFile(), null, users.isActive());
                 if (useConfiguredAutoLines) {
                     rememberAutoLines();
                 }
+                prepared.writeReport();
+                coveragePrepared = true;
             }
-            prepared.writeReport();
         } catch (Exception failure) {
             try {
                 closeSocket();
@@ -271,7 +274,9 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                         }
                     }
                     if (targets.verdict(measure, loggingOptions.isVerbose()) == UserTargets.Verdict.ACCEPTED) {
-                        measureResultProcessing(uriListByKey, externalDataProcessorsUriSet, measure);
+                        synchronized (coverageData) {
+                            measureResultProcessing(uriListByKey, externalDataProcessorsUriSet, measure);
+                        }
                     }
                 } else if (command.getCmdID() == DBGUIExtCmds.TARGET_STARTED) {
                     targetStarted((DBGUIExtCmdInfoStartedImpl) command);
@@ -412,7 +417,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
             logger.error(e.getLocalizedMessage());
         }
 
-        Utils.dumpCoverageFile(coverageData, metadataOptions, outputOptions);
+        writeCoverageDump();
         targets.summary().forEach(logger::info);
         if (!targets.matchedAnyTarget()) {
             logger.error(targets.noMatchMessage());
@@ -436,6 +441,16 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                 autoLines.computeIfAbsent(uri, ignored -> new HashSet<>()).add(line);
             }
         }));
+    }
+
+    @Override
+    protected boolean writeCoverageDump() {
+        synchronized (coverageData) {
+            if (!coveragePrepared) {
+                return false;
+            }
+            return super.writeCoverageDump();
+        }
     }
 
     @Override

@@ -29,6 +29,7 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
 
+import java.io.IOException;
 import java.net.ServerSocket;
 
 import java.nio.file.Files;
@@ -43,6 +44,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static com.clouds42.ConfiguredCoverageTest.MODULE;
@@ -50,6 +52,7 @@ import static com.clouds42.ConfiguredCoverageTest.OBJECT_ID;
 import static com.clouds42.ConfiguredCoverageTest.PROPERTY_ID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Timeout(60)
@@ -119,6 +122,49 @@ class ConfiguredStartTest {
     @Test
     void earlyCleanWaitsForLegacyPreparation() throws Exception {
         assertEarlyCleanWaitsForPreparation(false);
+    }
+
+    @Test
+    void earlyDumpCannotOverwriteASourceRejectedByPreparation() throws Exception {
+        Path project = TestUtils.copyConfiguration(directory);
+        Path source = Files.writeString(project.resolve("configuration").resolve(MODULE), ConfiguredCoverageTest.SOURCE);
+        Path config = Files.writeString(directory.resolve("coverage41c.json"), "{\"changeMarkers\":{}}");
+        List<String> connection = List.of("-u", "http://127.0.0.1:0", "-i", "test_" + UUID.randomUUID());
+        CountDownLatch listening = new CountDownLatch(1);
+        CountDownLatch resume = new CountDownLatch(1);
+        CoverageCommand command = new CoverageCommand() {
+            @Override
+            protected ServerSocket getServerSocket() throws IOException {
+                ServerSocket socket = super.getServerSocket();
+                listening.countDown();
+                try {
+                    if (!resume.await(10, TimeUnit.SECONDS)) {
+                        throw new IOException("Timed out waiting for the test to resume preparation");
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException(e);
+                }
+                return socket;
+            }
+        };
+        List<String> arguments = new ArrayList<>(connection);
+        arguments.addAll(List.of("-s", project.resolve("configuration").toString(), "--config", config.toString(),
+                "-o", source.toString()));
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<Integer> start = executor.submit(() -> new CommandLine(command).execute(arguments.toArray(String[]::new)));
+            try {
+                assertTrue(listening.await(5, TimeUnit.SECONDS));
+                Future<Integer> dump = executor.submit(() -> send(connection, "dump"));
+                assertThrows(TimeoutException.class, () -> dump.get(1, TimeUnit.SECONDS));
+                resume.countDown();
+                assertNotEquals(0, start.get(10, TimeUnit.SECONDS));
+                assertNotEquals(0, dump.get(10, TimeUnit.SECONDS));
+                assertEquals(ConfiguredCoverageTest.SOURCE, Files.readString(source));
+            } finally {
+                resume.countDown();
+            }
+        }
     }
 
     private void assertEarlyCleanWaitsForPreparation(boolean configured) throws Exception {
