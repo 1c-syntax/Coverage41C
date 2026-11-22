@@ -32,6 +32,7 @@ import org.w3c.dom.NodeList;
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
@@ -108,6 +109,33 @@ class ConfiguredCoverageTest {
                 """.formatted(OBJECT_ID, PROPERTY_ID));
     }
 
+    @Test
+    void rejectsFractionalRawLineNumberBeforePublishing() throws Exception {
+        assertRejectedBeforePublishing(rawWithLineNumber("2.5"));
+    }
+
+    @Test
+    void rejectsOutOfRangeRawLineNumberBeforePublishing() throws Exception {
+        assertRejectedBeforePublishing(rawWithLineNumber("2147483648"));
+    }
+
+    private static String rawWithLineNumber(String lineNumber) {
+        return """
+                <coverage><file path="/%s/%s">
+                  <lineToCover covered="true" lineNumber="%s"/>
+                </file></coverage>
+                """.formatted(OBJECT_ID, PROPERTY_ID, lineNumber);
+    }
+
+    @Test
+    void convertsWholeNumberWithDecimalScaleToTheMatchingLine() throws Exception {
+        Path sources = project().resolve("configuration");
+        Path input = Files.writeString(directory.resolve("raw.xml"), rawWithLineNumber("2.0"));
+        Path output = directory.resolve("coverage.xml");
+        assertEquals(0, execute("convert", "-s", sources.toString(), "-c", input.toString(), "-o", output.toString()));
+        assertEquals(Map.of(2, true, 4, false, 6, false), coverage(output, MODULE));
+    }
+
     private void assertRejectedBeforePublishing(String xml) throws Exception {
         Path project = project();
         Path input = Files.writeString(directory.resolve("internal.xml"), xml);
@@ -169,6 +197,41 @@ class ConfiguredCoverageTest {
             assertEquals(1, execute("convert", "-s", sources.toString(), "-c", input.toString(),
                     "-o", outputDirectory.toString(), "-f", format, "--exclusion-report", report.toString()), format);
         }
+    }
+
+    @Test
+    void lcovCountsAnOptionalLineOnlyAfterItIsCovered() throws Exception {
+        Path sources = project().resolve("configuration");
+        Path input = raw("");
+        String withHit = Files.readString(input);
+        Path config = config("{\"auto\":{\"lines\":[\"Второй\"]}}");
+        Path output = directory.resolve("coverage.lcov");
+        String[] arguments = {"convert", "-s", sources.toString(), "-c", input.toString(),
+                "-o", output.toString(), "-f", "LCOV", "--config", config.toString()};
+
+        Files.writeString(input, withHit.replace("covered=\"true\" lineNumber=\"4\"", "covered=\"false\" lineNumber=\"4\""));
+        assertEquals(0, execute(arguments));
+        var uncovered = lcovRecord(output, MODULE);
+        assertTrue(uncovered.stream().noneMatch(line -> line.startsWith("DA:4,")));
+        assertTrue(uncovered.contains("LF:2"));
+        assertTrue(uncovered.contains("LH:1"));
+
+        Files.writeString(input, withHit);
+        assertEquals(0, execute(arguments));
+        var covered = lcovRecord(output, MODULE);
+        assertTrue(covered.contains("DA:4,1"));
+        assertTrue(covered.contains("LF:3"));
+        assertTrue(covered.contains("LH:2"));
+    }
+
+    private static List<String> lcovRecord(Path file, String source) throws Exception {
+        for (String record : Files.readString(file).split("end_of_record")) {
+            var lines = record.lines().toList();
+            if (lines.contains("SF:" + source)) {
+                return lines;
+            }
+        }
+        throw new AssertionError("Missing module in LCOV: " + source);
     }
 
     @Test
@@ -361,6 +424,27 @@ class ConfiguredCoverageTest {
                 "-o", form.toString(), "--exclusion-report", report.toString()));
         assertEquals(descriptor, Files.readString(form));
         assertFalse(Files.exists(report));
+    }
+
+    @Test
+    void strictValidationReportsUnreadableFormAndStillChecksOtherModules() throws Exception {
+        Path processor = externalProcessor();
+        Path forms = directory.resolve("Sample/Forms");
+        Files.writeString(forms.resolve("Broken.xml"), "<MetaDataObject>");
+        Files.writeString(forms.resolve("Incomplete.xml"), "<MetaDataObject/>");
+        Files.writeString(forms.resolve("Main.xml"), """
+                <MetaDataObject><Form uuid="form-id"><Properties><Name>Main</Name></Properties></Form></MetaDataObject>
+                """);
+        Path formModule = Files.createDirectories(forms.resolve("Main/Ext/Form")).resolve("Module.bsl");
+        Files.writeString(formModule, "// Cover:auto\n" + SOURCE + "// Cover:on\n");
+        Path report = directory.resolve("exclusions.json");
+        assertEquals(1, execute("validate", "-s", processor.toString(), "--strict", "--exclusion-report", report.toString()));
+        var json = new ObjectMapper().readTree(report.toFile());
+        String warnings = json.path("warnings").toString();
+        assertTrue(warnings.contains("Broken.xml"));
+        assertTrue(warnings.contains("Incomplete.xml"));
+        assertTrue(json.path("autoLines").asInt() > 0);
+        assertEquals(0, execute("validate", "-s", processor.toString(), "--exclusion-report", report.toString()));
     }
 
     @Test

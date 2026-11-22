@@ -325,18 +325,20 @@ public class Utils {
                                                          Map<URI, Map<BigDecimal, Integer>> coverageData)
             throws IOException, ParserConfigurationException, SAXException, XPathExpressionException {
 
-        discoverExternalDataProcessorSources(rootPath, ignored -> {}).forEach((key, uri) -> {
+        discoverExternalDataProcessorSources(rootPath, ignored -> {}, logger::error).forEach((key, uri) -> {
             uriListByKey.put(getExtensionUriKey(extensionName, key), uri);
             addCoverageData(coverageData, uri);
         });
     }
 
-    static Map<String, URI> discoverExternalDataProcessorSources(Path rootPath, Consumer<URI> formDescriptor)
+    static Map<String, URI> discoverExternalDataProcessorSources(Path rootPath, Consumer<URI> formDescriptor,
+                                                                  Consumer<String> reportProblem)
             throws IOException, ParserConfigurationException, SAXException, XPathExpressionException {
         DocumentBuilder builder = DocumentBuilderFactory.newInstance().newDocumentBuilder();
         Document xmlDocument = builder.parse(rootPath.toFile());
         return switch (xmlDocument.getDocumentElement().getTagName()) {
-            case "MetaDataObject" -> readConfiguratorExternalDataProcessor(rootPath, xmlDocument, builder, formDescriptor);
+            case "MetaDataObject" -> readConfiguratorExternalDataProcessor(rootPath, xmlDocument, builder,
+                    formDescriptor, reportProblem);
             case "mdclass:ExternalDataProcessor" -> readEdtExternalDataProcessor(rootPath, xmlDocument);
             default -> throw new IllegalArgumentException("Unknown source format: " + rootPath);
         };
@@ -344,7 +346,8 @@ public class Utils {
 
     private static Map<String, URI> readConfiguratorExternalDataProcessor(Path rootPath, Document xmlDocument,
                                                                            DocumentBuilder builder,
-                                                                           Consumer<URI> formDescriptor)
+                                                                           Consumer<URI> formDescriptor,
+                                                                           Consumer<String> reportProblem)
             throws XPathExpressionException {
 
         Map<String, URI> uriListByKey = new HashMap<>();
@@ -357,6 +360,9 @@ public class Utils {
                 parentPath.resolve(Paths.get(externalDataProcessorName, "Ext", "ObjectModule.bsl")).toUri());
 
         Path formsPath = parentPath.resolve(Paths.get(externalDataProcessorName, "Forms"));
+        if (Files.notExists(formsPath)) {
+            return uriListByKey;
+        }
         XPathExpression formUuidExpression = xPath.compile("/MetaDataObject/Form/@uuid");
         XPathExpression formNameExpression = xPath.compile("/MetaDataObject/Form/Properties/Name/text()");
         try (Stream<Path> walk = Files.list(formsPath)) {
@@ -367,14 +373,17 @@ public class Utils {
                             Document formXmlDocument = builder.parse(formXmlFile.toFile());
                             String formUuid = (String) formUuidExpression.evaluate(formXmlDocument, XPathConstants.STRING);
                             String formName = (String) formNameExpression.evaluate(formXmlDocument, XPathConstants.STRING);
+                            if (formUuid.isBlank() || formName.isBlank()) {
+                                throw new IllegalArgumentException("Missing form ID or name");
+                            }
                             uriListByKey.put(getUriKey(formUuid, ModuleType.FormModule, null),
                                     formsPath.resolve(Paths.get(formName, "Ext", "Form", "Module.bsl")).toUri());
-                        } catch (Exception e) {
-                            logger.error("Can't read form xml: {}", e.getLocalizedMessage());
+                        } catch (IOException | SAXException | XPathExpressionException | IllegalArgumentException e) {
+                            reportProblem.accept("Cannot read form XML " + formXmlFile + ": " + e.getLocalizedMessage());
                         }
                     });
-        } catch (IOException e) {
-            logger.error("Can't read forms of external data processor: {}", e.getLocalizedMessage());
+        } catch (IOException | UncheckedIOException e) {
+            reportProblem.accept("Cannot read forms in " + formsPath + ": " + e.getLocalizedMessage());
         }
         return uriListByKey;
     }
@@ -673,7 +682,7 @@ public class Utils {
                     }
                 });
                 writer.printf("LH:%d\n", bigDecimalsMap.values().stream().filter(aInteger -> aInteger > 0).count());
-                writer.printf("LF:%d\n", bigDecimalsMap.size());
+                writer.printf("LF:%d\n", bigDecimalsMap.values().stream().filter(hits -> hits >= 0).count());
                 writer.println("end_of_record");
             });
             long linesToCover = 0;

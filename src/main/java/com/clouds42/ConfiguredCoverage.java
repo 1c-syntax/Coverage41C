@@ -271,7 +271,8 @@ public final class ConfiguredCoverage {
     private static void readProcessor(Path root, String extension, URI projectUri, Map<String, URI> modules,
                                       Map<URI, Map<BigDecimal, Integer>> coverageData, ExclusionReport report,
                                       Set<URI> inputFiles) throws Exception {
-        Map<String, URI> processorModules = Utils.discoverExternalDataProcessorSources(root, inputFiles::add);
+        Map<String, URI> processorModules = Utils.discoverExternalDataProcessorSources(
+                root, inputFiles::add, report::warn);
         processorModules.forEach((key, uri) -> modules.put(Utils.getExtensionUriKey(extension, key), uri));
         ExclusionRules rules = ExclusionRules.empty();
         for (URI uri : new LinkedHashSet<>(processorModules.values())) {

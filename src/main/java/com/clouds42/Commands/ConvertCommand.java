@@ -128,7 +128,8 @@ public class ConvertCommand implements Callable<Integer> {
                     if (!lineNoNode.getAttributes().getNamedItem("covered").getTextContent().equals("true")) {
                         continue;
                     }
-                    BigDecimal lineNo = new BigDecimal(lineNoNode.getAttributes().getNamedItem("lineNumber").getTextContent());
+                    String number = lineNoNode.getAttributes().getNamedItem("lineNumber").getTextContent();
+                    BigDecimal lineNo = readRawLineNumber(number, entry.getValue());
                     if (!coverMap.containsKey(lineNo)) {
                         if (loggingOptions.isVerbose()) {
                             logger.info("Can't find line to cover {} in module {}", lineNo, fileUri);
@@ -191,16 +192,20 @@ public class ConvertCommand implements Callable<Integer> {
             if (!covered.equals("true") && !covered.equals("false")) {
                 throw new IllegalArgumentException("Invalid RAW covered value in module " + key + ": " + covered);
             }
-            String number = line.getAttribute("lineNumber");
-            try {
-                if (new BigDecimal(number).signum() > 0) {
-                    continue;
-                }
-            } catch (NumberFormatException ignored) {
-                // Report the offending module for malformed as well as non-positive line numbers.
-            }
-            throw new IllegalArgumentException("Invalid RAW line number in module " + key + ": " + number);
+            readRawLineNumber(line.getAttribute("lineNumber"), key);
         }
+    }
+
+    private static BigDecimal readRawLineNumber(String number, String key) {
+        try {
+            int line = new BigDecimal(number).intValueExact();
+            if (line > 0) {
+                return BigDecimal.valueOf(line);
+            }
+        } catch (NumberFormatException | ArithmeticException invalid) {
+            throw new IllegalArgumentException("Invalid RAW line number in module " + key + ": " + number, invalid);
+        }
+        throw new IllegalArgumentException("Invalid RAW line number in module " + key + ": " + number);
     }
 
     private static String rawModuleKey(Element file) {

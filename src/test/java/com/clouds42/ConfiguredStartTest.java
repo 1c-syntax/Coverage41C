@@ -50,6 +50,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static com.clouds42.ConfiguredCoverageTest.MODULE;
 import static com.clouds42.ConfiguredCoverageTest.OBJECT_ID;
 import static com.clouds42.ConfiguredCoverageTest.PROPERTY_ID;
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -111,6 +112,37 @@ class ConfiguredStartTest {
             assertEquals(0, start.get(10, TimeUnit.SECONDS));
             assertEquals(Map.of(2, false, 6, false),
                     ConfiguredCoverageTest.coverage(output, "configuration/" + MODULE));
+        }
+    }
+
+    @Test
+    void dumpAndStopReportWriteFailureAndDumpCanRetry() throws Exception {
+        Path project = TestUtils.copyConfiguration(directory);
+        Path output = directory.resolve("coverage.xml");
+        try (FakeDebugServer debugger = new FakeDebugServer();
+             ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            List<String> connection = List.of("-u", debugger.url(), "-i", "test_" + UUID.randomUUID());
+            Future<Integer> start = launch(executor, debugger, connection, output,
+                    "-s", project.resolve("configuration").toString());
+            int failedDump;
+            int retriedDump;
+            int stop;
+            try {
+                Files.createDirectory(output);
+                failedDump = send(connection, "dump");
+                Files.delete(output);
+                retriedDump = send(connection, "dump");
+                assertTrue(Files.isRegularFile(output));
+                Files.delete(output);
+                Files.createDirectory(output);
+            } finally {
+                stop = send(connection, "stop");
+            }
+            int result = start.get(10, TimeUnit.SECONDS);
+            assertAll(() -> assertEquals(1, failedDump, "dump with unwritable destination"),
+                    () -> assertEquals(0, retriedDump, "dump after restoring the destination"),
+                    () -> assertEquals(1, stop, "stop with unwritable destination"),
+                    () -> assertEquals(1, result, "start after a failed final write"));
         }
     }
 

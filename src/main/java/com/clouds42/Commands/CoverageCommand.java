@@ -99,6 +99,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     private final Map<URI, Set<BigDecimal>> autoLines = new HashMap<>();
     private volatile boolean useConfiguredAutoLines;
     private boolean coveragePrepared;
+    private boolean finalOutputFailed;
 
     private final Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<>() {
         @Override
@@ -202,7 +203,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         Thread.sleep(debuggerOptions.getPingTimeout());
 
         shutdown();
-        return targets.matchedAnyTarget() ? result : CommandLine.ExitCode.SOFTWARE;
+        return !finalOutputFailed && targets.matchedAnyTarget() ? result : CommandLine.ExitCode.SOFTWARE;
     }
 
     private void shutdown() throws IOException {
@@ -405,29 +406,28 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
 
     }
 
-    protected void gracefulShutdown(PrintWriter serverPipeOut) {
-        if (stopExecution.get()) {
-            return;
-        }
+    @Override
+    protected synchronized void gracefulShutdown(PrintWriter serverPipeOut) {
+        if (!stopExecution.get()) {
+            logger.info("Disabling profiling...");
+            try {
+                client.toggleProfiling(null);
+            } catch (RuntimeDebugClientException e) {
+                logger.error(e.getLocalizedMessage());
+            }
 
-        logger.info("Disabling profiling...");
-        try {
-            client.toggleProfiling(null);
-        } catch (RuntimeDebugClientException e) {
-            logger.error(e.getLocalizedMessage());
-        }
-
-        writeCoverageDump();
-        targets.summary().forEach(logger::info);
-        if (!targets.matchedAnyTarget()) {
-            logger.error(targets.noMatchMessage());
+            finalOutputFailed = !writeCoverageDump();
+            targets.summary().forEach(logger::info);
+            if (!targets.matchedAnyTarget()) {
+                logger.error(targets.noMatchMessage());
+            }
+            stopExecution.set(true);
+            logger.info("Bye!");
         }
         if (serverPipeOut != null) {
-            serverPipeOut.println(targets.matchedAnyTarget() ? PipeMessages.OK_RESULT : PipeMessages.FAIL_RESULT);
+            serverPipeOut.println(!finalOutputFailed && targets.matchedAnyTarget()
+                    ? PipeMessages.OK_RESULT : PipeMessages.FAIL_RESULT);
         }
-        stopExecution.set(true);
-
-        logger.info("Bye!");
     }
 
     @Override

@@ -145,8 +145,7 @@ public abstract class CoverServer {
     protected abstract boolean getSystemStarted();
 
     protected boolean writeCoverageDump() {
-        Utils.dumpCoverageFile(getCoverageData(), getMetadataOptions(), getOutputOptions());
-        return true;
+        return Utils.tryDumpCoverageFile(getCoverageData(), getMetadataOptions(), getOutputOptions());
     }
 
     protected void cleanCoverageData() {
