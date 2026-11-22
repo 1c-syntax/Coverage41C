@@ -23,6 +23,7 @@ package com.clouds42.Commands;
 
 import com.clouds42.BuildConfig;
 import com.clouds42.CommandLineOptions.*;
+import com.clouds42.ConfiguredCoverage;
 import com.clouds42.PipeMessages;
 import com.clouds42.Utils;
 import org.slf4j.Logger;
@@ -76,12 +77,16 @@ public class ConvertCommand implements Callable<Integer> {
 
         Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<URI,Map<BigDecimal, Integer>>();
 
-        Map<String, URI> uriListByKey = Utils.readMetadata(metadataOptions, srcDirExtensionName, coverageData);
+        ConfiguredCoverage.Prepared prepared = ConfiguredCoverage.prepare(metadataOptions, srcDirExtensionName,
+                coverageData, outputOptions.getOutputFile(), convertOptions.getInputRawXmlFile(), false);
+        Map<String, URI> uriListByKey = prepared.modules();
 
-        FileInputStream fileIS = new FileInputStream(convertOptions.getInputRawXmlFile());
         DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
         DocumentBuilder builder = builderFactory.newDocumentBuilder();
-        Document xmlDocument = builder.parse(fileIS);
+        Document xmlDocument;
+        try (FileInputStream fileIS = new FileInputStream(convertOptions.getInputRawXmlFile())) {
+            xmlDocument = builder.parse(fileIS);
+        }
         NodeList fileNodeList = xmlDocument.getElementsByTagName("file");
 
         // without -e and --extension the extension attribute is ignored: -s may point to sources of any extension, as before
@@ -148,6 +153,7 @@ public class ConvertCommand implements Callable<Integer> {
         if (skippedModulesCount > 0) {
             logger.info("Skipped {} modules of configuration or extensions without sources", skippedModulesCount);
         }
+        prepared.writeReport();
         Utils.dumpCoverageFile(coverageData, metadataOptions, outputOptions);
         logger.info("Convert done");
 

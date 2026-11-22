@@ -114,8 +114,7 @@ public abstract class CoverServer {
                             out.println(PipeMessages.OK_RESULT);
                             return true;
                         case PipeMessages.CLEAN_COMMAND:
-                            getCoverageData().forEach((uri, bigDecimalIntegerMap) ->
-                                    bigDecimalIntegerMap.replaceAll((k, v) -> 0));
+                            cleanCoverageData();
                             out.println(PipeMessages.OK_RESULT);
                             return true;
                         case PipeMessages.CHECK_COMMAND:
@@ -140,6 +139,10 @@ public abstract class CoverServer {
     }
 
     protected abstract boolean getSystemStarted();
+
+    protected void cleanCoverageData() {
+        getCoverageData().forEach((uri, lines) -> lines.replaceAll((line, hits) -> 0));
+    }
 
     protected abstract void gracefulShutdown(PrintWriter out) throws IOException;
 

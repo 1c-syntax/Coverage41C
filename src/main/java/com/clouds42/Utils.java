@@ -317,7 +317,7 @@ public class Utils {
                 && module.getSupportVariant().compareTo(removeSupport) <= 0;
     }
 
-    private static void readExternalDataProcessorSources(Path rootPath,
+    static void readExternalDataProcessorSources(Path rootPath,
                                                          String extensionName,
                                                          Map<String, URI> uriListByKey,
                                                          Map<URI, Map<BigDecimal, Integer>> coverageData)

@@ -29,6 +29,7 @@ import picocli.CommandLine.Option;
 import picocli.CommandLine.ParameterException;
 import picocli.CommandLine.Spec;
 
+import java.io.File;
 import java.lang.invoke.MethodHandles;
 import java.util.HashSet;
 import java.util.List;
@@ -46,6 +47,12 @@ public class MetadataOptions {
 
     @Option(names = {"-r", "--removeSupport"}, description = "Remove support values: ${COMPLETION-CANDIDATES}. Default - ${DEFAULT-VALUE}", defaultValue = "NONE")
     private SupportVariant removeSupport;
+
+    @Option(names = "--config", description = "Coverage configuration file or directory with *.json files")
+    private File configFile;
+
+    @Option(names = "--exclusion-report", description = "Write the coverage exclusion report to a JSON file")
+    private File exclusionReportFile;
 
     @Option(names = {"--extension"}, paramLabel = "<extensionName>=<path>",
             converter = ExtensionSource.Converter.class,
@@ -83,6 +90,14 @@ public class MetadataOptions {
 
     public void setRemoveSupport(SupportVariant removeSupport) {
         this.removeSupport = removeSupport;
+    }
+
+    public File getConfigFile() {
+        return configFile;
+    }
+
+    public File getExclusionReportFile() {
+        return exclusionReportFile;
     }
 
     public List<ExtensionSource> getExtensionSources() {

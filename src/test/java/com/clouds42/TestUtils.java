@@ -28,10 +28,36 @@ import org.xmlunit.diff.ElementSelectors;
 import org.xmlunit.matchers.CompareMatcher;
 
 import javax.xml.transform.Source;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.stream.Stream;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 
 public class TestUtils {
+
+    public static final Path CONFIGURATION = Path.of("src/test/resources/configuration");
+
+    // Копирует тестовую конфигурацию в <directory>/project/configuration, чтобы тест мог менять модули.
+    public static Path copyConfiguration(Path directory) throws IOException {
+        Path project = directory.resolve("project");
+        copyDirectory(CONFIGURATION, project.resolve("configuration"));
+        return project;
+    }
+
+    public static void copyDirectory(Path source, Path target) throws IOException {
+        try (Stream<Path> files = Files.walk(source)) {
+            for (Path file : (Iterable<Path>) files::iterator) {
+                Path copy = target.resolve(source.relativize(file).toString());
+                if (Files.isDirectory(file)) {
+                    Files.createDirectories(copy);
+                } else {
+                    Files.copy(file, copy);
+                }
+            }
+        }
+    }
 
     public static void assertCoverageEqual(String expectedXmlFile, String controlXmlFile) {
         Source expectedXml = Input.fromFile(expectedXmlFile).build();

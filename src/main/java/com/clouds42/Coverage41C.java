@@ -39,7 +39,8 @@ import java.util.concurrent.Callable;
                 SendCleanMessageCommand.class,
                 SendDumpMessageCommand.class,
                 SendStatsMessageCommand.class,
-                ConvertCommand.class}
+                ConvertCommand.class,
+                ValidateCommand.class}
                 )
 public class Coverage41C implements Callable<Integer> {
 
