@@ -74,6 +74,16 @@ class PrefixRoutinesTest {
     }
 
     @Test
+    void insertionDirectivesBetweenMethodKeywordAndNameDoNotDefeatPrecheck() {
+        assertEquals(List.of("тестПодготовить"), names(parse("Процедура",
+                "#Вставка", "тестПодготовить()", "#КонецВставки", "ВыполнитьШаг();", "КонецПроцедуры")));
+        assertEquals(List.of("demoBuild"), names(parse("Function",
+                "# Insert", "demoBuild()", "#EndInsert", "Return 1;", "EndFunction")));
+        assertEquals(List.of(), names(parse("Процедура",
+                "#Вставка", "ТестПодготовить()", "#КонецВставки", "ВыполнитьШаг();", "КонецПроцедуры")));
+    }
+
+    @Test
     void prefixIsCaseSensitiveAndComparedWithStartOfName() {
         PrefixRoutines routines = parse("Процедура ТестХ()", "КонецПроцедуры", "Процедура префикстестХ()", "КонецПроцедуры",
                 "Процедура тест()", "КонецПроцедуры", "Процедура тестХ_Ещё()", "КонецПроцедуры");

@@ -238,8 +238,10 @@ final class ExclusionRules {
     }
 
     static Pattern routinePrecheck(List<ScopePrefix> prefixes) {
-        return Pattern.compile("(?iu:процедура|функция|procedure|function)(?=\\s|//)"
-                + "\\s*+(?://[^\\r\\n]*+[\\r\\n]\\s*+)*+(?:" + prefixes.stream()
+        // The lexer hides insertion directives, just like comments between a method keyword and its name.
+        String hiddenTokens = "(?:\\s++|//[^\\r\\n]*+|(?iu:#[ \\t]*(?:вставка|конецвставки|insert|endinsert)))*+";
+        return Pattern.compile("(?iu:процедура|функция|procedure|function)(?=\\s|//|#)"
+                + hiddenTokens + "(?:" + prefixes.stream()
                 .map(prefix -> Pattern.quote(prefix.getPrefix())).collect(Collectors.joining("|")) + ")");
     }
 
