@@ -132,9 +132,8 @@ public class ConvertCommand implements Callable<Integer> {
                     if (!coverMap.containsKey(lineNo)) {
                         if (loggingOptions.isVerbose()) {
                             logger.info("Can't find line to cover {} in module {}", lineNo, fileUri);
-                            try {
-                                Stream<String> all_lines = Files.lines(Paths.get(fileUri));
-                                String specific_line_n = all_lines.skip(lineNo.longValue() - 1).findFirst().get();
+                            try (Stream<String> lines = Files.lines(Paths.get(fileUri))) {
+                                String specific_line_n = lines.skip(lineNo.longValue() - 1).findFirst().get();
                                 logger.info(">>> {}", specific_line_n);
                             } catch (Exception e) {
                                 logger.error(e.getLocalizedMessage());

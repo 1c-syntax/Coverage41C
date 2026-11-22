@@ -323,9 +323,8 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                             if (!rawMode && !coverMap.containsKey(lineNo)) {
                                 if (loggingOptions.isVerbose()) {
                                     logger.info("Can't find line to cover {} in module {}", lineNo, uri);
-                                    try {
-                                        Stream<String> all_lines = Files.lines(Paths.get(uri));
-                                        Optional<String> first = all_lines.skip(lineNo.longValue() - 1).findFirst();
+                                    try (Stream<String> lines = Files.lines(Paths.get(uri))) {
+                                        Optional<String> first = lines.skip(lineNo.longValue() - 1).findFirst();
                                         if (first.isPresent()) {
                                             String specific_line_n = first.get();
                                             logger.info(">>> {}", specific_line_n);
