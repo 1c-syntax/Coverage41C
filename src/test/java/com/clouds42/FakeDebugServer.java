@@ -88,6 +88,7 @@ class FakeDebugServer implements AutoCloseable {
 
     void failFinalPoll(int number) { failedFinalPollNumber = number; }
     void failTargetLookups() { failTargetLookups = true; }
+    void restoreTargetLookups() { failTargetLookups = false; }
     private final AtomicBoolean failOnePing = new AtomicBoolean();
     private final CountDownLatch failedPing = new CountDownLatch(1);
 
@@ -121,6 +122,7 @@ class FakeDebugServer implements AutoCloseable {
     static final class Request {
         final String command;
         final String body;
+        final long receivedAt = System.nanoTime();
 
         Request(String command, String body) {
             this.command = command;

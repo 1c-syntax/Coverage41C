@@ -537,6 +537,8 @@ class CoverMapBuilderTest {
         assertEquals(cover(module.split("\n")), result);
         assertEquals(2, report.getChangeBlocks().iterator().next().getBlocks());
         assertEquals(1, report.getAutomaticallyClosedBlocks().size());
+        assertEquals(2, report.getAutomaticallyClosedBlocks().get(0).getBeginLine());
+        assertEquals(7, report.getAutomaticallyClosedBlocks().get(0).getEndLine());
         assertEquals(0, report.getAutomaticallyClosedBlocks().get(0).getIncludedLines());
     }
 

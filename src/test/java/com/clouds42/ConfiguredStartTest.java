@@ -119,6 +119,65 @@ class ConfiguredStartTest {
     }
 
     @Test
+    void unresolvedTargetsAreRefreshedLessOftenUntilAnAttachmentResetsTheInterval() throws Exception {
+        checkTargetRefreshBackoff(false);
+    }
+
+    @Test
+    void failedTargetRefreshesAlsoBackOffAndRecover() throws Exception {
+        checkTargetRefreshBackoff(true);
+    }
+
+    private void checkTargetRefreshBackoff(boolean failRefresh) throws Exception {
+        DebugTargetId late = FakeDebugServer.target(UUID.randomUUID(), DebugTargetType.MANAGED_CLIENT, null);
+        DebugTargetId unresolved = FakeDebugServer.target(UUID.randomUUID(), DebugTargetType.MANAGED_CLIENT, null);
+        try (FakeDebugServer debugger = new FakeDebugServer();
+             ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            debugger.setTargets(late, unresolved);
+            List<String> connection = List.of("-u", debugger.url(), "-i", "test_" + UUID.randomUUID());
+            Future<Integer> start = launch(executor, debugger, connection, directory.resolve("raw.xml"),
+                    "--include-user", "chosen", "-n", "test-area");
+            try {
+                if (failRefresh) debugger.failTargetLookups();
+                List<FakeDebugServer.Request> lookups = awaitTargetLookups(debugger, 4, 8);
+                long interval = lookups.get(3).receivedAt - lookups.get(2).receivedAt;
+                assertTrue(interval >= TimeUnit.MILLISECONDS.toNanos(1800), "retries back off after no progress");
+                // Wait for the refresh to finish before giving a target its name.
+                debugger.deliver();
+                debugger.restoreTargetLookups();
+                late.setUserName("chosen");
+                debugger.setTargets(late, unresolved);
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(6);
+                while (debugger.requests("attachDetachDbgTargets").isEmpty() && System.nanoTime() < deadline) {
+                    Thread.sleep(10);
+                }
+                assertEquals(1, debugger.requests("attachDetachDbgTargets").size());
+                assertTrue(debugger.requests("attachDetachDbgTargets").getFirst().body.contains(late.getId()));
+                // Another nameless target keeps refresh active. Success restores the short interval.
+                int countAtAttachment = debugger.requests("getDbgTargets").size();
+                List<FakeDebugServer.Request> after = awaitTargetLookups(debugger, countAtAttachment + 1, 4);
+                long resumedInterval = after.get(countAtAttachment).receivedAt - after.get(countAtAttachment - 1).receivedAt;
+                assertTrue(resumedInterval < TimeUnit.SECONDS.toNanos(4), "attachment resets retry interval");
+                assertTrue(after.stream().allMatch(request -> request.body.contains("test-area")));
+            } finally {
+                send(connection, "stop");
+            }
+            assertEquals(0, start.get(10, TimeUnit.SECONDS));
+        }
+    }
+
+    private static List<FakeDebugServer.Request> awaitTargetLookups(FakeDebugServer debugger, int count,
+                                                                   int timeoutSeconds) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds);
+        while (debugger.requests("getDbgTargets").size() < count && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        List<FakeDebugServer.Request> requests = debugger.requests("getDbgTargets");
+        assertTrue(requests.size() >= count, "expected target refresh was not sent");
+        return requests;
+    }
+
+    @Test
     void stopCollectsLateMeasuresAfterAnEmptyFinalPollAndAppliesTheUserFilter() throws Exception {
         DebugTargetId allowed = FakeDebugServer.target(UUID.randomUUID(), DebugTargetType.MANAGED_CLIENT, "chosen");
         DebugTargetId rejected = FakeDebugServer.target(UUID.randomUUID(), DebugTargetType.MANAGED_CLIENT, "other");

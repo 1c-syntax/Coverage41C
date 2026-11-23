@@ -22,16 +22,21 @@
 package com.clouds42;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.clouds42.CommandLineOptions.MetadataOptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
+import picocli.CommandLine;
 
 import javax.xml.parsers.DocumentBuilderFactory;
+import java.math.BigDecimal;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -111,9 +116,17 @@ class ConfiguredCoverageTest {
 
     @Test
     void rawCommentsAndWhitespaceAreAllowed() throws Exception {
-        assertNoHits("<coverage><![CDATA[ \n]]><!-- comment --><file path=\"object/property\">\n<!-- comment -->\n"
-                + "<lineToCover covered=\"false\" lineNumber=\"2\"> <!-- comment --><![CDATA[ ]]></lineToCover>"
-                + "</file></coverage>");
+        Path sources = project().resolve("configuration");
+        Path input = Files.writeString(directory.resolve("raw.xml"), """
+                <coverage><![CDATA[
+                ]]><!-- comment --><file path="/%s/%s">
+                <!-- comment -->
+                  <lineToCover covered="true" lineNumber="2"> <!-- comment --><![CDATA[ ]]></lineToCover>
+                </file></coverage>
+                """.formatted(OBJECT_ID, PROPERTY_ID));
+        Path output = directory.resolve("coverage.xml");
+        assertEquals(0, execute("convert", "-s", sources.toString(), "-c", input.toString(), "-o", output.toString()));
+        assertEquals(Map.of(2, true, 4, false, 6, false), coverage(output, MODULE));
     }
 
     @Test
@@ -158,8 +171,9 @@ class ConfiguredCoverageTest {
     void acceptsLegacyRawWithAndWithoutVersionOne() throws Exception {
         Path sources = project().resolve("configuration");
         Path input = directory.resolve("raw.xml");
-        Path output = directory.resolve("coverage.xml");
+        int variant = 0;
         for (String root : List.of("<coverage>", "<coverage version=\"1\">")) {
+            Path output = directory.resolve("coverage-" + variant++ + ".xml");
             Files.writeString(input, rawWithLineNumber("2").replace("<coverage>", root));
             assertEquals(0, execute("convert", "-s", sources.toString(), "-c", input.toString(),
                     "-o", output.toString()), root);
@@ -680,6 +694,17 @@ class ConfiguredCoverageTest {
         var warnings = new ObjectMapper().readTree(report.toFile()).path("warnings");
         assertTrue(warnings.toString().contains("ObjectModule.bsl: cannot read module"));
 
+        class Options {
+            @CommandLine.Mixin MetadataOptions metadata = new MetadataOptions();
+        }
+        Options options = new Options();
+        new CommandLine(options).parseArgs("-s", processor.toString(), "--exclusion-report", report.toString());
+        Map<URI, Map<BigDecimal, Integer>> data = new HashMap<>();
+        var prepared = ConfiguredCoverage.prepare(options.metadata, "", data, null, null, false);
+        assertEquals(objectModule.toUri(), prepared.modules().get("object-id/a637f77f-3840-441d-a1c3-699c8c5cb7e0"));
+        assertTrue(data.containsKey(objectModule.toUri()));
+        assertTrue(data.get(objectModule.toUri()).isEmpty(), "unreadable source has no measurable lines");
+
         Path input = Files.writeString(directory.resolve("raw.xml"), """
                 <coverage><file path="/object-id/a637f77f-3840-441d-a1c3-699c8c5cb7e0">
                   <lineToCover covered="true" lineNumber="2"/>
@@ -688,7 +713,9 @@ class ConfiguredCoverageTest {
         Path output = directory.resolve("coverage.xml");
         assertEquals(0, execute("convert", "-s", processor.toString(), "-c", input.toString(),
                 "-o", output.toString(), "--exclusion-report", report.toString()));
-        assertTrue(Files.isRegularFile(output));
+        assertEquals(0, Utils.newInputXmlBuilder().parse(output.toFile()).getElementsByTagName("lineToCover").getLength());
+        assertTrue(new ObjectMapper().readTree(report.toFile()).path("warnings").toString()
+                .contains("ObjectModule.bsl: cannot read module"));
     }
 
     @Test

@@ -108,6 +108,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     private Map<String, URI> modules = Map.of();
     private final Set<String> externalDataProcessors = new HashSet<>();
     private long targetLookupAllowedAt = System.nanoTime();
+    private int targetLookupIntervalSeconds = 1;
 
     private final Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<>() {
         @Override
@@ -127,7 +128,11 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     private volatile boolean systemStarted = false;
 
     private void connectAllTargets(List<DebugTargetId> debugTargets) {
-        logger.info("Current debug targets size: {}", debugTargets.size());
+        if (systemStarted) {
+            logger.debug("Current debug targets size: {}", debugTargets.size());
+        } else {
+            logger.info("Current debug targets size: {}", debugTargets.size());
+        }
         debugTargets.forEach(debugTarget -> {
             if (targets.isActive() && !targets.register(debugTarget)) {
                 return;
@@ -140,6 +145,8 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                 client.attachRuntimeDebugTargets(Collections.singletonList(UUID.fromString(debugTarget.getId())));
                 if (targets.isActive()) {
                     targets.attached(debugTarget.getId());
+                    targetLookupIntervalSeconds = 1;
+                    targetLookupAllowedAt = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
                 }
             } catch (RuntimeDebugClientException e) {
                 logger.error(e.getLocalizedMessage());
@@ -253,6 +260,8 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
             client.attachRuntimeDebugTargets(Collections.singletonList(UUID.fromString(targetId.getId())));
             if (targets.isActive()) {
                 targets.attached(targetId.getId());
+                targetLookupIntervalSeconds = 1;
+                targetLookupAllowedAt = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
             }
         } catch (RuntimeDebugClientException e) {
             logger.info("Command: {} error!", command.getCmdID().getName());
@@ -269,12 +278,13 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                 }
                 processCommands(client.ping(), true);
                 if (targets.hasPendingTargets() && System.nanoTime() - targetLookupAllowedAt >= 0) {
-                    targetLookupAllowedAt = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
                     try {
                         connectAllTargets(listDebugTargets());
                     } catch (RuntimeDebugClientException e) {
                         logger.warn("Cannot refresh debug targets: {}", e.getLocalizedMessage());
                     }
+                    targetLookupAllowedAt = System.nanoTime() + TimeUnit.SECONDS.toNanos(targetLookupIntervalSeconds);
+                    targetLookupIntervalSeconds = Math.min(30, targetLookupIntervalSeconds * 2);
                 }
             } catch (RuntimeDebugClientException | RuntimeException e) {
                 // Stop sees this failure before it can acquire the lock and publish the final result.
