@@ -61,6 +61,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.zip.Deflater;
 import java.util.zip.DeflaterOutputStream;
@@ -81,6 +82,14 @@ class FakeDebugServer implements AutoCloseable {
     private final BlockingQueue<List<DBGUIExtCmdInfoBase>> finalPolls = new LinkedBlockingQueue<>();
     private volatile boolean profilingDisabled;
     private volatile boolean failFinalPolls;
+    private final AtomicBoolean failOnePing = new AtomicBoolean();
+    private final CountDownLatch failedPing = new CountDownLatch(1);
+
+    void failNextPing() { failOnePing.set(true); }
+
+    boolean awaitFailedPing() throws InterruptedException {
+        return failedPing.await(5, TimeUnit.SECONDS);
+    }
     private final BlockingQueue<PausedPing> pausedPings = new LinkedBlockingQueue<>();
 
     static final class PausedPing implements AutoCloseable {
@@ -222,6 +231,11 @@ class FakeDebugServer implements AutoCloseable {
             requests.add(new Request(command, body));
             if (command.equals("setMeasureMode")) {
                 profilingDisabled = !body.contains("measureModeSeanceID");
+            }
+            if (command.equals("pingDebugUIParams") && failOnePing.compareAndSet(true, false)) {
+                exchange.sendResponseHeaders(503, -1);
+                failedPing.countDown();
+                return;
             }
             if (command.equals("pingDebugUIParams") && profilingDisabled && failFinalPolls) {
                 exchange.sendResponseHeaders(503, -1);

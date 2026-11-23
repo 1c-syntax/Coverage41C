@@ -643,8 +643,9 @@ public class Utils {
     }
 
     private static void requireUsableStdout(PrintStream stdout) throws IOException {
-        if (stdout.checkError()) {
-            throw new IOException("Cannot write coverage to standard output: the stream reports an I/O error");
+        boolean error = stdout.checkError();
+        if (error || Thread.currentThread().isInterrupted()) {
+            throw new IOException("Cannot write coverage to standard output: I/O error or interrupted write");
         }
     }
 
@@ -737,7 +738,7 @@ public class Utils {
                     writer.flush();
                 }
             }
-            if (writer.checkError() || (stdout != null && stdout.checkError())) {
+            if (writer.checkError() || (stdout != null && (stdout.checkError() || Thread.currentThread().isInterrupted()))) {
                 logger.error("Cannot write coverage: {}", stdout == null ? outputOptions.getOutputFile() : "standard output");
                 return false;
             }

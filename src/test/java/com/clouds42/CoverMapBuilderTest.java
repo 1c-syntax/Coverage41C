@@ -772,6 +772,62 @@ class CoverMapBuilderTest {
         return result;
     }
 
+    @Test
+    void fileOffWithoutMeasurableLinesStillRecordsItsReason() {
+        ExclusionReport report = new ExclusionReport();
+        assertEquals(Map.of(), cover(report, "// Cover:file-off — generated", "Перем Счётчик;"));
+        assertEquals(0, report.getTotalLines());
+        assertEquals(0, report.getExcludedLines());
+        assertEquals(1, report.getEntries().size());
+        ExclusionReport.Entry entry = report.getEntries().iterator().next();
+        assertEquals("generated", entry.getReason());
+        assertEquals(Set.of("Module.bsl"), entry.getModules());
+        assertEquals(0, entry.getExcludedLines());
+        assertTrue(report.getWarnings().isEmpty());
+    }
+
+    @Test
+    void autoLineRuleDoesNotCountAnUnchangedLineAsReturnedByABlock() throws Exception {
+        for (boolean automatic : List.of(false, true)) {
+            ExclusionRules rules = rules("{'auto':{'objects':['CommonModule.М'],'lines':['.*']},"
+                    + "'changeMarkers':{},'unclosedBlocks':{'enabled':true}}");
+            String source = automatic ? text("Процедура А()", "Шаг(); //++", "КонецПроцедуры")
+                    : text("Процедура А()", "Шаг(); //++", "//--", "КонецПроцедуры");
+            ExclusionReport report = new ExclusionReport();
+            Map<Integer, Integer> result = cover(rules, report, COMMON_MODULE, source);
+            assertEquals(cover(rules, new ExclusionReport(), COMMON_MODULE,
+                    source.replace("//++", "// comment").replace("//--", "// comment")), result);
+            assertEquals(-1, result.get(2));
+            assertEquals(0, report.getIncludedLines());
+            assertEquals(0, report.getChangeBlocks().iterator().next().getIncludedLines());
+            report.getAutomaticallyClosedBlocks().forEach(block -> assertEquals(0, block.getIncludedLines()));
+        }
+    }
+
+    @Test
+    void blockStillCountsOptionalLinesReturnedFromAModuleExclusion() throws Exception {
+        ExclusionRules rules = rules("{'exclude':{'objects':['CommonModule.М']},"
+                + "'auto':{'lines':['.*']},'changeMarkers':{}}");
+        ExclusionReport report = new ExclusionReport();
+        assertEquals(Map.of(2, -1), cover(rules, report, COMMON_MODULE,
+                text("Процедура А()", "Шаг(); //++", "//--", "КонецПроцедуры")));
+        assertEquals(1, report.getIncludedLines());
+    }
+
+    @Test
+    void unclosedBlockOnAsyncKeywordEndsWithTheMethod() throws Exception {
+        for (String[] method : new String[][] {
+                {"Асинх", "Процедура Пример()", "КонецПроцедуры"},
+                {"Async", "Function Sample()", "EndFunction"}}) {
+            ExclusionReport report = new ExclusionReport();
+            Map<Integer, Integer> result = outside(rules("{'changeMarkers':{},'unclosedBlocks':{'enabled':true}}"),
+                    report, text(method[0] + " //++", method[1], "Шаг();", method[2],
+                            "Процедура Следующая()", "ЧужойШаг();", "КонецПроцедуры"));
+            assertEquals(Map.of(3, 0, 4, 0), result);
+            assertEquals("method", report.getAutomaticallyClosedBlocks().getFirst().getBoundary());
+        }
+    }
+
     private ExclusionRules scoped(String json) throws IOException {
         Path file = tempDir.resolve("team.json");
         Files.writeString(file, json.replace('\'', '"'));

@@ -100,19 +100,22 @@ final class CoverMapBuilder {
             Arrays.sort(linesToCover);
         }
         List<Source> sources = new ArrayList<>();
-        boolean hasModuleRule = false;
+        CoverageMarker.Kind moduleRuleKind = null;
         // Rules over the whole module exclude lines of prefixed methods, but not lines of change blocks.
         if (!outside || !found.isEmpty()) {
             for (ExclusionRules.Rule rule : rules.getRules()) {
                 if (!rule.isLineRule() && rule.matches(module)) {
                     // Change blocks take their lines back from a rule that excludes the whole module.
                     sources.add(Source.rule(rule, true, line -> !blocks.covers(line)));
-                    hasModuleRule = true;
+                    if (moduleRuleKind != CoverageMarker.Kind.OFF) {
+                        moduleRuleKind = rule.getKind();
+                    }
                 }
             }
         }
+        markers.getMarkers().stream().filter(marker -> linesToCover.length > 0 || marker.isFileOff())
+                .forEach(marker -> sources.add(Source.marker(module, marker)));
         if (linesToCover.length > 0) {
-            markers.getMarkers().forEach(marker -> sources.add(Source.marker(module, marker)));
             for (ExclusionRules.Rule rule : rules.getRules()) {
                 if (rule.isLineRule()) {
                     sources.add(Source.rule(rule, false,
@@ -148,7 +151,9 @@ final class CoverMapBuilder {
             } else {
                 coverMap.put(new BigDecimal(line), 0);
             }
-            if (inBlock && (hasModuleRule || (outside && prefixSources.isEmpty()))) {
+            // Count only a line absent without the block, or one made mandatory from module AUTO.
+            if (inBlock && ((outside && prefixSources.isEmpty()) || moduleRuleKind == CoverageMarker.Kind.OFF
+                    || (moduleRuleKind == CoverageMarker.Kind.AUTO && kind != CoverageMarker.Kind.AUTO))) {
                 linesReturnedByBlocks.add(line);
                 blocks.sourcesCovering(line).forEach(source -> includedBySource.merge(source, 1, Integer::sum));
             }
@@ -277,7 +282,7 @@ final class CoverMapBuilder {
 
         private static Source marker(ModuleId module, CoverageMarker marker) {
             return new Source(module.getPath() + ":" + marker.getLine() + " → " + marker.getLabel(),
-                    "", marker.getReason(), marker.getKind(), true, false, marker::covers);
+                    "", marker.getReason(), marker.getKind(), true, marker.isFileOff(), marker::covers);
         }
     }
 }

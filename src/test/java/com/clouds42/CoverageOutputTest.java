@@ -24,16 +24,21 @@ package com.clouds42;
 import com.clouds42.CommandLineOptions.MetadataOptions;
 import com.clouds42.CommandLineOptions.OutputOptions;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestFactory;
+import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.Arrays;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -98,6 +103,51 @@ class CoverageOutputTest {
             assertTrue(bytes.size() > 0);
         } finally {
             System.setOut(original);
+        }
+    }
+
+    @TestFactory
+    Stream<DynamicTest> interruptedStdoutIsReportedWithoutClearingTheInterrupt() {
+        return Arrays.stream(OutputOptions.OutputFormat.values()).map(format ->
+                DynamicTest.dynamicTest(format.toString(), () -> {
+                    PrintStream original = System.out;
+                    ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+                    try {
+                        PrintStream stdout = new PrintStream(new OutputStream() {
+                            @Override public void write(int value) throws IOException {
+                                if (bytes.size() == 0) {
+                                    bytes.write(value);
+                                } else {
+                                    throw new InterruptedIOException("partial write");
+                                }
+                            }
+                        });
+                        System.setOut(stdout);
+                        boolean success = dump(format);
+                        assertEquals(1, bytes.size());
+                        assertFalse(stdout.checkError());
+                        assertTrue(Thread.currentThread().isInterrupted());
+                        assertFalse(success);
+                    } finally {
+                        System.setOut(original);
+                        Thread.interrupted();
+                    }
+                }));
+    }
+
+    @Test
+    void previouslyInterruptedStdoutIsRejectedBeforeWriting() {
+        PrintStream original = System.out;
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try {
+            System.setOut(new PrintStream(bytes));
+            Thread.currentThread().interrupt();
+            assertFalse(dump(OutputOptions.OutputFormat.GENERIC_COVERAGE));
+            assertEquals(0, bytes.size());
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            System.setOut(original);
+            Thread.interrupted();
         }
     }
 

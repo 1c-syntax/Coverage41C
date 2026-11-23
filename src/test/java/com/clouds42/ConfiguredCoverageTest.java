@@ -77,13 +77,43 @@ class ConfiguredCoverageTest {
     }
 
     @Test
+    void rejectsTextInsteadOfRawRecordsBeforePublishing() throws Exception {
+        assertRejectedBeforePublishing("<coverage>lost records</coverage>");
+    }
+
+    @Test
+    void rejectsCdataInsteadOfRawRecordsBeforePublishing() throws Exception {
+        assertRejectedBeforePublishing("<coverage><![CDATA[lost records]]></coverage>");
+    }
+
+    @Test
+    void rejectsTextInsteadOfRawLinesBeforePublishing() throws Exception {
+        assertRejectedBeforePublishing("<coverage><file path=\"object/property\">lost lines</file></coverage>");
+    }
+
+    @Test
+    void rejectsTextInsideRawLineBeforePublishing() throws Exception {
+        assertRejectedBeforePublishing("<coverage><file path=\"object/property\">"
+                + "<lineToCover covered=\"true\" lineNumber=\"2\"><![CDATA[unexpected]]></lineToCover></file></coverage>");
+    }
+
+    @Test
+    void rejectsNestedRawLineElementsBeforePublishing() throws Exception {
+        assertRejectedBeforePublishing("<coverage><file path=\"object/property\">"
+                + "<lineToCover covered=\"true\" lineNumber=\"2\"><lineToCover covered=\"true\" lineNumber=\"4\"/>"
+                + "</lineToCover></file></coverage>");
+    }
+
+    @Test
     void rejectsUnknownRawLineElementBeforePublishing() throws Exception {
         assertRejectedBeforePublishing("<coverage><file path=\"object/property\"><lineToCovre/></file></coverage>");
     }
 
     @Test
     void rawCommentsAndWhitespaceAreAllowed() throws Exception {
-        assertNoHits("<coverage><!-- comment --><file path=\"object/property\">\n<!-- comment -->\n</file></coverage>");
+        assertNoHits("<coverage><![CDATA[ \n]]><!-- comment --><file path=\"object/property\">\n<!-- comment -->\n"
+                + "<lineToCover covered=\"false\" lineNumber=\"2\"> <!-- comment --><![CDATA[ ]]></lineToCover>"
+                + "</file></coverage>");
     }
 
     @Test

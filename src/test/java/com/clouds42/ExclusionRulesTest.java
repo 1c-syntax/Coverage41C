@@ -400,7 +400,7 @@ class ExclusionRulesTest {
     @Test
     void rejectsBooleanAndNumericRuleValuesButAcceptsStringPatterns() throws Exception {
         for (String value : List.of("true", "42", "1.5")) {
-            File file = write("rules.json", "{'exclude':{'lines':[" + value + "]}}");
+            File file = write("rules.json", "{'exclude':{'objects':['CommonModule.Sample'],'lines':[" + value + "]}}");
             assertThrows(IllegalArgumentException.class, () -> load(file), value);
         }
         ExclusionRules rules = load(write("rules.json", "{'exclude':{'lines':['true','42','1.5']}}"));
@@ -967,14 +967,25 @@ class ExclusionRulesTest {
         assertEquals("users.json → includeUsers[0]: empty value", e.getMessage());
     }
 
+    @Test
+    void pathGlobCanContainAnApostrophe() throws Exception {
+        ExclusionRules.Rule rule = pathRule("src/O'Brien/**");
+        assertTrue(rule.matches(module("src/O'Brien/Module.bsl")));
+        assertFalse(rule.matches(module("src/OBrien/Module.bsl")));
+    }
+
     private ExclusionRules.Rule pathRule(String glob) throws IOException {
-        return load(write("paths.json", new ObjectMapper().writeValueAsString(
+        return load(writeJson("paths.json", new ObjectMapper().writeValueAsString(
                 Map.of("exclude", Map.of("paths", List.of(glob)))))).getRules().get(0);
     }
 
     private File write(String name, String json) throws IOException {
+        return writeJson(name, json.replace('\'', '"'));
+    }
+
+    private File writeJson(String name, String json) throws IOException {
         Path file = tempDir.resolve(name);
-        Files.writeString(file, json.replace('\'', '"'));
+        Files.writeString(file, json);
         return file.toFile();
     }
 

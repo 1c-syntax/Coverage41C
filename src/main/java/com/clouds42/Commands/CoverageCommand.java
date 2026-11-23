@@ -276,6 +276,10 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                         logger.warn("Cannot refresh debug targets: {}", e.getLocalizedMessage());
                     }
                 }
+            } catch (RuntimeDebugClientException e) {
+                // Stop sees this failure before it can acquire the lock and publish the final result.
+                finalCollectionFailed = true;
+                throw e;
             } finally {
                 collectionLock.unlock();
             }

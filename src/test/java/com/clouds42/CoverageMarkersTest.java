@@ -298,6 +298,18 @@ class CoverageMarkersTest {
         assertEquals(List.of(), ranges(parse("// Cover:ВКЛ", "Б();")));
     }
 
+    @Test
+    void inlineMarkerOnAsyncKeywordCoversTheMethod() {
+        for (String[] method : new String[][] {
+                {"Асинх", "Процедура Пример()", "КонецПроцедуры"},
+                {"Асинх", "Функция Пример()", "КонецФункции"},
+                {"Async", "Procedure Sample()", "EndProcedure"},
+                {"Async", "Function Sample()", "EndFunction"}}) {
+            assertEquals(List.of("OFF Cover:off 2..5"), ranges(parse("&НаКлиенте",
+                    method[0] + " // Cover:off", method[1], "Шаг();", method[2])));
+        }
+    }
+
     static CoverageMarkers parse(String... lines) {
         return CoverageMarkers.parse(new BSLTokenizer(String.join("\n", lines) + "\n"));
     }

@@ -326,6 +326,10 @@ final class CoverageMarkers {
 
     private static int keywordLine(ParserRuleContext declaration, int keyword, ParserRuleContext block) {
         if (declaration != null) {
+            TerminalNode async = declaration.getToken(BSLLexer.ASYNC_KEYWORD, 0);
+            if (async != null && async.getSymbol().getTokenIndex() >= 0) {
+                return async.getSymbol().getLine();
+            }
             TerminalNode node = declaration.getToken(keyword, 0);
             if (node != null) {
                 return node.getSymbol().getLine();

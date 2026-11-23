@@ -170,6 +170,7 @@ public class ConvertCommand implements Callable<Integer> {
         }
         Map<Element, String> files = new LinkedHashMap<>();
         for (Node node = coverage.getFirstChild(); node != null; node = node.getNextSibling()) {
+            rejectRawText(node);
             if (node instanceof Element file) {
                 if (!file.getTagName().equals("file")) {
                     throw new IllegalArgumentException("Expected a file entry in the RAW coverage XML");
@@ -184,6 +185,7 @@ public class ConvertCommand implements Callable<Integer> {
 
     private static void validateRawLines(Element file, String key) {
         for (Node node = file.getFirstChild(); node != null; node = node.getNextSibling()) {
+            rejectRawText(node);
             if (!(node instanceof Element line)) {
                 continue;
             }
@@ -195,6 +197,19 @@ public class ConvertCommand implements Callable<Integer> {
                 throw new IllegalArgumentException("Invalid RAW covered value in module " + key + ": " + covered);
             }
             readRawLineNumber(line.getAttribute("lineNumber"), key);
+            for (Node child = line.getFirstChild(); child != null; child = child.getNextSibling()) {
+                rejectRawText(child);
+                if (child instanceof Element) {
+                    throw new IllegalArgumentException("Unexpected RAW element inside lineToCover in module " + key);
+                }
+            }
+        }
+    }
+
+    private static void rejectRawText(Node node) {
+        if ((node.getNodeType() == Node.TEXT_NODE || node.getNodeType() == Node.CDATA_SECTION_NODE)
+                && !node.getTextContent().isBlank()) {
+            throw new IllegalArgumentException("Unexpected text in RAW coverage XML");
         }
     }
 

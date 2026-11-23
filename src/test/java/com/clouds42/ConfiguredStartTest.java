@@ -158,6 +158,32 @@ class ConfiguredStartTest {
     }
 
     @Test
+    void failedPrimaryPingMakesStartAndStopFailEvenWhenFinalPollsSucceed() throws Exception {
+        try (FakeDebugServer debugger = new FakeDebugServer();
+             ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            List<String> connection = List.of("-u", debugger.url(), "-i", "test_" + UUID.randomUUID());
+            Path output = directory.resolve("raw.xml");
+            List<String> arguments = new ArrayList<>(List.of("start", "-t", "3000", "-o", output.toString()));
+            arguments.addAll(connection);
+            Future<Integer> start = executor.submit(() -> Coverage41C.getCommandLine().execute(arguments.toArray(String[]::new)));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (debugger.requests("pingDebugUIParams").isEmpty() && !start.isDone() && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
+            try {
+                debugger.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
+                debugger.finalPolls(List.of(), List.of(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 6, 1)));
+                debugger.failNextPing();
+                assertTrue(debugger.awaitFailedPing());
+            } finally {
+                int stop = send(connection, "stop");
+                assertAll(() -> assertEquals(1, stop), () -> assertEquals(1, start.get(10, TimeUnit.SECONDS)));
+            }
+            assertEquals(Map.of(2, true, 6, true), ConfiguredCoverageTest.coverage(output, "/" + OBJECT_ID + "/" + PROPERTY_ID));
+        }
+    }
+
+    @Test
     void failedFinalPollReturnsFailureButPreservesAlreadyCollectedHits() throws Exception {
         try (FakeDebugServer debugger = new FakeDebugServer();
              ExecutorService executor = Executors.newSingleThreadExecutor()) {
