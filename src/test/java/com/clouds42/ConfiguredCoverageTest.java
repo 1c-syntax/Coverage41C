@@ -465,6 +465,43 @@ class ConfiguredCoverageTest {
     }
 
     @Test
+    void strictValidationAcceptsMarkerBeforeExportOnFollowingLine() throws Exception {
+        Path sources = project().resolve("configuration");
+        Files.writeString(sources.resolve(MODULE), """
+                Процедура Пример(
+                    Параметр) // Cover:off
+                Экспорт
+                    Шаг();
+                КонецПроцедуры
+                """);
+        Path report = directory.resolve("report.json");
+
+        assertEquals(0, execute("validate", "-s", sources.toString(), "--strict",
+                "--exclusion-report", report.toString()));
+        var json = new ObjectMapper().readTree(report.toFile());
+        assertTrue(json.path("excludedLines").asInt() > 0);
+        assertTrue(json.path("warnings").isEmpty());
+    }
+
+    @Test
+    void strictValidationReportsIncompleteInlineMarkerBoundary() throws Exception {
+        Path sources = project().resolve("configuration");
+        Files.writeString(sources.resolve(MODULE), """
+                Процедура Пример()
+                    Если Готово Тогда // Cover:off
+                        Шаг();
+                КонецПроцедуры
+                """);
+        Path report = directory.resolve("report.json");
+
+        assertEquals(1, execute("validate", "-s", sources.toString(), "--strict",
+                "--exclusion-report", report.toString()));
+        var warnings = new ObjectMapper().readTree(report.toFile()).path("warnings");
+        assertTrue(warnings.toString().contains("incomplete"), warnings.toString());
+        assertEquals(0, execute("validate", "-s", sources.toString()));
+    }
+
+    @Test
     void prefixedRoutineInFileOffModuleDoesNotMakeScopeNonempty() throws Exception {
         Path project = project();
         Files.writeString(project.resolve("configuration").resolve(MODULE), "// Cover:file-off\n" + SOURCE);

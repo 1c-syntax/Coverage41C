@@ -201,13 +201,16 @@ class ExclusionRulesTest {
     @Test
     void cyclicReportLinkIsDetectedAfterResolvingItsParent() throws Exception {
         Path rules = Files.createDirectory(tempDir.resolve("rules"));
-        Files.createDirectory(tempDir.resolve("nested"));
-        Path report = tempDir.resolve("destination");
+        Path output = Files.createDirectory(tempDir.resolve("output"));
+        Path alias = tempDir.resolve("linked-output");
+        createSymbolicLink(alias, output);
+        Files.createDirectory(output.resolve("nested"));
+        Path report = alias.resolve("destination");
         createSymbolicLink(report, Path.of("nested", "..", "destination"));
 
         FileSystemLoopException error = assertThrows(FileSystemLoopException.class,
                 () -> ExclusionRules.rejectReportInsideConfigDirectory(rules.toFile(), report.toFile(), "--exclusion-report"));
-        assertEquals(report.toString(), error.getFile());
+        assertEquals(report.getParent().toRealPath().resolve(report.getFileName()).toString(), error.getFile());
     }
 
     @Test

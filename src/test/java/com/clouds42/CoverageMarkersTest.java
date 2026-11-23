@@ -30,6 +30,7 @@ import java.util.stream.Collectors;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CoverageMarkersTest {
 
@@ -169,6 +170,56 @@ class CoverageMarkersTest {
     void inlineMarkerOnEndOfMultilineMethodHeaderCoversMethod() {
         assertEquals(List.of("OFF Cover:off 1..4"), ranges(parse("Процедура П(Первый,",
                 "Второй) Экспорт // Cover:off", "ВыполнитьШаг();", "КонецПроцедуры")));
+    }
+
+    @Test
+    void inlineMarkerBeforeExportOnFollowingLineCoversMethod() {
+        for (String[] method : new String[][] {
+                {"Процедура Пример(", "Экспорт", "КонецПроцедуры"},
+                {"Функция Пример(", "Экспорт", "КонецФункции"},
+                {"Procedure Sample(", "Export", "EndProcedure"},
+                {"Function Sample(", "Export", "EndFunction"}}) {
+            for (String marker : List.of("off", "auto")) {
+                CoverageMarkers markers = parse(method[0], "Параметр) // Cover:" + marker,
+                        method[1], "Шаг();", method[2]);
+
+                assertEquals(List.of(marker.toUpperCase() + " Cover:" + marker + " 1..5"), ranges(markers));
+                assertEquals(List.of(), markers.getWarnings());
+            }
+        }
+    }
+
+    @Test
+    void inlineMarkerAfterBodyOnExportLineRemainsSingleLine() {
+        CoverageMarkers markers = parse("Процедура Пример(", "Параметр)",
+                "Экспорт Первый(); // Cover:off", "Второй();", "КонецПроцедуры");
+
+        assertEquals(List.of("OFF Cover:off 3..3"), ranges(markers));
+        assertEquals(List.of(), markers.getWarnings());
+    }
+
+    @Test
+    void incompleteIfDoesNotExcludeRecoveredBodyWithoutWarning() {
+        CoverageMarkers markers = parse("Процедура Пример()", "Если Готово Тогда // Cover:off",
+                "Первый();", "Второй();", "КонецПроцедуры");
+
+        assertEquals(List.of("OFF Cover:off 2..2"), ranges(markers));
+        assertTrue(markers.getWarnings().stream().anyMatch(warning -> warning.contains("incomplete")),
+                markers.getWarnings().toString());
+    }
+
+    @Test
+    void incompleteLoopAndTryBlocksKeepInlineMarkersLocal() {
+        for (String header : List.of("Пока Готово Цикл", "Для Сч = 1 По 2 Цикл",
+                "Для Каждого Элемент Из Массив Цикл", "Попытка")) {
+            String body = header.equals("Попытка") ? "Шаг();\nИсключение\nВосстановить();" : "Шаг();";
+            CoverageMarkers markers = parse("Процедура Пример()", header + " // Cover:auto",
+                    body, "КонецПроцедуры");
+
+            assertEquals(List.of("AUTO Cover:auto 2..2"), ranges(markers), header);
+            assertTrue(markers.getWarnings().stream().anyMatch(warning -> warning.contains("incomplete")),
+                    header + ": " + markers.getWarnings());
+        }
     }
 
     @Test

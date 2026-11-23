@@ -101,12 +101,13 @@ final class CoverageMarkers {
                 if (blocks == null) {
                     blocks = new HashMap<>();
                     for (BlockRange block : blockRanges(tokenizer.getAst())) {
-                        if (block.complete) {
-                            blocks.merge(block.begin, block,
-                                    (current, candidate) -> current.end >= candidate.end ? current : candidate);
-                            if (block.headerEndToken >= 0) {
-                                blocksByHeaderEnd.put(block.headerEndToken, block);
-                            }
+                        blocks.merge(block.begin, block,
+                                (current, candidate) -> current.end >= candidate.end ? current : candidate);
+                        if (block.headerEndToken >= 0) {
+                            blocksByHeaderEnd.put(block.headerEndToken, block);
+                        }
+                        if (block.parameterEndToken >= 0) {
+                            blocksByHeaderEnd.put(block.parameterEndToken, block);
                         }
                     }
                 }
@@ -118,6 +119,11 @@ final class CoverageMarkers {
                 if (block == null || (block.headerEndToken >= 0
                         && previousIndex > block.headerEndToken && endingHeader == null)) {
                     block = endingHeader;
+                }
+                if (block != null && !block.complete) {
+                    warnings.add(new Warning(line, line,
+                            label + " block boundary is incomplete, marker applies only to its line"));
+                    block = null;
                 }
                 int firstLine = block == null ? line : block.begin;
                 int endLine = block == null ? line : block.end;
@@ -250,8 +256,13 @@ final class CoverageMarkers {
                     default -> context.getToken(BSLLexer.DO_KEYWORD, 0);
                 };
                 int headerEndToken = headerEnd == null ? -1 : headerEnd.getSymbol().getTokenIndex();
+                int endKeyword = context instanceof BSLParser.IfStatementContext ? BSLLexer.ENDIF_KEYWORD
+                        : context instanceof BSLParser.TryStatementContext ? BSLLexer.ENDTRY_KEYWORD
+                        : BSLLexer.ENDDO_KEYWORD;
+                TerminalNode end = context.getToken(endKeyword, 0);
+                boolean complete = end != null && end.getSymbol().getTokenIndex() >= 0;
                 blocks.add(new BlockRange(context.getStart().getLine(), context.getStop().getLine(),
-                        "statement", true, headerEndToken));
+                        "statement", complete, headerEndToken));
             }
         }
         methods.sort(Comparator.comparingInt(method -> method.begin));
@@ -261,7 +272,7 @@ final class CoverageMarkers {
             int end = method.complete ? method.end
                     : index + 1 < methods.size() ? methods.get(index + 1).begin - 1 : Integer.MAX_VALUE;
             blocks.add(new BlockRange(method.begin, end, "method", method.complete,
-                    method.headerEndToken, method.endToken));
+                    method.headerEndToken, method.endToken, method.parameterEndToken));
         }
         regions.sort(Comparator.comparingInt(region -> region.getStart().getTokenIndex()));
         Deque<ParserRuleContext> regionStarts = new ArrayDeque<>();
@@ -283,9 +294,11 @@ final class CoverageMarkers {
         TerminalNode end = context.getToken(endKeyword, 0);
         boolean complete = isComplete(context) && end != null && end.getSymbol().getTokenIndex() >= 0;
         int headerEndToken = isComplete(declaration) ? declaration.getStop().getTokenIndex() : -1;
+        TerminalNode parametersEnd = declaration == null ? null : declaration.getToken(BSLLexer.RPAREN, 0);
+        int parameterEndToken = parametersEnd == null ? -1 : parametersEnd.getSymbol().getTokenIndex();
         methods.add(new BlockRange(keywordLine(declaration, keyword, context),
                 complete ? end.getSymbol().getLine() : Integer.MAX_VALUE, "method", complete, headerEndToken,
-                complete ? end.getSymbol().getTokenIndex() : -1));
+                complete ? end.getSymbol().getTokenIndex() : -1, parameterEndToken));
     }
 
     static final class BlockRange {
@@ -294,6 +307,7 @@ final class CoverageMarkers {
         final String kind;
         final boolean complete;
         final int headerEndToken;
+        private final int parameterEndToken;
         private final int endToken;
 
         BlockRange(int begin, int end, String kind, boolean complete) {
@@ -301,15 +315,17 @@ final class CoverageMarkers {
         }
 
         private BlockRange(int begin, int end, String kind, boolean complete, int headerEndToken) {
-            this(begin, end, kind, complete, headerEndToken, -1);
+            this(begin, end, kind, complete, headerEndToken, -1, -1);
         }
 
-        private BlockRange(int begin, int end, String kind, boolean complete, int headerEndToken, int endToken) {
+        private BlockRange(int begin, int end, String kind, boolean complete, int headerEndToken, int endToken,
+                           int parameterEndToken) {
             this.begin = begin;
             this.end = end;
             this.kind = kind;
             this.complete = complete;
             this.headerEndToken = headerEndToken;
+            this.parameterEndToken = parameterEndToken;
             this.endToken = endToken;
         }
 
