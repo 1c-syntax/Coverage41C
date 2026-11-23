@@ -105,11 +105,16 @@ public class Utils {
     }
 
     private static String getUriKey(String mdObjUuid, ModuleType moduleType, MD mdObj) {
-        return mdObjUuid + "/" + getModuleTypeUuid(moduleType, mdObj);
+        return getUriKey(mdObjUuid, getModuleTypeUuid(moduleType, mdObj));
     }
 
     public static String getUriKey(String objectId, String propertyId) {
-        return objectId + "/" + propertyId;
+        return normalizeModuleId(objectId) + "/" + normalizeModuleId(propertyId);
+    }
+
+    private static String normalizeModuleId(String id) {
+        return id != null && id.matches("[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}")
+                ? id.toLowerCase(Locale.ROOT) : id;
     }
 
     /**
@@ -347,7 +352,7 @@ public class Utils {
         return switch (xmlDocument.getDocumentElement().getTagName()) {
             case "MetaDataObject" -> readConfiguratorExternalDataProcessor(rootPath, xmlDocument, builder,
                     formDescriptor, reportProblem);
-            case "mdclass:ExternalDataProcessor" -> readEdtExternalDataProcessor(rootPath, xmlDocument);
+            case "mdclass:ExternalDataProcessor" -> readEdtExternalDataProcessor(rootPath, xmlDocument, reportProblem);
             default -> throw new IllegalArgumentException("Unknown source format: " + rootPath);
         };
     }
@@ -364,6 +369,7 @@ public class Utils {
         String externalDataProcessorName = com.google.common.io.Files.getNameWithoutExtension(rootPath.toString());
         String externalDataProcessorUuid = (String) xPath.compile("/MetaDataObject/ExternalDataProcessor/@uuid")
                 .evaluate(xmlDocument, XPathConstants.STRING);
+        requireProcessorId(externalDataProcessorUuid, rootPath);
         uriListByKey.put(getUriKey(externalDataProcessorUuid, ModuleType.ObjectModule, null),
                 parentPath.resolve(Paths.get(externalDataProcessorName, "Ext", "ObjectModule.bsl")).toUri());
 
@@ -396,26 +402,33 @@ public class Utils {
         return uriListByKey;
     }
 
-    private static Map<String, URI> readEdtExternalDataProcessor(Path rootPath, Document xmlDocument)
+    private static void requireProcessorId(String id, Path descriptor) {
+        if (id.isBlank()) {
+            throw new IllegalArgumentException("Missing external data processor ID: " + descriptor);
+        }
+    }
+
+    private static Map<String, URI> readEdtExternalDataProcessor(Path rootPath, Document xmlDocument,
+                                                               Consumer<String> reportProblem)
             throws XPathExpressionException {
 
         Map<String, URI> uriListByKey = new HashMap<>();
         XPath xPath = XPathFactory.newInstance().newXPath();
         Path parentPath = rootPath.toAbsolutePath().getParent();
-        String externalDataProcessorUuid = (String) xPath.compile("/ExternalDataProcessor/@uuid")
-                .evaluate(xmlDocument, XPathConstants.STRING);
+        String externalDataProcessorUuid = xmlDocument.getDocumentElement().getAttribute("uuid");
+        requireProcessorId(externalDataProcessorUuid, rootPath);
         uriListByKey.put(getUriKey(externalDataProcessorUuid, ModuleType.ObjectModule, null),
                 parentPath.resolve("ObjectModule.bsl").toUri());
 
         Path formsPath = parentPath.resolve("Forms");
-        NodeList formsNodeList = (NodeList) xPath.compile("/ExternalDataProcessor/forms")
+        NodeList formsNodeList = (NodeList) xPath.compile("/*/forms")
                 .evaluate(xmlDocument, XPathConstants.NODESET);
         for (int nodeNumber = 0; nodeNumber < formsNodeList.getLength(); nodeNumber++) {
-            Node formsNode = formsNodeList.item(nodeNumber);
-            String formUuid = formsNode.getAttributes().getNamedItem("uuid").getTextContent();
+            Element formsNode = (Element) formsNodeList.item(nodeNumber);
+            String formUuid = formsNode.getAttribute("uuid");
             String formName = getEdtFormName(formsNode);
-            if (formName.isEmpty()) {
-                logger.error("Can't find form name: {}", formUuid);
+            if (formUuid.isBlank() || formName.isBlank()) {
+                reportProblem.accept("Missing form ID or name in " + rootPath + ": " + formUuid + " " + formName);
                 continue;
             }
             uriListByKey.put(getUriKey(formUuid, ModuleType.FormModule, null),
@@ -539,6 +552,8 @@ public class Utils {
 
                 Element methodsElement = doc.createElement("methods");
                 classElement.appendChild(methodsElement);
+                Element linesElement = doc.createElement("lines");
+                classElement.appendChild(linesElement);
 
                 bigDecimalsMap.forEach((bigDecimal, hits) -> {
                     if (hits >= 0) {
@@ -546,7 +561,7 @@ public class Utils {
                         lineElement.setAttribute("hits", String.valueOf(hits));
                         lineElement.setAttribute("number", bigDecimal.toString());
                         lineElement.setAttribute("branch", "false");
-                        classElement.appendChild(lineElement);
+                        linesElement.appendChild(lineElement);
                     }
                 });
             });
@@ -616,11 +631,20 @@ public class Utils {
         transformer.setOutputProperty(OutputKeys.INDENT, "yes");
         DOMSource source = new DOMSource(document);
         if (destination == null) {
-            transformer.transform(source, new StreamResult(System.out));
+            PrintStream stdout = System.out;
+            requireUsableStdout(stdout);
+            transformer.transform(source, new StreamResult(stdout));
+            requireUsableStdout(stdout);
         } else {
             try (OutputStream output = new FileOutputStream(destination)) {
                 transformer.transform(source, new StreamResult(output));
             }
+        }
+    }
+
+    private static void requireUsableStdout(PrintStream stdout) throws IOException {
+        if (stdout.checkError()) {
+            throw new IOException("Cannot write coverage to standard output: the stream reports an I/O error");
         }
     }
 
@@ -668,46 +692,53 @@ public class Utils {
                                      OutputOptions outputOptions) {
 
         try {
+            PrintStream stdout = outputOptions.getOutputFile() == null ? System.out : null;
             OutputStreamWriter outputStream;
-            if (outputOptions.getOutputFile() == null) {
-                outputStream = new OutputStreamWriter(System.out);
+            if (stdout != null) {
+                requireUsableStdout(stdout);
+                outputStream = new OutputStreamWriter(stdout);
             } else {
                 outputStream = new OutputStreamWriter(new FileOutputStream(outputOptions.getOutputFile()), StandardCharsets.UTF_8);
             }
             PrintWriter writer = new PrintWriter(outputStream);
+            try {
+                URI projectUri = Path.of(metadataOptions.getProjectDirName()).toUri();
 
-            URI projectUri = Path.of(metadataOptions.getProjectDirName()).toUri();
-
-            coverageData.forEach((uri, bigDecimalsMap) -> {
-                if (bigDecimalsMap.isEmpty()) {
-                    return;
-                }
-                writer.println("TN:");
-                writer.printf("SF:%s\n", projectUri.relativize(uri).getPath());
-                bigDecimalsMap.forEach((bigDecimal, integer) -> {
-                    if (integer >= 0) {
-                        writer.printf("DA:%s,%d\n", bigDecimal.toString(), integer);
+                coverageData.forEach((uri, bigDecimalsMap) -> {
+                    if (bigDecimalsMap.isEmpty()) {
+                        return;
                     }
+                    writer.println("TN:");
+                    writer.printf("SF:%s\n", projectUri.relativize(uri).getPath());
+                    bigDecimalsMap.forEach((bigDecimal, integer) -> {
+                        if (integer >= 0) {
+                            writer.printf("DA:%s,%d\n", bigDecimal.toString(), integer);
+                        }
+                    });
+                    writer.printf("LH:%d\n", bigDecimalsMap.values().stream().filter(aInteger -> aInteger > 0).count());
+                    writer.printf("LF:%d\n", bigDecimalsMap.values().stream().filter(hits -> hits >= 0).count());
+                    writer.println("end_of_record");
                 });
-                writer.printf("LH:%d\n", bigDecimalsMap.values().stream().filter(aInteger -> aInteger > 0).count());
-                writer.printf("LF:%d\n", bigDecimalsMap.values().stream().filter(hits -> hits >= 0).count());
-                writer.println("end_of_record");
-            });
-            long linesToCover = 0;
-            long coveredLinesCount = 0;
-            for (Map<BigDecimal, Integer> bigDecimalMap : coverageData.values()) {
-                linesToCover += bigDecimalMap.values().stream().filter(value -> value >= 0).count();
-                coveredLinesCount += bigDecimalMap.values().stream().filter(value -> value > 0).count();
+                long linesToCover = 0;
+                long coveredLinesCount = 0;
+                for (Map<BigDecimal, Integer> bigDecimalMap : coverageData.values()) {
+                    linesToCover += bigDecimalMap.values().stream().filter(value -> value >= 0).count();
+                    coveredLinesCount += bigDecimalMap.values().stream().filter(value -> value > 0).count();
+                }
+                logger.info("Lines to cover: {}", linesToCover);
+                logger.info("Covered lines: {}", coveredLinesCount);
+                if (linesToCover > 0) {
+                    logger.info("Coverage: {}%", Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100.);
+                }
+            } finally {
+                if (stdout == null) {
+                    writer.close();
+                } else {
+                    writer.flush();
+                }
             }
-            logger.info("Lines to cover: {}", linesToCover);
-            logger.info("Covered lines: {}", coveredLinesCount);
-            if (linesToCover > 0) {
-                logger.info("Coverage: {}%", Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100.);
-            }
-
-            writer.close();
-            if (outputOptions.getOutputFile() != null && writer.checkError()) {
-                logger.error("Cannot write coverage file: {}", outputOptions.getOutputFile());
+            if (writer.checkError() || (stdout != null && stdout.checkError())) {
+                logger.error("Cannot write coverage: {}", stdout == null ? outputOptions.getOutputFile() : "standard output");
                 return false;
             }
             return true;

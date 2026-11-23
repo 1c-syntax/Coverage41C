@@ -21,8 +21,6 @@
  */
 package com.clouds42;
 
-import java.util.Locale;
-
 final class CoverageMarker {
 
     enum Kind { OFF, AUTO }
@@ -33,14 +31,20 @@ final class CoverageMarker {
     private final int startLine;
     private final int endLine;
     private final String reason;
+    private final boolean fileOff;
 
     CoverageMarker(Kind kind, String label, int line, int startLine, int endLine, String reason) {
+        this(kind, label, line, startLine, endLine, reason, false);
+    }
+
+    CoverageMarker(Kind kind, String label, int line, int startLine, int endLine, String reason, boolean fileOff) {
         this.kind = kind;
         this.label = label;
         this.line = line;
         this.startLine = startLine;
         this.endLine = endLine;
         this.reason = reason;
+        this.fileOff = fileOff;
     }
 
     Kind getKind() {
@@ -69,7 +73,7 @@ final class CoverageMarker {
 
     // Cover:file-off and its Russian synonym exclude the whole module.
     boolean isFileOff() {
-        return CoverageMarkers.FILE_OFF.contains(label.substring(label.indexOf(':') + 1).toLowerCase(Locale.ROOT));
+        return fileOff;
     }
 
     boolean covers(int lineNumber) {

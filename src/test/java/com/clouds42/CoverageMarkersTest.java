@@ -281,6 +281,23 @@ class CoverageMarkersTest {
         assertEquals(List.of("OFF Cover:файл-выкл 1..5"), ranges(markers));
     }
 
+    @Test
+    void markerMustNotBePartOfAnotherWord() {
+        for (String prefix : List.of("Legacy", "_", "9", "Метка", "е\u0301")) {
+            assertEquals(List.of(), ranges(parse("// " + prefix + "Cover:off", "Б();")), prefix);
+        }
+        assertEquals(List.of("OFF Cover:off 1..1"), ranges(parse("Б(); // (Cover:off)")));
+    }
+
+    @Test
+    void unicodeCaseVariantsKeepTheirMatchedKind() {
+        CoverageMarkers markers = parse("// Cover:FıLE-OFF", "Б();");
+        assertEquals(List.of("OFF Cover:FıLE-OFF 1..3"), ranges(markers));
+        assertEquals(true, markers.getMarkers().getFirst().isFileOff());
+        assertEquals(List.of(), markers.getWarnings());
+        assertEquals(List.of(), ranges(parse("// Cover:ВКЛ", "Б();")));
+    }
+
     static CoverageMarkers parse(String... lines) {
         return CoverageMarkers.parse(new BSLTokenizer(String.join("\n", lines) + "\n"));
     }

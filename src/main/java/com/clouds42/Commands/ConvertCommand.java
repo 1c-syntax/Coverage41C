@@ -150,7 +150,7 @@ public class ConvertCommand implements Callable<Integer> {
         }
         prepared.writeReport();
         boolean coverageWritten = Utils.tryDumpCoverageFile(coverageData, metadataOptions, outputOptions);
-        if (!coverageWritten && (metadataOptions.getConfigFile() != null || metadataOptions.getExclusionReportFile() != null)) {
+        if (!coverageWritten) {
             return CommandLine.ExitCode.SOFTWARE;
         }
         logger.info("Convert done");
@@ -184,8 +184,11 @@ public class ConvertCommand implements Callable<Integer> {
 
     private static void validateRawLines(Element file, String key) {
         for (Node node = file.getFirstChild(); node != null; node = node.getNextSibling()) {
-            if (!(node instanceof Element line) || !line.getTagName().equals("lineToCover")) {
+            if (!(node instanceof Element line)) {
                 continue;
+            }
+            if (!line.getTagName().equals("lineToCover")) {
+                throw new IllegalArgumentException("Unexpected RAW element in module " + key + ": " + line.getTagName());
             }
             String covered = line.getAttribute("covered");
             if (!covered.equals("true") && !covered.equals("false")) {
@@ -217,6 +220,6 @@ public class ConvertCommand implements Callable<Integer> {
             throw new IllegalArgumentException("Unsupported RAW module path: " + path
                     + ". Expected object ID/module type ID");
         }
-        return key;
+        return Utils.getUriKey(parts[0], parts[1]);
     }
 }

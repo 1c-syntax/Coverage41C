@@ -88,6 +88,110 @@ class ConfiguredStartTest {
     }
 
     @Test
+    void attachesAnAnnouncedTargetWhenItsUserNameBecomesAvailableWithoutAnotherEvent() throws Exception {
+        DebugTargetId target = FakeDebugServer.target(UUID.randomUUID(), DebugTargetType.MANAGED_CLIENT, null);
+        try (FakeDebugServer debugger = new FakeDebugServer();
+             ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            debugger.setTargets(target);
+            List<String> connection = List.of("-u", debugger.url(), "-i", "test_" + UUID.randomUUID());
+            Path output = directory.resolve("raw.xml");
+            Future<Integer> start = launch(executor, debugger, connection, output,
+                    "--include-user", "chosen", "-n", "test-area");
+            try {
+                target.setUserName("chosen");
+                debugger.setTargets(target);
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(4);
+                while (debugger.requests("attachDetachDbgTargets").isEmpty() && System.nanoTime() < deadline) {
+                    Thread.sleep(10);
+                }
+                assertEquals(1, debugger.requests("attachDetachDbgTargets").size());
+                assertTrue(debugger.requests("getDbgTargets").stream().allMatch(request -> request.body.contains("test-area")));
+                debugger.deliver(FakeDebugServer.measure(target, OBJECT_ID, PROPERTY_ID, 2, 1));
+            } finally {
+                send(connection, "stop");
+            }
+            assertEquals(0, start.get(10, TimeUnit.SECONDS));
+            assertEquals(Map.of(2, true), ConfiguredCoverageTest.coverage(output, "/" + OBJECT_ID + "/" + PROPERTY_ID));
+        }
+    }
+
+    @Test
+    void stopCollectsLateMeasuresAfterAnEmptyFinalPollAndAppliesTheUserFilter() throws Exception {
+        DebugTargetId allowed = FakeDebugServer.target(UUID.randomUUID(), DebugTargetType.MANAGED_CLIENT, "chosen");
+        DebugTargetId rejected = FakeDebugServer.target(UUID.randomUUID(), DebugTargetType.MANAGED_CLIENT, "other");
+        try (FakeDebugServer debugger = new FakeDebugServer();
+             ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            debugger.setTargets();
+            List<String> connection = List.of("-u", debugger.url(), "-i", "test_" + UUID.randomUUID());
+            Path output = directory.resolve("raw.xml");
+            Future<Integer> start = launch(executor, debugger, connection, output, "--include-user", "chosen");
+            debugger.finalPolls(List.of(), List.of(FakeDebugServer.measure(allowed, OBJECT_ID, PROPERTY_ID, 6, 1),
+                    FakeDebugServer.measure(rejected, OBJECT_ID, PROPERTY_ID, 4, 1)));
+            assertEquals(0, send(connection, "stop"));
+            assertEquals(0, start.get(10, TimeUnit.SECONDS));
+            assertEquals(Map.of(6, true), ConfiguredCoverageTest.coverage(output, "/" + OBJECT_ID + "/" + PROPERTY_ID));
+        }
+    }
+
+    @Test
+    void stopWaitsForTheInFlightPacketBeforeDecidingSuccessAndWritingTheReport() throws Exception {
+        DebugTargetId allowed = FakeDebugServer.target(UUID.randomUUID(), DebugTargetType.MANAGED_CLIENT, "chosen");
+        try (FakeDebugServer debugger = new FakeDebugServer();
+             ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            debugger.setTargets();
+            List<String> connection = List.of("-u", debugger.url(), "-i", "test_" + UUID.randomUUID());
+            Path output = directory.resolve("raw.xml");
+            Future<Integer> start = launch(executor, debugger, connection, output, "--include-user", "chosen");
+            Future<Integer> stop;
+            try (var pause = debugger.pauseNextPing(FakeDebugServer.measure(allowed, OBJECT_ID, PROPERTY_ID, 2, 1))) {
+                assertTrue(pause.arrived.await(5, TimeUnit.SECONDS));
+                stop = executor.submit(() -> send(connection, "stop"));
+                assertThrows(TimeoutException.class, () -> stop.get(300, TimeUnit.MILLISECONDS));
+            } finally {
+                // Also finishes the collector if the synchronization assertion fails.
+                send(connection, "stop");
+            }
+            assertEquals(0, stop.get(10, TimeUnit.SECONDS));
+            assertEquals(0, start.get(10, TimeUnit.SECONDS));
+            assertEquals(Map.of(2, true), ConfiguredCoverageTest.coverage(output, "/" + OBJECT_ID + "/" + PROPERTY_ID));
+        }
+    }
+
+    @Test
+    void failedFinalPollReturnsFailureButPreservesAlreadyCollectedHits() throws Exception {
+        try (FakeDebugServer debugger = new FakeDebugServer();
+             ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            List<String> connection = List.of("-u", debugger.url(), "-i", "test_" + UUID.randomUUID());
+            Path output = directory.resolve("raw.xml");
+            Future<Integer> start = launch(executor, debugger, connection, output);
+            debugger.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
+            debugger.failFinalPolls();
+            assertEquals(1, send(connection, "stop"));
+            assertEquals(1, start.get(10, TimeUnit.SECONDS));
+            assertEquals(Map.of(2, true), ConfiguredCoverageTest.coverage(output, "/" + OBJECT_ID + "/" + PROPERTY_ID));
+        }
+    }
+
+    @Test
+    void rawCleanRemovesPreviouslyObservedLines() throws Exception {
+        try (FakeDebugServer debugger = new FakeDebugServer();
+             ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            List<String> connection = List.of("-u", debugger.url(), "-i", "test_" + UUID.randomUUID());
+            Path output = directory.resolve("raw.xml");
+            Future<Integer> start = launch(executor, debugger, connection, output);
+            try {
+                debugger.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
+                assertEquals(0, send(connection, "clean"));
+            } finally {
+                assertEquals(0, send(connection, "stop"));
+            }
+            assertEquals(0, start.get(10, TimeUnit.SECONDS));
+            var xml = Utils.newInputXmlBuilder().parse(output.toFile());
+            assertEquals(0, xml.getElementsByTagName("lineToCover").getLength());
+        }
+    }
+
+    @Test
     void configuredAutoLinesRemainOptionalAfterClean() throws Exception {
         Path project = TestUtils.copyConfiguration(directory);
         Files.writeString(project.resolve("configuration").resolve(MODULE), ConfiguredCoverageTest.SOURCE);

@@ -37,9 +37,7 @@ import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.function.BiPredicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -48,13 +46,11 @@ import java.util.stream.Collectors;
 final class CoverageMarkers {
 
     private static final Pattern MARKER = Pattern.compile(
-            "Cover:(file-off|файл-выкл|off|выкл|on|вкл|auto|авто)(?![\\p{L}\\p{N}_])",
+            "(?<![\\p{L}\\p{N}\\p{M}_])Cover:(?:(?<fileOff>file-off|файл-выкл)|(?<off>off|выкл)"
+                    + "|(?<on>on|вкл)|(?<auto>auto|авто))(?![\\p{L}\\p{N}\\p{M}_])",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
     );
     private static final Pattern REASON_PREFIX = Pattern.compile("^[\\s—–:-]+");
-    private static final Set<String> ON = Set.of("on", "вкл");
-    private static final Set<String> OFF = Set.of("off", "выкл");
-    static final Set<String> FILE_OFF = Set.of("file-off", "файл-выкл");
 
     private final List<CoverageMarker> markers;
     private final List<Warning> warnings;
@@ -79,19 +75,18 @@ final class CoverageMarkers {
             if (!matcher.find()) {
                 continue;
             }
-            String word = matcher.group(1).toLowerCase(Locale.ROOT);
             String label = matcher.group();
             int line = token.getLine();
-            if (FILE_OFF.contains(word)) {
+            if (matcher.group("fileOff") != null) {
                 if (token.getTokenIndex() < firstCodeIndex) {
                     markers.add(new CoverageMarker(CoverageMarker.Kind.OFF, label, line, 1, lastLine,
-                            reason(token.getText().substring(matcher.end()))));
+                            reason(token.getText().substring(matcher.end())), true));
                 } else {
                     warnings.add(new Warning(line, line, label + " ignored, it must precede module code"));
                 }
                 continue;
             }
-            if (ON.contains(word)) {
+            if (matcher.group("on") != null) {
                 if (open.isEmpty()) {
                     warnings.add(new Warning(line, line, label + " without open Cover:off or Cover:auto"));
                 } else {
@@ -99,7 +94,7 @@ final class CoverageMarkers {
                 }
                 continue;
             }
-            CoverageMarker.Kind kind = OFF.contains(word) ? CoverageMarker.Kind.OFF : CoverageMarker.Kind.AUTO;
+            CoverageMarker.Kind kind = matcher.group("off") != null ? CoverageMarker.Kind.OFF : CoverageMarker.Kind.AUTO;
             String reason = reason(token.getText().substring(matcher.end()));
             Token previousCode = previousCodeTokenOnLine(tokens, token);
             if (previousCode != null) {

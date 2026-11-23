@@ -77,6 +77,34 @@ class ConfiguredCoverageTest {
     }
 
     @Test
+    void rejectsUnknownRawLineElementBeforePublishing() throws Exception {
+        assertRejectedBeforePublishing("<coverage><file path=\"object/property\"><lineToCovre/></file></coverage>");
+    }
+
+    @Test
+    void rawCommentsAndWhitespaceAreAllowed() throws Exception {
+        assertNoHits("<coverage><!-- comment --><file path=\"object/property\">\n<!-- comment -->\n</file></coverage>");
+    }
+
+    @Test
+    void matchesRawUuidsRegardlessOfCase() throws Exception {
+        Path sources = project().resolve("configuration");
+        Path input = Files.writeString(directory.resolve("raw.xml"), rawWithLineNumber("2")
+                .replace(OBJECT_ID, OBJECT_ID.toUpperCase(java.util.Locale.ROOT))
+                .replace(PROPERTY_ID, PROPERTY_ID.toUpperCase(java.util.Locale.ROOT)));
+        Path output = directory.resolve("coverage.xml");
+        assertEquals(0, execute("convert", "-s", sources.toString(), "-c", input.toString(), "-o", output.toString()));
+        assertEquals(Map.of(2, true, 4, false, 6, false), coverage(output, MODULE));
+    }
+
+    @Test
+    void ordinaryConversionReportsCoverageWriteFailure() throws Exception {
+        Path sources = project().resolve("configuration");
+        Path output = Files.createDirectory(directory.resolve("coverage.xml"));
+        assertEquals(1, execute("convert", "-s", sources.toString(), "-c", raw("").toString(), "-o", output.toString()));
+    }
+
+    @Test
     void rejectsGenericCoverageXmlAsRaw() throws Exception {
         assertRejectedBeforePublishing("<coverage><file path=\"Ext/Module.BSL\"/></coverage>");
     }
@@ -499,6 +527,35 @@ class ConfiguredCoverageTest {
         assertEquals(0, execute("convert", "-s", processor.toString(), "-c", input.toString(),
                 "-o", output.toString(), "--exclusion-report", report.toString()));
         assertTrue(Files.isRegularFile(output));
+    }
+
+    @Test
+    void externalProcessorWithoutRootIdIsRejected() throws Exception {
+        Path processor = externalProcessor();
+        Files.writeString(processor, "<MetaDataObject><ExternalDataProcessor/></MetaDataObject>");
+        assertEquals(1, execute("validate", "-s", processor.toString(), "--strict"));
+    }
+
+    @Test
+    void edtExternalProcessorReportsIncompleteFormsAndMapsValidModules() throws Exception {
+        Path processor = Files.writeString(directory.resolve("Sample.mdo"), """
+                <mdclass:ExternalDataProcessor xmlns:mdclass="http://g5.1c.ru/v8/dt/metadata/mdclass" uuid="object-id">
+                  <forms uuid="broken-form"/>
+                  <forms uuid="form-id"><name>Main</name></forms>
+                  <forms><name>NoId</name></forms>
+                </mdclass:ExternalDataProcessor>
+                """);
+        Files.writeString(directory.resolve("ObjectModule.bsl"), SOURCE);
+        Files.writeString(Files.createDirectories(directory.resolve("Forms/Main")).resolve("Module.bsl"), SOURCE);
+        Path report = directory.resolve("exclusions.json");
+        assertEquals(1, execute("validate", "-s", processor.toString(), "--strict", "--exclusion-report", report.toString()));
+        String warnings = new ObjectMapper().readTree(report.toFile()).path("warnings").toString();
+        assertTrue(warnings.contains("broken-form"));
+        assertTrue(warnings.contains("NoId"));
+        var modules = Utils.discoverExternalDataProcessorSources(processor, ignored -> {}, ignored -> {});
+        assertEquals(2, modules.size());
+        assertTrue(modules.keySet().stream().anyMatch(key -> key.startsWith("object-id/")));
+        assertTrue(modules.keySet().stream().anyMatch(key -> key.startsWith("form-id/")));
     }
 
     private Path externalProcessor() throws Exception {

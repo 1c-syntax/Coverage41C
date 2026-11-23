@@ -55,6 +55,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -77,6 +78,27 @@ class FakeDebugServer implements AutoCloseable {
     private final BlockingQueue<DBGUIExtCmdInfoBase> events = new LinkedBlockingQueue<>();
 
     private final AtomicInteger pings = new AtomicInteger();
+    private final BlockingQueue<List<DBGUIExtCmdInfoBase>> finalPolls = new LinkedBlockingQueue<>();
+    private volatile boolean profilingDisabled;
+    private volatile boolean failFinalPolls;
+    private final BlockingQueue<PausedPing> pausedPings = new LinkedBlockingQueue<>();
+
+    static final class PausedPing implements AutoCloseable {
+        final CountDownLatch arrived = new CountDownLatch(1);
+        final CountDownLatch release = new CountDownLatch(1);
+        final List<DBGUIExtCmdInfoBase> reply;
+
+        PausedPing(List<DBGUIExtCmdInfoBase> reply) { this.reply = reply; }
+        @Override public void close() { release.countDown(); }
+    }
+
+    PausedPing pauseNextPing(DBGUIExtCmdInfoBase... reply) {
+        PausedPing pause = new PausedPing(List.of(reply));
+        pausedPings.add(pause);
+        return pause;
+    }
+
+    void failFinalPolls() { failFinalPolls = true; }
     private volatile boolean compressResponses;
     // Что отдаёт getDbgTargets: по умолчанию один серверный предмет без имени пользователя, как раньше.
     private volatile List<DebugTargetId> targets = List.of(target(UUID.randomUUID()));
@@ -109,6 +131,10 @@ class FakeDebugServer implements AutoCloseable {
 
     void setTargets(DebugTargetId... newTargets) {
         targets = List.of(newTargets);
+    }
+
+    void finalPolls(List<DBGUIExtCmdInfoBase>... replies) {
+        finalPolls.addAll(List.of(replies));
     }
 
     List<Request> requests(String command) {
@@ -194,6 +220,13 @@ class FakeDebugServer implements AutoCloseable {
             String command = query.replaceFirst("^cmd=([^&]*).*$", "$1");
             String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             requests.add(new Request(command, body));
+            if (command.equals("setMeasureMode")) {
+                profilingDisabled = !body.contains("measureModeSeanceID");
+            }
+            if (command.equals("pingDebugUIParams") && profilingDisabled && failFinalPolls) {
+                exchange.sendResponseHeaders(503, -1);
+                return;
+            }
             EObject response = response(command);
             if (response == null) {
                 exchange.sendResponseHeaders(200, -1);
@@ -244,6 +277,20 @@ class FakeDebugServer implements AutoCloseable {
     private EObject ping() throws InterruptedException {
         pings.incrementAndGet();
         RDBGPingDebugUIResponse ping = ResponseFactory.eINSTANCE.createRDBGPingDebugUIResponse();
+        PausedPing pause = pausedPings.poll();
+        if (pause != null) {
+            pause.arrived.countDown();
+            if (!pause.release.await(10, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("Timed out waiting to release ping");
+            }
+            ping.getResult().addAll(pause.reply);
+            return ping;
+        }
+        List<DBGUIExtCmdInfoBase> finalReply = profilingDisabled ? finalPolls.poll() : null;
+        if (finalReply != null) {
+            ping.getResult().addAll(finalReply);
+            return ping;
+        }
         DBGUIExtCmdInfoBase event = events.poll(20, TimeUnit.MILLISECONDS);
         if (event != null) {
             ping.getResult().add(event);

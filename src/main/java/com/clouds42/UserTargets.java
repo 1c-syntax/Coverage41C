@@ -105,6 +105,12 @@ public final class UserTargets {
         return wanted && !attachedIds.contains(id);
     }
 
+    // Only unresolved or allowed but unattached targets require periodic refresh.
+    public boolean hasPendingTargets() {
+        return isActive() && usersById.entrySet().stream().anyMatch(entry ->
+                !attachedIds.contains(entry.getKey()) && (entry.getValue().isEmpty() || users.accepts(entry.getValue())));
+    }
+
     // The target was attached; later announcements of it do not attach it again.
     public void attached(String targetId) {
         attachedIds.add(normalizeUuid(targetId));
