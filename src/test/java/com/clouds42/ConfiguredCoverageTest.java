@@ -140,6 +140,34 @@ class ConfiguredCoverageTest {
     }
 
     @Test
+    void rejectsUnknownRawVersionBeforePublishing() throws Exception {
+        assertRejectedBeforePublishing(rawWithLineNumber("2").replace("<coverage>", "<coverage version=\"2\">"));
+    }
+
+    @Test
+    void rejectsExplicitEmptyRawVersionBeforePublishing() throws Exception {
+        assertRejectedBeforePublishing(rawWithLineNumber("2").replace("<coverage>", "<coverage version=\"\">"));
+    }
+
+    @Test
+    void rejectsUnknownVersionEvenForEmptyRaw() throws Exception {
+        assertRejectedBeforePublishing("<coverage version=\"2\"/>");
+    }
+
+    @Test
+    void acceptsLegacyRawWithAndWithoutVersionOne() throws Exception {
+        Path sources = project().resolve("configuration");
+        Path input = directory.resolve("raw.xml");
+        Path output = directory.resolve("coverage.xml");
+        for (String root : List.of("<coverage>", "<coverage version=\"1\">")) {
+            Files.writeString(input, rawWithLineNumber("2").replace("<coverage>", root));
+            assertEquals(0, execute("convert", "-s", sources.toString(), "-c", input.toString(),
+                    "-o", output.toString()), root);
+            assertEquals(Map.of(2, true, 4, false, 6, false), coverage(output, MODULE), root);
+        }
+    }
+
+    @Test
     void rejectsCoberturaXmlAsRaw() throws Exception {
         assertRejectedBeforePublishing("<coverage><packages/></coverage>");
     }
@@ -393,6 +421,44 @@ class ConfiguredCoverageTest {
     }
 
     @Test
+    void configuredConversionRejectsRepeatedSourcesBeforePublishing() throws Exception {
+        Path project = project();
+        Path config = config("{\"changeMarkers\":{}}");
+        Path output = Files.writeString(directory.resolve("coverage.xml"), "previous coverage");
+        Path report = Files.writeString(directory.resolve("report.json"), "previous report");
+
+        assertEquals(1, execute("convert", "-P", project.toString(), "-s", "configuration",
+                "--extension", "Second=configuration", "--config", config.toString(),
+                "-c", raw("").toString(), "-o", output.toString(), "--exclusion-report", report.toString()));
+        assertEquals("previous coverage", Files.readString(output));
+        assertEquals("previous report", Files.readString(report));
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    void validationRejectsSourceDirectoryAliases() throws Exception {
+        Path project = project();
+        Files.createSymbolicLink(project.resolve("linked"), Path.of("configuration"));
+        Path report = Files.writeString(directory.resolve("report.json"), "previous report");
+
+        assertEquals(1, execute("validate", "-P", project.toString(), "-s", "configuration",
+                "--extension", "Second=linked", "--exclusion-report", report.toString()));
+        assertEquals("previous report", Files.readString(report));
+    }
+
+    @Test
+    void validationRejectsRepeatedExtensionDirectories() throws Exception {
+        Path project = project();
+        TestUtils.copyDirectory(project.resolve("configuration"), project.resolve("extensions/Sample"));
+        Path report = Files.writeString(directory.resolve("report.json"), "previous report");
+
+        assertEquals(1, execute("validate", "-P", project.toString(), "-s", "configuration",
+                "--extension", "First=extensions/Sample", "--extension", "Second=extensions/./Sample",
+                "--exclusion-report", report.toString()));
+        assertEquals("previous report", Files.readString(report));
+    }
+
+    @Test
     @EnabledOnOs({OS.LINUX, OS.MAC})
     void configuredConversionRejectsAnExclusionReportHardLinkedToTheConfig() throws Exception {
         Path project = project();
@@ -499,6 +565,22 @@ class ConfiguredCoverageTest {
         var warnings = new ObjectMapper().readTree(report.toFile()).path("warnings");
         assertTrue(warnings.toString().contains("incomplete"), warnings.toString());
         assertEquals(0, execute("validate", "-s", sources.toString()));
+    }
+
+    @Test
+    void strictValidationKeepsWarningsOnAsyncPrefixMethodHeaders() throws Exception {
+        Path sources = project().resolve("configuration");
+        String source = "Асинх // Cover:on\nПроцедура тестЗапуск()\nШаг();\nКонецПроцедуры\n";
+        Files.writeString(sources.resolve(MODULE), source);
+        Path config = config("{\"includePrefix\":[\"тест\"],\"prefixScope\":{\"routines\":true}}");
+        Path report = directory.resolve("report.json");
+
+        assertEquals(1, execute("validate", "-s", sources.toString(), "--strict",
+                "--config", config.toString(), "--exclusion-report", report.toString()));
+        assertTrue(new ObjectMapper().readTree(report.toFile()).path("warnings").toString()
+                .contains(":1: Cover:on without open"));
+        Files.writeString(sources.resolve(MODULE), source.replace(" // Cover:on", ""));
+        assertEquals(0, execute("validate", "-s", sources.toString(), "--strict", "--config", config.toString()));
     }
 
     @Test

@@ -232,6 +232,7 @@ public class CoverageConfig {
             return enabled;
         }
 
+        @JsonSetter(nulls = Nulls.FAIL)
         public void setEnabled(boolean enabled) {
             this.enabled = enabled;
         }
@@ -252,6 +253,7 @@ public class CoverageConfig {
             return begin;
         }
 
+        @JsonSetter(nulls = Nulls.FAIL)
         public void setBegin(String begin) {
             this.begin = begin;
         }
@@ -260,6 +262,7 @@ public class CoverageConfig {
             return end;
         }
 
+        @JsonSetter(nulls = Nulls.FAIL)
         public void setEnd(String end) {
             this.end = end;
         }
@@ -267,6 +270,10 @@ public class CoverageConfig {
         @JsonAnySetter
         public void addUnknownKey(String key, Object value) {
             unknownKeys.add(key);
+        }
+
+        boolean hasUnknownKeys() {
+            return !unknownKeys.isEmpty();
         }
     }
 }

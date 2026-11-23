@@ -64,6 +64,11 @@ final class ExclusionRules {
                     .setCoercion(CoercionInputShape.Boolean, CoercionAction.Fail)
                     .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
                     .setCoercion(CoercionInputShape.Float, CoercionAction.Fail))
+            .withCoercionConfig(LogicalType.Boolean, config -> config
+                    .setCoercion(CoercionInputShape.String, CoercionAction.Fail)
+                    .setCoercion(CoercionInputShape.EmptyString, CoercionAction.Fail)
+                    .setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
+                    .setCoercion(CoercionInputShape.Float, CoercionAction.Fail))
             .build();
     private static final int LINE_PATTERN_FLAGS = Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE;
     // Default comment styles: //++ … //-- and //{{ … //}}; "// -----" is a separator, not an end.
@@ -383,6 +388,9 @@ final class ExclusionRules {
             String source = source(fileName, "changeMarkers", index);
             CoverageConfig.MarkerPair pair = pairs.get(index);
             if (pair.getBegin() == null && pair.getEnd() == null) {
+                if (pair.hasUnknownKeys()) {
+                    continue;
+                }
                 for (String[] defaults : DEFAULT_CHANGE_MARKERS) {
                     markers.add(new ChangeMarker(source, team, Pattern.compile(defaults[0], LINE_PATTERN_FLAGS),
                             Pattern.compile(defaults[1], LINE_PATTERN_FLAGS), closeUnclosed));

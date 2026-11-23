@@ -387,7 +387,54 @@ class ExclusionRulesTest {
         ExclusionRules rules = ExclusionRules.load(file, tempDir, configuration, report);
 
         assertEquals(List.of("a.json: unknown key changeMarkers[0].bgin"), report.getWarnings());
-        assertEquals(2, rules.getChangeMarkers().size());
+        assertEquals(0, rules.getChangeMarkers().size());
+    }
+
+    @Test
+    void unknownMarkerKeysDoNotDiscardKnownPatternsOrAnEmptyPair() throws Exception {
+        File file = write("a.json", "{'changeMarkers':[{'begin':'^//TEAM','note':'x'},"
+                + "{'end':'^//DONE','note':'x'},{}]}");
+        ExclusionReport report = new ExclusionReport();
+        ExclusionRules rules = ExclusionRules.load(file, tempDir, configuration, report);
+
+        assertEquals(4, rules.getChangeMarkers().size());
+        assertTrue(rules.getChangeMarkers().get(0).isBegin("//TEAM"));
+        assertTrue(rules.getChangeMarkers().get(0).isEnd("//--"));
+        assertTrue(rules.getChangeMarkers().get(1).isBegin("//++"));
+        assertTrue(rules.getChangeMarkers().get(1).isEnd("//DONE"));
+        assertEquals(List.of("a.json: unknown key changeMarkers[0].note",
+                "a.json: unknown key changeMarkers[1].note"), report.getWarnings());
+    }
+
+    @Test
+    void explicitNullMarkerPatternIsNotAnEmptyDefaultPair() throws Exception {
+        for (String field : List.of("begin", "end")) {
+            File file = write("rules.json", "{'exclude':{'objects':['CommonModule.Sample']},"
+                    + "'changeMarkers':{'" + field + "':null}}");
+            IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> load(file), field);
+            assertTrue(error.getMessage().contains(field), error.getMessage());
+        }
+    }
+
+    @Test
+    void unclosedEnabledRejectsNonBooleanValues() throws Exception {
+        for (String value : List.of("\"true\"", "\"false\"", "\"\"", "1", "0", "1.0", "null", "{}", "[]")) {
+            File file = write("rules.json", "{'changeMarkers':{},'unclosedBlocks':{'enabled':" + value + "}}");
+            IllegalArgumentException error = assertThrows(IllegalArgumentException.class, () -> load(file), value);
+            assertTrue(error.getMessage().startsWith("Cannot read coverage configuration rules.json:"),
+                    error.getMessage());
+            assertTrue(error.getCause().getMessage().contains("enabled"), error.getCause().getMessage());
+        }
+    }
+
+    @Test
+    void unclosedEnabledAcceptsBooleanValues() throws Exception {
+        for (boolean enabled : List.of(false, true)) {
+            ExclusionRules rules = load(write("rules.json",
+                    "{'changeMarkers':{},'unclosedBlocks':{'enabled':" + enabled + "}}"));
+            assertEquals(2, rules.getChangeMarkers().size());
+            rules.getChangeMarkers().forEach(marker -> assertEquals(enabled, marker.closesUnclosed()));
+        }
     }
 
     @Test

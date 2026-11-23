@@ -168,6 +168,9 @@ public class ConvertCommand implements Callable<Integer> {
         if (!coverage.getTagName().equals("coverage")) {
             throw new IllegalArgumentException("Expected a RAW coverage XML document");
         }
+        if (coverage.hasAttribute("version") && !coverage.getAttribute("version").equals("1")) {
+            throw new IllegalArgumentException("Unsupported RAW coverage version: " + coverage.getAttribute("version"));
+        }
         Map<Element, String> files = new LinkedHashMap<>();
         for (Node node = coverage.getFirstChild(); node != null; node = node.getNextSibling()) {
             rejectRawText(node);

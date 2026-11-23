@@ -21,6 +21,7 @@
  */
 package com.clouds42;
 
+import com.github._1c_syntax.bsl.parser.BSLLexer;
 import com.github._1c_syntax.bsl.parser.BSLParser;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.tree.ParseTree;
@@ -85,6 +86,10 @@ final class PrefixRoutines {
                 continue;
             }
             ParserRuleContext context = (ParserRuleContext) node;
+            TerminalNode async = declaration == null ? null : declaration.getToken(BSLLexer.ASYNC_KEYWORD, 0);
+            if (async != null && async.getSymbol().getTokenIndex() >= 0) {
+                keyword = async;
+            }
             int begin = keyword != null && keyword.getSymbol().getTokenIndex() >= 0
                     ? keyword.getSymbol().getLine() : context.getStart().getLine();
             if (end == null || end.getSymbol().getTokenIndex() < 0) {

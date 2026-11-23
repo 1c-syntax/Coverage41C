@@ -130,6 +130,32 @@ class PrefixRoutinesTest {
     }
 
     @Test
+    void asyncOnSeparateLineBelongsToRoutineButPrecedingAnnotationDoesNot() {
+        for (String[] method : new String[][] {
+                {"Асинх", "Процедура тестЗапуск()", "КонецПроцедуры"},
+                {"Асинх", "Функция тестЗапуск()", "КонецФункции"},
+                {"Async", "Procedure demoRun()", "EndProcedure"},
+                {"Async", "Function demoRun()", "EndFunction"}}) {
+            PrefixRoutines routines = parse("&НаКлиенте", method[0], method[1], "Шаг();", method[2]);
+
+            assertEquals(1, routines.getRoutines().size());
+            assertEquals(2, routines.getRoutines().get(0).getBeginLine());
+            assertEquals(5, routines.getRoutines().get(0).getEndLine());
+            assertFalse(routines.covers(1));
+            assertTrue(routines.covers(2));
+        }
+    }
+
+    @Test
+    void missingAsyncMethodEndIsReportedAtAsyncLine() {
+        PrefixRoutines routines = parse("&НаКлиенте", "Асинх", "Процедура тестЗапуск()", "Шаг();");
+
+        assertTrue(routines.isEmpty());
+        assertEquals(List.of("Module.bsl:2 → a.json → includePrefix[0]: method тестЗапуск has no end, not counted"),
+                routines.getWarnings());
+    }
+
+    @Test
     void englishKeywordsAreRecognized() {
         PrefixRoutines routines = parse("Procedure demoX()", "\tA();", "EndProcedure");
 

@@ -800,8 +800,22 @@ class CoverMapBuilderTest {
             assertEquals(-1, result.get(2));
             assertEquals(0, report.getIncludedLines());
             assertEquals(0, report.getChangeBlocks().iterator().next().getIncludedLines());
-            report.getAutomaticallyClosedBlocks().forEach(block -> assertEquals(0, block.getIncludedLines()));
+            assertEquals(automatic ? 1 : 0, report.getAutomaticallyClosedBlocks().size());
+            if (automatic) {
+                assertEquals(0, report.getAutomaticallyClosedBlocks().iterator().next().getIncludedLines());
+            }
         }
+    }
+
+    @Test
+    void asyncPrefixMethodKeepsMarkerWarningsButNotPrecedingAnnotationWarnings() throws Exception {
+        ExclusionReport report = new ExclusionReport();
+        Map<Integer, Integer> result = outsideScope(scoped(ROUTINES), report,
+                text("&НаКлиенте // Cover:on", "Асинх // Cover:on", "Процедура тестЗапуск()",
+                        "Шаг();", "КонецПроцедуры"));
+
+        assertEquals(Map.of(4, 0, 5, 0), result);
+        assertEquals(List.of("Module.bsl:2: Cover:on without open Cover:off or Cover:auto"), report.getWarnings());
     }
 
     @Test

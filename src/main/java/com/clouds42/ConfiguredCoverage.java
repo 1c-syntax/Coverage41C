@@ -127,6 +127,16 @@ public final class ConfiguredCoverage {
         roots.put(mainExtension, project.resolve(options.getSrcDirName()));
         options.getExtensionSources().forEach(source ->
                 roots.put(source.getName(), project.resolve(source.getPath())));
+        List<Path> previousRoots = new ArrayList<>();
+        for (Path root : roots.values()) {
+            for (Path previous : previousRoots) {
+                if (Files.exists(root) && Files.exists(previous) && Files.isSameFile(root, previous)) {
+                    throw new IllegalArgumentException("Source paths refer to the same file or directory: "
+                            + previous + " and " + root);
+                }
+            }
+            previousRoots.add(root);
+        }
         boolean multipleSources = roots.size() > 1;
 
         ExclusionReport report = new ExclusionReport();
