@@ -361,6 +361,22 @@ class CoverageMarkersTest {
         }
     }
 
+    @Test
+    void inlineMarkerInAMultilineMethodHeaderCoversTheWholeMethod() {
+        for (String[] method : new String[][] {
+                {"Асинх", "Процедура", "Пример()", "КонецПроцедуры"},
+                {"Асинх", "Функция", "Пример()", "КонецФункции"},
+                {"Async", "Procedure", "Sample()", "EndProcedure"},
+                {"Async", "Function", "Sample()", "EndFunction"}}) {
+            assertEquals(List.of("OFF Cover:off 2..6"), ranges(parse("&НаКлиенте", method[0],
+                    method[1] + " // Cover:off", method[2], "Шаг();", method[3])));
+            assertEquals(List.of("AUTO Cover:auto 2..7"), ranges(parse("&НаКлиенте", method[0], method[1],
+                    "Пример( // Cover:auto", "Параметр)", "Шаг();", method[3])));
+            assertEquals(List.of("OFF Cover:off 5..5"), ranges(parse("&НаКлиенте", method[0], method[1],
+                    method[2], "Шаг(); // Cover:off", method[3])));
+        }
+    }
+
     static CoverageMarkers parse(String... lines) {
         return CoverageMarkers.parse(new BSLTokenizer(String.join("\n", lines) + "\n"));
     }

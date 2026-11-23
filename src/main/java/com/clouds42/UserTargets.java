@@ -159,7 +159,7 @@ public final class UserTargets {
         }
     }
 
-    // A successful lookup found no user. Give dbgs time to learn the name before trying again.
+    // A lookup did not resolve the user, including a failed request. Wait before trying again.
     public void markUnknown(String targetId) {
         String id = normalizeUuid(targetId);
         if (id != null && usersById.getOrDefault(id, NO_USER).isEmpty()) {

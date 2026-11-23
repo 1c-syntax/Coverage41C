@@ -82,6 +82,12 @@ class FakeDebugServer implements AutoCloseable {
     private final BlockingQueue<List<DBGUIExtCmdInfoBase>> finalPolls = new LinkedBlockingQueue<>();
     private volatile boolean profilingDisabled;
     private volatile boolean failFinalPolls;
+    private volatile int failedFinalPollNumber;
+    private final AtomicInteger finalPollNumber = new AtomicInteger();
+    private volatile boolean failTargetLookups;
+
+    void failFinalPoll(int number) { failedFinalPollNumber = number; }
+    void failTargetLookups() { failTargetLookups = true; }
     private final AtomicBoolean failOnePing = new AtomicBoolean();
     private final CountDownLatch failedPing = new CountDownLatch(1);
 
@@ -237,7 +243,12 @@ class FakeDebugServer implements AutoCloseable {
                 failedPing.countDown();
                 return;
             }
-            if (command.equals("pingDebugUIParams") && profilingDisabled && failFinalPolls) {
+            if (command.equals("getDbgTargets") && failTargetLookups) {
+                exchange.sendResponseHeaders(503, -1);
+                return;
+            }
+            if (command.equals("pingDebugUIParams") && profilingDisabled
+                    && (finalPollNumber.incrementAndGet() == failedFinalPollNumber || failFinalPolls)) {
                 exchange.sendResponseHeaders(503, -1);
                 return;
             }
@@ -315,9 +326,11 @@ class FakeDebugServer implements AutoCloseable {
 
     private static byte[] deflate(byte[] content) throws IOException {
         ByteArrayOutputStream compressed = new ByteArrayOutputStream();
-        try (DeflaterOutputStream output = new DeflaterOutputStream(compressed,
-                new Deflater(Deflater.DEFAULT_COMPRESSION, true))) {
+        Deflater deflater = new Deflater(Deflater.DEFAULT_COMPRESSION, true);
+        try (DeflaterOutputStream output = new DeflaterOutputStream(compressed, deflater)) {
             output.write(content);
+        } finally {
+            deflater.end();
         }
         return compressed.toByteArray();
     }

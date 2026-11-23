@@ -393,13 +393,13 @@ final class ExclusionRules {
                 }
                 for (String[] defaults : DEFAULT_CHANGE_MARKERS) {
                     markers.add(new ChangeMarker(source, team, Pattern.compile(defaults[0], LINE_PATTERN_FLAGS),
-                            Pattern.compile(defaults[1], LINE_PATTERN_FLAGS), closeUnclosed));
+                            Pattern.compile(defaults[1], LINE_PATTERN_FLAGS), closeUnclosed, false));
                 }
                 continue;
             }
             markers.add(new ChangeMarker(source, team,
                     markerPattern(source + ".begin", pair.getBegin(), DEFAULT_BEGIN),
-                    markerPattern(source + ".end", pair.getEnd(), DEFAULT_END), closeUnclosed));
+                    markerPattern(source + ".end", pair.getEnd(), DEFAULT_END), closeUnclosed, true));
         }
     }
 
@@ -822,13 +822,16 @@ final class ExclusionRules {
         private final String team;
         private final Pattern begin;
         private final Pattern end;
+        private final boolean customPatterns;
 
-        private ChangeMarker(String source, String team, Pattern begin, Pattern end, boolean closeUnclosed) {
+        private ChangeMarker(String source, String team, Pattern begin, Pattern end, boolean closeUnclosed,
+                             boolean customPatterns) {
             this.closeUnclosed = closeUnclosed;
             this.source = source;
             this.team = team;
             this.begin = begin;
             this.end = end;
+            this.customPatterns = customPatterns;
         }
 
         boolean closesUnclosed() {
@@ -844,7 +847,8 @@ final class ExclusionRules {
         }
 
         boolean mayMatchAt(String text, int start) {
-            return begin.matcher(text).region(start, text.length()).find()
+            // Custom unanchored patterns are checked once against the real comment after lexing.
+            return customPatterns || begin.matcher(text).region(start, text.length()).find()
                     || end.matcher(text).region(start, text.length()).find();
         }
 

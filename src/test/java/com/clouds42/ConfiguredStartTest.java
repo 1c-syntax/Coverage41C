@@ -30,6 +30,8 @@ import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
 
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.net.ServerSocket;
 
 import java.nio.file.Files;
@@ -46,6 +48,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static com.clouds42.ConfiguredCoverageTest.MODULE;
 import static com.clouds42.ConfiguredCoverageTest.OBJECT_ID;
@@ -141,11 +144,20 @@ class ConfiguredStartTest {
             debugger.setTargets();
             List<String> connection = List.of("-u", debugger.url(), "-i", "test_" + UUID.randomUUID());
             Path output = directory.resolve("raw.xml");
-            Future<Integer> start = launch(executor, debugger, connection, output, "--include-user", "chosen");
+            CountDownLatch stopEntered = new CountDownLatch(1);
+            CoverageCommand collector = new CoverageCommand() {
+                @Override protected void gracefulShutdown(PrintWriter out) {
+                    stopEntered.countDown();
+                    super.gracefulShutdown(out);
+                }
+            };
+            Future<Integer> start = launch(new CommandLine(collector), executor, debugger, connection, output,
+                    "--include-user", "chosen");
             Future<Integer> stop;
             try (var pause = debugger.pauseNextPing(FakeDebugServer.measure(allowed, OBJECT_ID, PROPERTY_ID, 2, 1))) {
                 assertTrue(pause.arrived.await(5, TimeUnit.SECONDS));
                 stop = executor.submit(() -> send(connection, "stop"));
+                assertTrue(stopEntered.await(5, TimeUnit.SECONDS), "stop reached the collector");
                 assertThrows(TimeoutException.class, () -> stop.get(300, TimeUnit.MILLISECONDS));
             } finally {
                 // Also finishes the collector if the synchronization assertion fails.
@@ -195,6 +207,153 @@ class ConfiguredStartTest {
             assertEquals(1, send(connection, "stop"));
             assertEquals(1, start.get(10, TimeUnit.SECONDS));
             assertEquals(Map.of(2, true), ConfiguredCoverageTest.coverage(output, "/" + OBJECT_ID + "/" + PROPERTY_ID));
+        }
+    }
+
+    @Test
+    void failedUserLookupIsThrottledAcrossFinalPackets() throws Exception {
+        DebugTargetId nameless = FakeDebugServer.target(UUID.randomUUID(), DebugTargetType.SERVER, null);
+        try (FakeDebugServer debugger = new FakeDebugServer();
+             ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            debugger.setTargets();
+            List<String> connection = List.of("-u", debugger.url(), "-i", "test_" + UUID.randomUUID());
+            Path output = directory.resolve("raw.xml");
+            Future<Integer> start = launch(executor, debugger, connection, output, "--include-user", "chosen");
+            debugger.failTargetLookups();
+            debugger.finalPolls(List.of(FakeDebugServer.measure(nameless, OBJECT_ID, PROPERTY_ID, 2, 1)),
+                    List.of(FakeDebugServer.measure(nameless, OBJECT_ID, PROPERTY_ID, 4, 1)));
+            assertEquals(1, send(connection, "stop"));
+            assertEquals(1, start.get(10, TimeUnit.SECONDS));
+            assertEquals(2, debugger.requests("getDbgTargets").size(), "initial listing and one failed lookup");
+            assertEquals(0, Utils.newInputXmlBuilder().parse(output.toFile()).getElementsByTagName("file").getLength());
+        }
+    }
+
+    @Test
+    void aFailedFirstFinalPollDoesNotDiscardTheSecondPoll() throws Exception {
+        failedFinalPollDoesNotDiscardTheOtherPoll(1);
+    }
+
+    @Test
+    void aFailedSecondFinalPollPreservesTheFirstPoll() throws Exception {
+        failedFinalPollDoesNotDiscardTheOtherPoll(2);
+    }
+
+    private void failedFinalPollDoesNotDiscardTheOtherPoll(int failedPoll) throws Exception {
+        try (FakeDebugServer debugger = new FakeDebugServer();
+             ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            List<String> connection = List.of("-u", debugger.url(), "-i", "test_" + UUID.randomUUID());
+            Path output = directory.resolve("raw.xml");
+            Future<Integer> start = launch(executor, debugger, connection, output);
+            debugger.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
+            debugger.finalPolls(List.of(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 6, 1)));
+            debugger.failFinalPoll(failedPoll);
+            assertEquals(1, send(connection, "stop"));
+            assertEquals(1, start.get(10, TimeUnit.SECONDS));
+            assertEquals(Map.of(2, true, 6, true), ConfiguredCoverageTest.coverage(output, "/" + OBJECT_ID + "/" + PROPERTY_ID));
+        }
+    }
+
+    @Test
+    void malformedFinalPacketStillAllowsTheSecondPollAndTheFinalDump() throws Exception {
+        try (FakeDebugServer debugger = new FakeDebugServer();
+             ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            List<String> connection = List.of("-u", debugger.url(), "-i", "test_" + UUID.randomUUID());
+            Path output = directory.resolve("raw.xml");
+            class Collector extends CoverageCommand {
+                String stopDirectly() {
+                    StringWriter reply = new StringWriter();
+                    gracefulShutdown(new PrintWriter(reply, true));
+                    return reply.toString().trim();
+                }
+            }
+            Collector collector = new Collector();
+            Future<Integer> start = launch(new CommandLine(collector), executor, debugger, connection, output);
+            debugger.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
+            var malformed = FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 4, 1);
+            malformed.setMeasure(null);
+            debugger.finalPolls(List.of(malformed), List.of(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 6, 1)));
+            // Use the existing hook to observe exceptions without leaving a socket client blocked.
+            try {
+                assertEquals(PipeMessages.FAIL_RESULT, collector.stopDirectly());
+            } finally {
+                collector.stopDirectly();
+            }
+            assertEquals(1, start.get(10, TimeUnit.SECONDS));
+            assertEquals(PipeMessages.FAIL_RESULT, collector.stopDirectly(), "repeat stop retains failure");
+            assertEquals(Map.of(2, true, 6, true), ConfiguredCoverageTest.coverage(output, "/" + OBJECT_ID + "/" + PROPERTY_ID));
+        }
+    }
+
+    @Test
+    void malformedPrimaryPacketFailsAndStillSavesCollectedHits() throws Exception {
+        try (FakeDebugServer debugger = new FakeDebugServer();
+             ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            List<String> connection = List.of("-u", debugger.url(), "-i", "test_" + UUID.randomUUID());
+            Path output = directory.resolve("raw.xml");
+            class Collector extends CoverageCommand {
+                String stopDirectly() {
+                    StringWriter reply = new StringWriter();
+                    gracefulShutdown(new PrintWriter(reply, true));
+                    return reply.toString().trim();
+                }
+            }
+            Collector collector = new Collector();
+            Future<Integer> start = launch(new CommandLine(collector), executor, debugger, connection, output);
+            debugger.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
+            var malformed = FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 4, 1);
+            malformed.setMeasure(null);
+            try (var pause = debugger.pauseNextPing(malformed)) {
+                assertTrue(pause.arrived.await(5, TimeUnit.SECONDS));
+            }
+            try {
+                assertEquals(1, start.get(10, TimeUnit.SECONDS));
+                assertEquals(Map.of(2, true), ConfiguredCoverageTest.coverage(output, "/" + OBJECT_ID + "/" + PROPERTY_ID));
+                assertEquals(PipeMessages.FAIL_RESULT, collector.stopDirectly());
+            } finally {
+                collector.stopDirectly();
+            }
+        }
+    }
+
+    @Test
+    void failedFinalDumpCannotBecomeSuccessOnRepeatedStop() throws Exception {
+        failedFinalDumpCannotBecomeSuccessOnRepeatedStop(false);
+    }
+
+    @Test
+    void uncheckedFinalDumpFailureCannotBecomeSuccessOnRepeatedStop() throws Exception {
+        failedFinalDumpCannotBecomeSuccessOnRepeatedStop(true);
+    }
+
+    private void failedFinalDumpCannotBecomeSuccessOnRepeatedStop(boolean throwsException) throws Exception {
+        try (FakeDebugServer debugger = new FakeDebugServer();
+             ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            List<String> connection = List.of("-u", debugger.url(), "-i", "test_" + UUID.randomUUID());
+            AtomicInteger dumps = new AtomicInteger();
+            class Collector extends CoverageCommand {
+                @Override protected boolean writeCoverageDump() {
+                    dumps.incrementAndGet();
+                    if (throwsException) throw new IllegalStateException("Output failed");
+                    return false;
+                }
+                String stopDirectly() {
+                    StringWriter reply = new StringWriter();
+                    gracefulShutdown(new PrintWriter(reply, true));
+                    return reply.toString().trim();
+                }
+            }
+            Collector collector = new Collector();
+            Future<Integer> start = launch(new CommandLine(collector), executor, debugger, connection,
+                    directory.resolve("raw.xml"));
+            try {
+                assertEquals(PipeMessages.FAIL_RESULT, collector.stopDirectly());
+            } finally {
+                collector.stopDirectly();
+            }
+            assertEquals(1, start.get(10, TimeUnit.SECONDS));
+            assertEquals(PipeMessages.FAIL_RESULT, collector.stopDirectly());
+            assertEquals(1, dumps.get(), "repeat stop does not repeat output");
         }
     }
 
@@ -374,10 +533,15 @@ class ConfiguredStartTest {
 
     private static Future<Integer> launch(ExecutorService executor, FakeDebugServer debugger,
                                           List<String> connection, Path output, String... options) throws Exception {
-        List<String> arguments = new ArrayList<>(List.of("start", "-o", output.toString(), "-t", "10"));
+        return launch(new CommandLine(new CoverageCommand()), executor, debugger, connection, output, options);
+    }
+
+    private static Future<Integer> launch(CommandLine cli, ExecutorService executor, FakeDebugServer debugger,
+                                          List<String> connection, Path output, String... options) throws Exception {
+        List<String> arguments = new ArrayList<>(List.of("-o", output.toString(), "-t", "10"));
         arguments.addAll(connection);
         arguments.addAll(Arrays.asList(options));
-        Future<Integer> start = executor.submit(() -> Coverage41C.getCommandLine().execute(arguments.toArray(String[]::new)));
+        Future<Integer> start = executor.submit(() -> cli.execute(arguments.toArray(String[]::new)));
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (debugger.requests("pingDebugUIParams").isEmpty()) {
             if (start.isDone() || System.nanoTime() > deadline) {

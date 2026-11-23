@@ -101,7 +101,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     private final Map<URI, Set<BigDecimal>> autoLines = new HashMap<>();
     private volatile boolean useConfiguredAutoLines;
     private boolean coveragePrepared;
-    private boolean finalOutputFailed;
+    private boolean finalOutputFailed = true;
     private boolean finalCollectionFailed;
     // A ping and its merge finish before stop disables profiling and reads the final packets.
     private final ReentrantLock collectionLock = new ReentrantLock(true);
@@ -201,7 +201,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
 
         try {
             mainLoop();
-        } catch (RuntimeDebugClientException e) {
+        } catch (RuntimeDebugClientException | RuntimeException e) {
             logger.error("Can't send ping to debug server. Coverage analyzing finished");
             logger.error(e.getLocalizedMessage());
             e.printStackTrace();
@@ -276,7 +276,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                         logger.warn("Cannot refresh debug targets: {}", e.getLocalizedMessage());
                     }
                 }
-            } catch (RuntimeDebugClientException e) {
+            } catch (RuntimeDebugClientException | RuntimeException e) {
                 // Stop sees this failure before it can acquire the lock and publish the final result.
                 finalCollectionFailed = true;
                 throw e;
@@ -300,11 +300,11 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                             lookupAttempted = true;
                             listedUsers = lookupUsers();
                         }
+                        String id = UserTargets.targetIdOf(measure);
                         if (listedUsers != null) {
-                            String id = UserTargets.targetIdOf(measure);
                             targets.rememberListedUser(id, listedUsers);
-                            targets.markUnknown(id);
                         }
+                        targets.markUnknown(id);
                     }
                     if (targets.verdict(measure, loggingOptions.isVerbose()) == UserTargets.Verdict.ACCEPTED) {
                         measureResultProcessing(modules, externalDataProcessors, measure);
@@ -458,15 +458,24 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                     logger.info("Disabling profiling...");
                     try {
                         client.toggleProfiling(null);
-                        // The first response can still be empty while the platform prepares the last measures.
-                        // Both polls use the normal user filter and merge before the final report and reply.
-                        processCommands(client.ping(), false);
-                        processCommands(client.ping(), false);
-                    } catch (RuntimeDebugClientException e) {
+                    } catch (RuntimeDebugClientException | RuntimeException e) {
                         finalCollectionFailed = true;
-                        logger.error("Cannot finish collecting measures: {}", e.getLocalizedMessage());
+                        logger.error("Cannot disable profiling: {}", e.getLocalizedMessage());
                     }
-                    finalOutputFailed = !writeCoverageDump();
+                    // A failed or empty first response must not prevent the second final poll.
+                    for (int poll = 0; poll < 2; poll++) {
+                        try {
+                            processCommands(client.ping(), false);
+                        } catch (RuntimeDebugClientException | RuntimeException e) {
+                            finalCollectionFailed = true;
+                            logger.error("Cannot finish collecting measures: {}", e.getLocalizedMessage());
+                        }
+                    }
+                    try {
+                        finalOutputFailed = !writeCoverageDump();
+                    } catch (RuntimeException e) {
+                        logger.error("Cannot write final coverage: {}", e.getLocalizedMessage());
+                    }
                     targets.summary().forEach(logger::info);
                     if (!targets.matchedAnyTarget()) {
                         logger.error(targets.noMatchMessage());

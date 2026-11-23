@@ -121,7 +121,7 @@ public class ConvertCommand implements Callable<Integer> {
                 NodeList lineNoNodeList = fileNode.getChildNodes();
                 for (int lineNoNodeNumber = 0; lineNoNodeNumber < lineNoNodeList.getLength(); lineNoNodeNumber++) {
                     Node lineNoNode = lineNoNodeList.item(lineNoNodeNumber);
-                    if (!lineNoNode.getNodeName().equals("lineToCover")) {
+                    if (!(lineNoNode instanceof Element) || !lineNoNode.getNodeName().equals("lineToCover")) {
                         continue;
                     }
                     if (!lineNoNode.getAttributes().getNamedItem("covered").getTextContent().equals("true")) {

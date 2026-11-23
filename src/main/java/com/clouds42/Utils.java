@@ -759,6 +759,9 @@ public class Utils {
             }
             String path = projectUri.relativize(uri).getPath();
             long linesToCover = bigDecimalsMap.values().stream().filter(aInteger -> aInteger >= 0).count();
+            if (linesToCover == 0) {
+                return;
+            }
             long coveredLinesCount = bigDecimalsMap.values().stream().filter(aInteger -> aInteger > 0).count();
             double coverage = Math.floorDiv(coveredLinesCount * 10000, linesToCover) / 100.;
             Object[] dataRow = {

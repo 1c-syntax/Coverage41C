@@ -30,6 +30,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -39,6 +40,7 @@ import java.util.stream.Collectors;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertTimeout;
 
 class ChangeBlocksTest {
 
@@ -424,6 +426,17 @@ class ChangeBlocksTest {
         assertTrue(blocks.covers(2));
         assertTrue(blocks.covers(3));
         assertFalse(blocks.covers(4));
+    }
+
+    @Test
+    void customUnanchoredMarkersDoNotRescanEveryUrlSuffix() throws Exception {
+        String source = "Адрес = \"" + "http://example/".repeat(30_000) + "\";";
+        assertTimeout(Duration.ofSeconds(5), () -> {
+            ChangeBlocks blocks = parse("{'changeMarkers':{'begin':'BEGIN','end':'END'}}",
+                    source, "// prefix BEGIN suffix", "Шаг();", "// prefix END suffix");
+            assertTrue(blocks.covers(3));
+            assertFalse(blocks.covers(1));
+        });
     }
 
     @Test

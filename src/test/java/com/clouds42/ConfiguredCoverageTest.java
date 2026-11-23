@@ -290,11 +290,24 @@ class ConfiguredCoverageTest {
         Path sources = project().resolve("configuration");
         Path outputDirectory = Files.createDirectory(directory.resolve("coverage.xml"));
         Path input = raw("");
-        Path report = directory.resolve("exclusions.json");
         for (String format : new String[]{"GENERIC_COVERAGE", "COBERTURA", "LCOV"}) {
+            Path report = directory.resolve("exclusions-" + format + ".json");
             assertEquals(1, execute("convert", "-s", sources.toString(), "-c", input.toString(),
                     "-o", outputDirectory.toString(), "-f", format, "--exclusion-report", report.toString()), format);
+            assertTrue(Files.isRegularFile(report), format + " passed preparation");
+            assertTrue(new ObjectMapper().readTree(report.toFile()).isObject(), format + " wrote valid JSON");
         }
+    }
+
+    @Test
+    void rawProcessingInstructionsCannotBeMistakenForLineRecords() throws Exception {
+        Path sources = project().resolve("configuration");
+        Path input = raw("");
+        Files.writeString(input, Files.readString(input).replace("<lineToCover ",
+                "<?lineToCover ignored?>\n<!-- line record -->\n<lineToCover "));
+        Path output = directory.resolve("coverage.xml");
+        assertEquals(0, execute("convert", "-s", sources.toString(), "-c", input.toString(), "-o", output.toString()));
+        assertEquals(Map.of(2, true, 4, true, 6, false), coverage(output, MODULE));
     }
 
     @Test

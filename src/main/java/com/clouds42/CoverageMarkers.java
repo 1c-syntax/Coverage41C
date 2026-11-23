@@ -113,6 +113,16 @@ final class CoverageMarkers {
                 }
                 int previousIndex = previousCode.getTokenIndex();
                 BlockRange endingHeader = blocksByHeaderEnd.get(previousIndex);
+                if (endingHeader == null) {
+                    // A method declaration may span several lines, including Async and its parameters.
+                    for (BlockRange header : blocksByHeaderEnd.values()) {
+                        if (header.kind.equals("method") && header.begin <= line
+                                && previousIndex <= header.headerEndToken) {
+                            endingHeader = header;
+                            break;
+                        }
+                    }
+                }
                 BlockRange block = blocks.get(line);
                 // Keep the longest block starting on the line when a marker follows a nested header.
                 // A body statement after the header on that line limits the marker to the line.
