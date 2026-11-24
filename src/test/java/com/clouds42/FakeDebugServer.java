@@ -52,9 +52,11 @@ import java.math.BigDecimal;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -85,10 +87,26 @@ class FakeDebugServer implements AutoCloseable {
     private volatile int failedFinalPollNumber;
     private final AtomicInteger finalPollNumber = new AtomicInteger();
     private volatile boolean failTargetLookups;
+    private volatile String failedLookupArea;
+    private final Map<String, List<DebugTargetId>> areaTargets = new ConcurrentHashMap<>();
+
+    void failTargetLookupForArea(String area) { failedLookupArea = area; }
+    void setAreaTargets(String area, DebugTargetId... newTargets) { areaTargets.put(area, List.of(newTargets)); }
+    private volatile int overriddenFinalPollNumber;
+    private int finalPollStatus;
+    private String finalPollContentType;
+    private byte[] finalPollBody;
+
+    void finalPollHttpResponse(int number, int status, String contentType, String body) {
+        finalPollStatus = status;
+        finalPollContentType = contentType;
+        finalPollBody = body.getBytes(StandardCharsets.UTF_8);
+        overriddenFinalPollNumber = number;
+    }
 
     void failFinalPoll(int number) { failedFinalPollNumber = number; }
     void failTargetLookups() { failTargetLookups = true; }
-    void restoreTargetLookups() { failTargetLookups = false; }
+    void restoreTargetLookups() { failTargetLookups = false; failedLookupArea = null; }
     private final AtomicBoolean failOnePing = new AtomicBoolean();
     private final CountDownLatch failedPing = new CountDownLatch(1);
 
@@ -249,7 +267,8 @@ class FakeDebugServer implements AutoCloseable {
                 failedPing.countDown();
                 return;
             }
-            if (command.equals("getDbgTargets") && failTargetLookups) {
+            if (command.equals("getDbgTargets") && (failTargetLookups
+                    || (failedLookupArea != null && body.contains(">" + failedLookupArea + "<")))) {
                 exchange.sendResponseHeaders(503, -1);
                 return;
             }
@@ -257,7 +276,17 @@ class FakeDebugServer implements AutoCloseable {
                 exchange.sendResponseHeaders(503, -1);
                 return;
             }
-            EObject response = response(command, finalReply);
+            if (finalPoll > 0 && finalPoll == overriddenFinalPollNumber) {
+                if (finalPollContentType != null) {
+                    exchange.getResponseHeaders().add("Content-Type", finalPollContentType);
+                }
+                exchange.sendResponseHeaders(finalPollStatus, finalPollStatus == 204 ? -1 : finalPollBody.length);
+                if (finalPollStatus != 204) {
+                    exchange.getResponseBody().write(finalPollBody);
+                }
+                return;
+            }
+            EObject response = response(command, finalReply, body);
             if (response == null) {
                 exchange.sendResponseHeaders(200, -1);
                 return;
@@ -279,7 +308,7 @@ class FakeDebugServer implements AutoCloseable {
         }
     }
 
-    private EObject response(String command, List<DBGUIExtCmdInfoBase> finalReply) throws InterruptedException {
+    private EObject response(String command, List<DBGUIExtCmdInfoBase> finalReply, String body) throws InterruptedException {
         switch (command) {
             case "attachDebugUI":
                 RDBGAttachDebugUIResponse attach = ResponseFactory.eINSTANCE.createRDBGAttachDebugUIResponse();
@@ -295,7 +324,10 @@ class FakeDebugServer implements AutoCloseable {
                 return version;
             case "getDbgTargets":
                 RDBGSGetDbgTargetsResponse list = ResponseFactory.eINSTANCE.createRDBGSGetDbgTargetsResponse();
-                targets.forEach(target -> list.getId().add(EcoreUtil.copy(target)));
+                List<DebugTargetId> listed = areaTargets.entrySet().stream()
+                        .filter(entry -> body.contains(">" + entry.getKey() + "<"))
+                        .map(Map.Entry::getValue).findFirst().orElse(targets);
+                listed.forEach(target -> list.getId().add(EcoreUtil.copy(target)));
                 return list;
             case "pingDebugUIParams":
                 return ping(finalReply);

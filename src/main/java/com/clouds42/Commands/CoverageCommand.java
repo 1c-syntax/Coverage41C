@@ -108,6 +108,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     private final Set<String> externalDataProcessors = new HashSet<>();
     private long targetLookupAllowedAt = System.nanoTime();
     private int targetLookupIntervalSeconds = 1;
+    private boolean targetListingIncomplete;
 
     private final Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<>() {
         @Override
@@ -274,7 +275,8 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                     break;
                 }
                 processCommands(client.ping(), true);
-                if (targets.hasPendingTargets() && System.nanoTime() - targetLookupAllowedAt >= 0) {
+                if ((targets.hasPendingTargets() || (targets.isActive() && targetListingIncomplete))
+                        && System.nanoTime() - targetLookupAllowedAt >= 0) {
                     try {
                         connectAllTargets(listDebugTargets());
                     } catch (RuntimeDebugClientException e) {
@@ -328,10 +330,12 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
             return client.getRuntimeDebugTargets(null);
         }
         List<DebugTargetId> listed = new ArrayList<>();
+        targetListingIncomplete = false;
         for (String area : debuggerOptions.getDebugAreaNames()) {
             try {
                 listed.addAll(client.getRuntimeDebugTargets(area));
             } catch (RuntimeDebugClientException e) {
+                targetListingIncomplete = true;
                 logger.error(e.getLocalizedMessage());
             }
         }

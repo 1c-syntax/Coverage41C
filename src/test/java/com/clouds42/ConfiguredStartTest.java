@@ -229,6 +229,82 @@ class ConfiguredStartTest {
     }
 
     @Test
+    void initialAreaLookupFailureIsRetriedWithoutAStartedEvent() throws Exception {
+        retryInitialAreaLookup(false);
+    }
+
+    @Test
+    void initialAreaLookupFailureDoesNotLoseTargetsWhenAnotherAreaSucceeds() throws Exception {
+        retryInitialAreaLookup(true);
+    }
+
+    private void retryInitialAreaLookup(boolean partialFailure) throws Exception {
+        DebugTargetId available = FakeDebugServer.target(UUID.randomUUID(), DebugTargetType.MANAGED_CLIENT, "chosen");
+        DebugTargetId target = FakeDebugServer.target(UUID.randomUUID(), DebugTargetType.MANAGED_CLIENT, "chosen");
+        try (FakeDebugServer debugger = new FakeDebugServer();
+             ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            debugger.setTargets(available);
+            debugger.setAreaTargets("test-area", target);
+            debugger.failTargetLookupForArea("test-area");
+            List<String> connection = List.of("-u", debugger.url(), "-i", "test_" + UUID.randomUUID());
+            Path output = directory.resolve("raw.xml");
+            String[] options = partialFailure
+                    ? new String[]{"--include-user", "chosen", "-n", "test-area", "-n", "available-area"}
+                    : new String[]{"--include-user", "chosen", "-n", "test-area"};
+            Future<Integer> start = launch(executor, debugger, connection, output, options);
+            int expectedAttachments = partialFailure ? 2 : 1;
+            try {
+                assertEquals(partialFailure ? 1 : 0, debugger.requests("attachDetachDbgTargets").size());
+                debugger.restoreTargetLookups();
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (debugger.requests("attachDetachDbgTargets").size() < expectedAttachments
+                        && System.nanoTime() < deadline) {
+                    Thread.sleep(10);
+                }
+                assertEquals(expectedAttachments, debugger.requests("attachDetachDbgTargets").size());
+                assertTrue(debugger.requests("attachDetachDbgTargets").stream()
+                        .anyMatch(request -> request.body.contains(target.getId())));
+                debugger.deliver(FakeDebugServer.measure(target, OBJECT_ID, PROPERTY_ID, 2, 1));
+            } finally {
+                send(connection, "stop");
+            }
+            assertEquals(0, start.get(10, TimeUnit.SECONDS));
+            assertEquals(Map.of(2, true), ConfiguredCoverageTest.coverage(output, "/" + OBJECT_ID + "/" + PROPERTY_ID));
+        }
+    }
+
+    @Test
+    void htmlFinalPollFailsButPreservesTheOtherPollAndEarlierHits() throws Exception {
+        finalHttpResponsePreservesTheOtherPoll(200, "text/html", "<html>Service unavailable</html>", 1);
+    }
+
+    @Test
+    void finalPollWithoutAContentTypeFailsButPreservesTheOtherPoll() throws Exception {
+        finalHttpResponsePreservesTheOtherPoll(200, null, "Service unavailable", 1);
+    }
+
+    @Test
+    void noContentFinalPollIsStillAccepted() throws Exception {
+        finalHttpResponsePreservesTheOtherPoll(204, null, "", 0);
+    }
+
+    private void finalHttpResponsePreservesTheOtherPoll(int status, String contentType, String body,
+                                                       int expectedStatus) throws Exception {
+        try (FakeDebugServer debugger = new FakeDebugServer();
+             ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            List<String> connection = List.of("-u", debugger.url(), "-i", "test_" + UUID.randomUUID());
+            Path output = directory.resolve("raw.xml");
+            Future<Integer> start = launch(executor, debugger, connection, output);
+            debugger.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
+            debugger.finalPolls(List.of(), List.of(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 6, 1)));
+            debugger.finalPollHttpResponse(1, status, contentType, body);
+            assertEquals(expectedStatus, send(connection, "stop"));
+            assertEquals(expectedStatus, start.get(10, TimeUnit.SECONDS));
+            assertEquals(Map.of(2, true, 6, true), ConfiguredCoverageTest.coverage(output, "/" + OBJECT_ID + "/" + PROPERTY_ID));
+        }
+    }
+
+    @Test
     void failedPrimaryPingMakesStartAndStopFailEvenWhenFinalPollsSucceed() throws Exception {
         try (FakeDebugServer debugger = new FakeDebugServer();
              ExecutorService executor = Executors.newSingleThreadExecutor()) {
