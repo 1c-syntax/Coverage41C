@@ -99,7 +99,6 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     private DebugClient client;
     private UserTargets targets = new UserTargets(IncludeUsers.NONE);
     private final Map<URI, Set<BigDecimal>> autoLines = new HashMap<>();
-    private volatile boolean useConfiguredAutoLines;
     private boolean coveragePrepared;
     private boolean finalOutputFailed = true;
     private boolean finalCollectionFailed;
@@ -166,8 +165,6 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         }
         UUID measureUuid = UUID.randomUUID();
         rawMode = metadataOptions.isRawMode();
-        useConfiguredAutoLines = !rawMode
-                && (metadataOptions.getConfigFile() != null || metadataOptions.getExclusionReportFile() != null);
 
         ConfiguredCoverage.Prepared prepared;
         try {
@@ -176,7 +173,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                 getServerSocket();
                 prepared = ConfiguredCoverage.prepare(metadataOptions, filterOptions.getExtensionName(),
                         coverageData, outputOptions.getOutputFile(), null, users.isActive());
-                if (useConfiguredAutoLines) {
+                if (!rawMode) {
                     rememberAutoLines();
                 }
                 prepared.writeReport();
@@ -532,9 +529,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                 return;
             }
             super.cleanCoverageData();
-            if (useConfiguredAutoLines) {
-                autoLines.forEach((uri, lines) -> lines.forEach(line -> coverageData.get(uri).put(line, -1)));
-            }
+            autoLines.forEach((uri, lines) -> lines.forEach(line -> coverageData.get(uri).put(line, -1)));
         }
     }
 

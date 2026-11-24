@@ -62,6 +62,75 @@ class ConfiguredCoverageTest {
     @TempDir Path directory;
 
     @Test
+    void inlineMarkersDoNotChangeWhenConversionRequestsAReport() throws Exception {
+        assertConversionMarkers("""
+                Процедура Пример()
+                    Первый(); // Cover:off
+                    Второй(); // Cover:auto
+                    Третий();
+                КонецПроцедуры
+                """, Map.of(4, true, 5, false));
+    }
+
+    @Test
+    void methodMarkerStopsAtTheMethodEndWithoutExtraOptions() throws Exception {
+        assertConversionMarkers("""
+                Процедура Исключённая() // Cover:off
+                    Первый();
+                КонецПроцедуры
+                Процедура Включённая()
+                    Второй();
+                КонецПроцедуры
+                """, Map.of(5, false, 6, false));
+    }
+
+    @Test
+    void nestedStandaloneMarkersCloseOneRangeAtATimeWithoutExtraOptions() throws Exception {
+        assertConversionMarkers("""
+                Процедура Пример()
+                    // Cover:off
+                    Первый();
+                    // Cover:auto
+                    Второй();
+                    // Cover:on
+                    Третий();
+                    // Cover:on
+                    Четвёртый();
+                КонецПроцедуры
+                """, Map.of(9, false, 10, false));
+    }
+
+    @Test
+    void fileOffExcludesTheModuleWithoutExtraOptions() throws Exception {
+        Path sources = project().resolve("configuration");
+        Files.writeString(sources.resolve(MODULE), "// Cover:file-off\n" + SOURCE);
+        MetadataOptions options = new MetadataOptions();
+        options.setProjectDirName(sources.getParent().toString());
+        options.setSrcDirName("configuration");
+        options.setRemoveSupport(com.github._1c_syntax.bsl.support.SupportVariant.NONE);
+        Map<URI, Map<BigDecimal, Integer>> data = new HashMap<>();
+        var modules = Utils.readMetadata(options, "", data);
+        assertEquals(sources.resolve(MODULE).toUri(), modules.get(OBJECT_ID + "/" + PROPERTY_ID));
+        assertEquals(Map.of(), data.get(sources.resolve(MODULE).toUri()));
+    }
+
+    private void assertConversionMarkers(String source, Map<Integer, Boolean> expected) throws Exception {
+        Path sources = project().resolve("configuration");
+        Files.writeString(sources.resolve(MODULE), source);
+        Path input = raw("");
+        for (boolean report : List.of(false, true)) {
+            Path output = directory.resolve("coverage-" + report + ".xml");
+            var arguments = new java.util.ArrayList<>(List.of("convert", "-s", sources.toString(),
+                    "-c", input.toString(), "-o", output.toString()));
+            if (report) {
+                arguments.addAll(List.of("--exclusion-report", directory.resolve("exclusions.json").toString()));
+            }
+            assertEquals(0, execute(arguments.toArray(String[]::new)));
+            assertEquals(expected, coverage(output, MODULE), "exclusion report: " + report);
+        }
+    }
+
+    @Test
     void legacyRawExtensionAttributeIsIgnoredWithoutAnExplicitSelector() throws Exception {
         Path project = project();
         Path input = raw("Sample");
@@ -716,6 +785,32 @@ class ConfiguredCoverageTest {
         assertEquals(0, Utils.newInputXmlBuilder().parse(output.toFile()).getElementsByTagName("lineToCover").getLength());
         assertTrue(new ObjectMapper().readTree(report.toFile()).path("warnings").toString()
                 .contains("ObjectModule.bsl: cannot read module"));
+        assertEquals(0, execute("convert", "-s", processor.toString(), "-c", input.toString(),
+                "-o", output.toString()));
+        assertEquals(0, Utils.newInputXmlBuilder().parse(output.toFile()).getElementsByTagName("lineToCover").getLength());
+    }
+
+    @Test
+    void externalModuleWithoutSourceTextIsSkippedWithAndWithoutAReport() throws Exception {
+        Path processor = externalProcessor();
+        Files.write(directory.resolve("Sample/Ext/ObjectModule.bsl"),
+                new byte[]{(byte) 0xff, (byte) 0xff, (byte) 0xff, 0x7f});
+        Path input = Files.writeString(directory.resolve("raw.xml"), """
+                <coverage><file path="/object-id/a637f77f-3840-441d-a1c3-699c8c5cb7e0">
+                  <lineToCover covered="true" lineNumber="2"/>
+                </file></coverage>
+                """);
+        for (boolean report : List.of(false, true)) {
+            Path output = directory.resolve("coverage-" + report + ".xml");
+            var arguments = new java.util.ArrayList<>(List.of("convert", "-s", processor.toString(),
+                    "-c", input.toString(), "-o", output.toString()));
+            if (report) {
+                arguments.addAll(List.of("--exclusion-report", directory.resolve("exclusions.json").toString()));
+            }
+            assertEquals(0, execute(arguments.toArray(String[]::new)));
+            assertEquals(0, Utils.newInputXmlBuilder().parse(output.toFile())
+                    .getElementsByTagName("lineToCover").getLength());
+        }
     }
 
     @Test

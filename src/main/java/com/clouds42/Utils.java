@@ -30,14 +30,10 @@ import com.github._1c_syntax.bsl.mdclasses.MDClasses;
 import com.github._1c_syntax.bsl.mdo.MD;
 import com.github._1c_syntax.bsl.mdo.Module;
 import com.github._1c_syntax.bsl.mdo.SettingsStorage;
-import com.github._1c_syntax.bsl.parser.BSLLexer;
-import com.github._1c_syntax.bsl.parser.BSLTokenizer;
 import com.github._1c_syntax.bsl.types.ModuleType;
 import com.github._1c_syntax.bsl.support.SupportVariant;
 import de.vandermeer.asciitable.AsciiTable;
 import de.vandermeer.asciitable.CWC_LongestLine;
-import org.antlr.v4.runtime.Token;
-import org.apache.commons.lang3.Range;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
@@ -152,85 +148,9 @@ public class Utils {
     }
 
 
-    private static final Pattern COVER_ON = Pattern.compile(
-            "Cover:(?:вкл|on)", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
-    );
-
-    private static final Pattern COVER_OFF = Pattern.compile(
-            "Cover:(?:выкл|off)", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
-    );
-
-    private static final Pattern COVER_AUTO = Pattern.compile(
-            "Cover:(?:авто|auto)", Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
-    );
-
     private static void addCoverageData(Map<URI, Map<BigDecimal, Integer>> coverageData, URI uri) {
-        BSLTokenizer tokenizer;
-        try {
-            tokenizer = LinesToCoverage.createTokenizer(Files.readString(Path.of(uri)));
-        } catch (IOException e) {
-            logger.error(e.getLocalizedMessage());
-            return;
-        }
-
-        int[] linesToCover = LinesToCoverage.getLines(tokenizer.getAst());
-
-        List<Range<Integer>> coverageIgnorance = new ArrayList<>();
-        Stack<Integer> coverageIgnoranceStartStack = new Stack();
-        List<Range<Integer>> coverageAutoIgnorance = new ArrayList<>();
-        Stack<Integer> coverageAutoIgnoranceStartStack = new Stack();
-
-        if (linesToCover.length > 0) {
-
-            List<Token> allTokens = tokenizer.getTokens();
-            List<Token> comments = allTokens.stream()
-                    .filter(token -> token.getType() == BSLLexer.LINE_COMMENT)
-                    .toList();
-
-            for (Token comment : comments) {
-                int commentLine = comment.getLine();
-                Matcher offMatcher = COVER_OFF.matcher(comment.getText());
-                if (offMatcher.find()) {
-                    coverageIgnoranceStartStack.push(commentLine);
-                } else {
-                    Matcher autoMatcher = COVER_AUTO.matcher(comment.getText());
-                    if (autoMatcher.find()) {
-                        coverageAutoIgnoranceStartStack.push(commentLine);
-                    } else {
-                        Matcher onMatcher = COVER_ON.matcher(comment.getText());
-                        if (onMatcher.find()) {
-                            while (!coverageIgnoranceStartStack.empty()) {
-                                coverageIgnorance.add(Range.of(coverageIgnoranceStartStack.pop(), commentLine));
-                            }
-                            while (!coverageAutoIgnoranceStartStack.empty()) {
-                                coverageAutoIgnorance.add(Range.of(coverageAutoIgnoranceStartStack.pop(), commentLine));
-                            }
-                        }
-                    }
-                }
-            }
-            while (!coverageIgnoranceStartStack.empty()) {
-                coverageIgnorance.add(
-                        Range.of(coverageIgnoranceStartStack.pop(), linesToCover[linesToCover.length - 1]));
-            }
-            while (!coverageAutoIgnoranceStartStack.empty()) {
-                coverageAutoIgnorance.add(
-                        Range.of(coverageAutoIgnoranceStartStack.pop(), linesToCover[linesToCover.length - 1]));
-            }
-
-            linesToCover = Arrays.stream(linesToCover).filter(i ->
-              coverageIgnorance.stream().noneMatch(integerRange -> integerRange.contains(i))).toArray();
-        }
-
-        Map<BigDecimal, Integer> coverMap = new HashMap<>();
-        for (int lineNumber : linesToCover) {
-            int countValue = 0;
-            if (coverageAutoIgnorance.stream().anyMatch(integerRange -> integerRange.contains(lineNumber))) {
-                countValue = -1;
-            }
-            coverMap.put(new BigDecimal(lineNumber), countValue);
-        }
-        coverageData.put(uri, coverMap);
+        ConfiguredCoverage.addCoverageData(coverageData, uri, new ModuleId(uri.getPath(), List.of(), Set.of()),
+                ExclusionRules.empty(), new ExclusionReport());
     }
 
     /**

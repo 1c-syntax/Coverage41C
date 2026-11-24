@@ -464,6 +464,46 @@ class ConfiguredStartTest {
     }
 
     @Test
+    void sourceMarkersAndCleanDoNotDependOnTheExclusionReportOption() throws Exception {
+        Path project = TestUtils.copyConfiguration(directory);
+        Files.writeString(project.resolve("configuration").resolve(MODULE), """
+                Процедура Пример()
+                    Первый(); // Cover:off
+                    Второй(); // Cover:auto
+                    Третий();
+                КонецПроцедуры
+                """);
+        for (boolean report : List.of(false, true)) {
+            try (FakeDebugServer debugger = new FakeDebugServer();
+                 ExecutorService executor = Executors.newSingleThreadExecutor()) {
+                List<String> connection = List.of("-u", debugger.url(), "-i", "test_" + UUID.randomUUID());
+                Path output = directory.resolve("coverage-" + report + ".xml");
+                var options = new ArrayList<>(List.of("-P", project.toString(), "-s", "configuration"));
+                if (report) {
+                    options.addAll(List.of("--exclusion-report", directory.resolve("exclusions.json").toString()));
+                }
+                Future<Integer> start = launch(executor, debugger, connection, output, options.toArray(String[]::new));
+                try {
+                    debugger.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1, 3, 1, 4, 1));
+                    assertEquals(0, send(connection, "dump"));
+                    assertEquals(Map.of(3, true, 4, true, 5, false),
+                            ConfiguredCoverageTest.coverage(output, "configuration/" + MODULE));
+                    assertEquals(0, send(connection, "clean"));
+                    assertEquals(0, send(connection, "dump"));
+                    assertEquals(Map.of(4, false, 5, false),
+                            ConfiguredCoverageTest.coverage(output, "configuration/" + MODULE));
+                    debugger.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 3, 1));
+                } finally {
+                    assertEquals(0, send(connection, "stop"));
+                }
+                assertEquals(0, start.get(10, TimeUnit.SECONDS));
+                assertEquals(Map.of(3, true, 4, false, 5, false),
+                        ConfiguredCoverageTest.coverage(output, "configuration/" + MODULE));
+            }
+        }
+    }
+
+    @Test
     void dumpAndStopReportWriteFailureAndDumpCanRetry() throws Exception {
         Path project = TestUtils.copyConfiguration(directory);
         Path output = directory.resolve("coverage.xml");

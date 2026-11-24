@@ -408,8 +408,8 @@ public final class ConfiguredCoverage {
         }
     }
 
-    private static void addCoverageData(Map<URI, Map<BigDecimal, Integer>> coverageData, URI uri,
-                                        ModuleId module, ExclusionRules rules, ExclusionReport report) {
+    static void addCoverageData(Map<URI, Map<BigDecimal, Integer>> coverageData, URI uri,
+                                ModuleId module, ExclusionRules rules, ExclusionReport report) {
         String moduleText = readModuleText(uri, module, report);
         // A skipped module keeps an empty map, like a module out of scope: its measurements are ignored.
         coverageData.put(uri, moduleText == null
