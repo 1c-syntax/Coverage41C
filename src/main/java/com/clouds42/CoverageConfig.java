@@ -114,6 +114,7 @@ public class CoverageConfig {
         return changeMarkers == null ? Collections.emptyList() : new ArrayList<>(changeMarkers);
     }
 
+    @JsonSetter(nulls = Nulls.FAIL)
     public void setChangeMarkers(List<MarkerPair> changeMarkers) {
         this.changeMarkers = changeMarkers;
     }

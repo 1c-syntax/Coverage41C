@@ -305,11 +305,13 @@ class ConfiguredStartTest {
             Path output = directory.resolve("raw.xml");
             Future<Integer> start = launch(executor, debugger, connection, output);
             debugger.deliver(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 2, 1));
-            debugger.finalPolls(List.of(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 6, 1)));
+            debugger.finalPolls(List.of(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 6, 1)),
+                    List.of(FakeDebugServer.measure(OBJECT_ID, PROPERTY_ID, 8, 1)));
             debugger.failFinalPoll(failedPoll);
             assertEquals(1, send(connection, "stop"));
             assertEquals(1, start.get(10, TimeUnit.SECONDS));
-            assertEquals(Map.of(2, true, 6, true), ConfiguredCoverageTest.coverage(output, "/" + OBJECT_ID + "/" + PROPERTY_ID));
+            assertEquals(failedPoll == 1 ? Map.of(2, true, 8, true) : Map.of(2, true, 6, true),
+                    ConfiguredCoverageTest.coverage(output, "/" + OBJECT_ID + "/" + PROPERTY_ID));
         }
     }
 

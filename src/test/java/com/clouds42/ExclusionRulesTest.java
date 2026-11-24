@@ -380,6 +380,22 @@ class ExclusionRulesTest {
     }
 
     @Test
+    void rejectsExplicitNullChangeMarkers() throws Exception {
+        File file = write("rules.json", "{'auto':{'objects':['CommonModule.*']},'changeMarkers':null}");
+        String message = assertThrows(IllegalArgumentException.class, () -> load(file)).getMessage();
+        assertTrue(message.contains("rules.json") && message.contains("changeMarkers"), message);
+    }
+
+    @Test
+    void absentAndEmptyChangeMarkersKeepOtherRules() throws Exception {
+        for (String setting : List.of("", ",'changeMarkers':[]")) {
+            ExclusionRules rules = load(write("rules.json", "{'auto':{'objects':['CommonModule.*']}" + setting + "}"));
+            assertEquals(1, rules.getRules().size());
+            assertTrue(rules.getChangeMarkers().isEmpty());
+        }
+    }
+
+    @Test
     void warnsAboutUnknownKeyOfChangeMarkers() throws Exception {
         File file = write("a.json", "{'changeMarkers':{'bgin':'x'}}");
         ExclusionReport report = new ExclusionReport();

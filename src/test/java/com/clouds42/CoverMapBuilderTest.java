@@ -82,8 +82,8 @@ class CoverMapBuilderTest {
 
     @Test
     void onClosesOnlyLastOpenRange() {
-        assertEquals(Map.of(9, 0, 10, 0), cover(
-                "Процедура А()", "\t// Cover:off", "\tБ();", "\t// Cover:off", "\tВ();", "\t// Cover:on",
+        assertEquals(Map.of(3, -1, 7, -1, 9, 0, 10, 0), cover(
+                "Процедура А()", "\t// Cover:auto", "\tБ();", "\t// Cover:off", "\tВ();", "\t// Cover:on",
                 "\tГ();", "\t// Cover:on", "\tД();", "КонецПроцедуры"));
     }
 

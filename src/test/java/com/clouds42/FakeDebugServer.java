@@ -240,6 +240,10 @@ class FakeDebugServer implements AutoCloseable {
             if (command.equals("setMeasureMode")) {
                 profilingDisabled = !body.contains("measureModeSeanceID");
             }
+            int finalPoll = command.equals("pingDebugUIParams") && profilingDisabled
+                    ? finalPollNumber.incrementAndGet() : 0;
+            // Reserve the reply even when this poll fails, so the next poll gets its own data.
+            List<DBGUIExtCmdInfoBase> finalReply = finalPoll > 0 ? finalPolls.poll() : null;
             if (command.equals("pingDebugUIParams") && failOnePing.compareAndSet(true, false)) {
                 exchange.sendResponseHeaders(503, -1);
                 failedPing.countDown();
@@ -249,12 +253,11 @@ class FakeDebugServer implements AutoCloseable {
                 exchange.sendResponseHeaders(503, -1);
                 return;
             }
-            if (command.equals("pingDebugUIParams") && profilingDisabled
-                    && (finalPollNumber.incrementAndGet() == failedFinalPollNumber || failFinalPolls)) {
+            if (finalPoll > 0 && (finalPoll == failedFinalPollNumber || failFinalPolls)) {
                 exchange.sendResponseHeaders(503, -1);
                 return;
             }
-            EObject response = response(command);
+            EObject response = response(command, finalReply);
             if (response == null) {
                 exchange.sendResponseHeaders(200, -1);
                 return;
@@ -276,7 +279,7 @@ class FakeDebugServer implements AutoCloseable {
         }
     }
 
-    private EObject response(String command) throws InterruptedException {
+    private EObject response(String command, List<DBGUIExtCmdInfoBase> finalReply) throws InterruptedException {
         switch (command) {
             case "attachDebugUI":
                 RDBGAttachDebugUIResponse attach = ResponseFactory.eINSTANCE.createRDBGAttachDebugUIResponse();
@@ -295,13 +298,13 @@ class FakeDebugServer implements AutoCloseable {
                 targets.forEach(target -> list.getId().add(EcoreUtil.copy(target)));
                 return list;
             case "pingDebugUIParams":
-                return ping();
+                return ping(finalReply);
             default:
                 return null;
         }
     }
 
-    private EObject ping() throws InterruptedException {
+    private EObject ping(List<DBGUIExtCmdInfoBase> finalReply) throws InterruptedException {
         pings.incrementAndGet();
         RDBGPingDebugUIResponse ping = ResponseFactory.eINSTANCE.createRDBGPingDebugUIResponse();
         PausedPing pause = pausedPings.poll();
@@ -313,7 +316,6 @@ class FakeDebugServer implements AutoCloseable {
             ping.getResult().addAll(pause.reply);
             return ping;
         }
-        List<DBGUIExtCmdInfoBase> finalReply = profilingDisabled ? finalPolls.poll() : null;
         if (finalReply != null) {
             ping.getResult().addAll(finalReply);
             return ping;
