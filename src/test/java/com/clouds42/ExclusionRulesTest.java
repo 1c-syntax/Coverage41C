@@ -906,6 +906,29 @@ class ExclusionRulesTest {
     }
 
     @Test
+    void rejectsExplicitNullInExcludeAndAutoLists() throws Exception {
+        for (String section : List.of("exclude", "auto")) {
+            for (String field : List.of("subsystems", "objects", "paths", "lines")) {
+                File file = write("null.json", "{'changeMarkers':{},'" + section + "':{'" + field + "':null}}");
+                String message = assertThrows(IllegalArgumentException.class, () -> load(file), section + "." + field)
+                        .getMessage();
+                assertTrue(message.contains("null.json") && message.contains(field), message);
+            }
+        }
+    }
+
+    @Test
+    void omittedAndEmptyExcludeAndAutoListsRemainAllowed() throws Exception {
+        assertTrue(load(write("omitted.json", "{'changeMarkers':{}}")).getRules().isEmpty());
+        for (String section : List.of("exclude", "auto")) {
+            for (String field : List.of("subsystems", "objects", "paths", "lines")) {
+                assertTrue(load(write("empty.json", "{'changeMarkers':{},'" + section + "':{'" + field + "':[]}}"))
+                        .getRules().isEmpty());
+            }
+        }
+    }
+
+    @Test
     void rejectsNullChangeMarkerWithItsIndex() throws Exception {
         File file = write("a.json", "{'changeMarkers':[{},null]}");
         String message = assertThrows(IllegalArgumentException.class, () -> load(file)).getMessage();

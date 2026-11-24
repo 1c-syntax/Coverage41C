@@ -253,7 +253,11 @@ public class Utils {
 
         discoverExternalDataProcessorSources(rootPath, ignored -> {}, logger::error).forEach((key, uri) -> {
             uriListByKey.put(getExtensionUriKey(extensionName, key), uri);
-            addCoverageData(coverageData, uri);
+            if (Files.notExists(Path.of(uri))) {
+                coverageData.put(uri, new HashMap<>());
+            } else {
+                addCoverageData(coverageData, uri);
+            }
         });
     }
 
@@ -310,8 +314,12 @@ public class Utils {
                             if (formUuid.isBlank() || formName.isBlank()) {
                                 throw new IllegalArgumentException("Missing form ID or name");
                             }
-                            uriListByKey.put(getUriKey(formUuid, ModuleType.FormModule, null),
-                                    formsPath.resolve(Paths.get(formName, "Ext", "Form", "Module.bsl")).toUri());
+                            URI module = checkedFormModule(formsPath, formName, "Ext", "Form", "Module.bsl").toUri();
+                            URI previous = uriListByKey.putIfAbsent(getUriKey(formUuid, ModuleType.FormModule, null), module);
+                            if (previous != null) {
+                                reportProblem.accept("Duplicate form ID " + formUuid + " in " + rootPath
+                                        + ": " + previous + " and " + module);
+                            }
                         } catch (IOException | SAXException | XPathExpressionException | IllegalArgumentException e) {
                             reportProblem.accept("Cannot read form XML " + formXmlFile + ": " + e.getLocalizedMessage());
                         }
@@ -351,10 +359,30 @@ public class Utils {
                 reportProblem.accept("Missing form ID or name in " + rootPath + ": " + formUuid + " " + formName);
                 continue;
             }
-            uriListByKey.put(getUriKey(formUuid, ModuleType.FormModule, null),
-                    formsPath.resolve(Paths.get(formName, "Module.bsl")).toUri());
+            try {
+                URI module = checkedFormModule(formsPath, formName, "Module.bsl").toUri();
+                URI previous = uriListByKey.putIfAbsent(getUriKey(formUuid, ModuleType.FormModule, null), module);
+                if (previous != null) {
+                    reportProblem.accept("Duplicate form ID " + formUuid + " in " + rootPath
+                            + ": " + previous + " and " + module);
+                }
+            } catch (IOException | IllegalArgumentException e) {
+                reportProblem.accept("Cannot read form " + formName + " in " + rootPath + ": " + e.getLocalizedMessage());
+            }
         }
         return uriListByKey;
+    }
+
+    private static Path checkedFormModule(Path formsPath, String formName, String... location) throws IOException {
+        if (formName.equals(".") || formName.equals("..") || formName.indexOf('/') >= 0
+                || formName.indexOf('\\') >= 0 || formName.indexOf(':') >= 0) {
+            throw new IllegalArgumentException("Invalid form name: " + formName);
+        }
+        Path module = formsPath.resolve(Paths.get(formName, location));
+        if (Files.exists(module) && !module.toRealPath().startsWith(formsPath.toRealPath())) {
+            throw new IllegalArgumentException("Form module is outside Forms: " + formName);
+        }
+        return module;
     }
 
     private static String getEdtFormName(Node formsNode) {

@@ -354,14 +354,10 @@ public final class ConfiguredCoverage {
         rejectSame(raw, report);
         rejectInputOutput(config, coverage);
         rejectInputOutput(config, report);
-        File existingCoverage = coverage != null && coverage.exists() ? coverage : null;
-        File existingReport = report != null && report.exists() ? report : null;
-        if (existingCoverage != null || existingReport != null) {
-            for (URI source : sources) {
-                File input = Path.of(source).toFile();
-                rejectSame(input, existingCoverage);
-                rejectSame(input, existingReport);
-            }
+        for (URI source : sources) {
+            File input = Path.of(source).toFile();
+            rejectSame(input, coverage);
+            rejectSame(input, report);
         }
     }
 

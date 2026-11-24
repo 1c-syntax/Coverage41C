@@ -126,7 +126,8 @@ final class CoverageMarkers {
                 BlockRange block = blocks.get(line);
                 // Keep the longest block starting on the line when a marker follows a nested header.
                 // A body statement after the header on that line limits the marker to the line.
-                if (block == null || (block.headerEndToken >= 0
+                if ((endingHeader != null && !endingHeader.complete) || block == null
+                        || (block.headerEndToken >= 0
                         && previousIndex > block.headerEndToken && endingHeader == null)) {
                     block = endingHeader;
                 }

@@ -185,6 +185,7 @@ public class CoverageConfig {
             return valueOrEmpty(subsystems);
         }
 
+        @JsonSetter(nulls = Nulls.FAIL)
         public void setSubsystems(List<String> subsystems) {
             this.subsystems = subsystems;
         }
@@ -193,6 +194,7 @@ public class CoverageConfig {
             return valueOrEmpty(objects);
         }
 
+        @JsonSetter(nulls = Nulls.FAIL)
         public void setObjects(List<String> objects) {
             this.objects = objects;
         }
@@ -201,6 +203,7 @@ public class CoverageConfig {
             return valueOrEmpty(paths);
         }
 
+        @JsonSetter(nulls = Nulls.FAIL)
         public void setPaths(List<String> paths) {
             this.paths = paths;
         }
@@ -209,6 +212,7 @@ public class CoverageConfig {
             return valueOrEmpty(lines);
         }
 
+        @JsonSetter(nulls = Nulls.FAIL)
         public void setLines(List<String> lines) {
             this.lines = lines;
         }

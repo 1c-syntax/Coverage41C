@@ -209,6 +209,17 @@ class CoverageMarkersTest {
     }
 
     @Test
+    void incompleteNestedHeaderOnTheMethodStartLineKeepsTheMarkerLocal() {
+        for (String header : List.of("Если Готово Тогда", "Пока Готово Цикл", "Для Сч = 1 По 2 Цикл")) {
+            CoverageMarkers markers = parse("Процедура П() " + header + " // Cover:off",
+                    "Первый();", "Второй();", "КонецПроцедуры");
+            assertEquals(List.of("OFF Cover:off 1..1"), ranges(markers), header);
+            assertTrue(markers.getWarnings().stream().anyMatch(warning -> warning.contains("incomplete")),
+                    header + ": " + markers.getWarnings());
+        }
+    }
+
+    @Test
     void incompleteLoopAndTryBlocksKeepInlineMarkersLocal() {
         for (String header : List.of("Пока Готово Цикл", "Для Сч = 1 По 2 Цикл",
                 "Для Каждого Элемент Из Массив Цикл", "Попытка")) {
