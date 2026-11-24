@@ -458,20 +458,97 @@ class ExclusionRulesTest {
     }
 
     @Test
-    void rejectsAmbiguousShortNameEvenWhenItMatchesARootPath() {
-        Subsystem nested = Subsystem.builder().name("Sales")
-                .mdoReference(MdoReference.create("Subsystem.Operations.Subsystem.Sales")).build();
-        Subsystem root = Subsystem.builder().name("Sales")
-                .mdoReference(MdoReference.create("Subsystem.Sales")).build();
-        Subsystem parent = Subsystem.builder().name("Operations")
-                .mdoReference(MdoReference.create("Subsystem.Operations")).subsystem(nested).build();
-        CF tree = Configuration.EMPTY.toBuilder().subsystems(List.of(root, parent)).build();
+    void exactRootPathTakesPriorityOverMatchingNestedNames() {
+        Subsystem root = namedSubsystem("Sales", namedSubsystem("Sales.Regional"));
+        Subsystem parent = namedSubsystem("Operations", namedSubsystem("Operations.Sales",
+                namedSubsystem("Operations.Sales.Regional")));
+        for (List<Subsystem> order : List.of(List.of(root, parent), List.of(parent, root))) {
+            CF tree = Configuration.EMPTY.toBuilder().subsystems(order).build();
+            for (boolean allowMissing : List.of(false, true)) {
+                assertEquals(Set.of("Subsystem.Sales", "Subsystem.Sales.Subsystem.Regional"),
+                        SubsystemFilter.resolve(tree, "Sales", allowMissing));
+                assertEquals(Set.of("Subsystem.Sales", "Subsystem.Sales.Subsystem.Regional"),
+                        SubsystemFilter.resolve(tree, "  Sales  ", allowMissing));
+                assertEquals(Set.of("Subsystem.Operations.Subsystem.Sales",
+                                "Subsystem.Operations.Subsystem.Sales.Subsystem.Regional"),
+                        SubsystemFilter.resolve(tree, "Operations.Sales", allowMissing));
+            }
+            assertEquals(Set.of("Sales", "Operations.Sales"),
+                    SubsystemFilter.resolveMask(tree, Pattern.compile(".*Sales")).keySet());
+        }
+    }
 
-        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
-                () -> SubsystemFilter.resolve(tree, "Sales"));
-        assertEquals("Ambiguous subsystem name: Sales", error.getMessage());
-        assertEquals(Set.of("Subsystem.Operations.Subsystem.Sales"),
-                SubsystemFilter.resolve(tree, "Operations.Sales"));
+    @Test
+    void shortNameFindsAUniqueNestedSubsystemWhenThereIsNoExactPath() {
+        CF tree = Configuration.EMPTY.toBuilder().subsystem(namedSubsystem("Operations",
+                namedSubsystem("Operations.Sales", namedSubsystem("Operations.Sales.Regional")))).build();
+        assertEquals(Set.of("Subsystem.Operations.Subsystem.Sales",
+                        "Subsystem.Operations.Subsystem.Sales.Subsystem.Regional"),
+                SubsystemFilter.resolve(tree, "Sales"));
+    }
+
+    @Test
+    void ambiguousShortNameWithoutAnExactPathIsStillRejected() {
+        CF tree = Configuration.EMPTY.toBuilder()
+                .subsystem(namedSubsystem("Operations", namedSubsystem("Operations.Sales")))
+                .subsystem(namedSubsystem("Finance", namedSubsystem("Finance.Sales"))).build();
+        for (boolean allowMissing : List.of(false, true)) {
+            var error = assertThrows(IllegalArgumentException.class,
+                    () -> SubsystemFilter.resolve(tree, "Sales", allowMissing));
+            assertEquals("Ambiguous subsystem name: Sales", error.getMessage());
+            assertEquals(Set.of("Subsystem.Finance.Subsystem.Sales"),
+                    SubsystemFilter.resolve(tree, "Finance.Sales", allowMissing));
+        }
+    }
+
+    @Test
+    void unknownQualifiedPathDoesNotFallBackToItsLastName() {
+        CF tree = Configuration.EMPTY.toBuilder().subsystem(namedSubsystem("Operations",
+                namedSubsystem("Operations.Sales"))).build();
+        for (String name : new String[]{"Missing.Sales", "sales", "", "  ", null}) {
+            String displayed = name == null ? "" : name.trim();
+            var error = assertThrows(IllegalArgumentException.class, () -> SubsystemFilter.resolve(tree, name));
+            assertEquals("Unknown subsystem: " + displayed, error.getMessage());
+            assertEquals(Set.of(), SubsystemFilter.resolve(tree, name, true));
+        }
+    }
+
+    @Test
+    void duplicateExactPathsRemainAmbiguous() {
+        CF tree = Configuration.EMPTY.toBuilder().subsystems(List.of(namedSubsystem("Sales"),
+                namedSubsystem("Sales"))).build();
+        for (boolean allowMissing : List.of(false, true)) {
+            var error = assertThrows(IllegalArgumentException.class,
+                    () -> SubsystemFilter.resolve(tree, "Sales", allowMissing));
+            assertEquals("Ambiguous subsystem name: Sales", error.getMessage());
+        }
+    }
+
+    @Test
+    void includeExcludeAndAutoRulesUseTheSameExactPathPriority() throws Exception {
+        CF tree = Configuration.EMPTY.toBuilder()
+                .subsystem(namedSubsystem("Sales", namedSubsystem("Sales.Regional")))
+                .subsystem(namedSubsystem("Operations", namedSubsystem("Operations.Sales"))).build();
+        ExclusionRules include = ExclusionRules.load(write("include.json", "{'includeSubsystems':['Sales']}"),
+                tempDir, tree, new ExclusionReport());
+        assertEquals(Set.of("Subsystem.Sales", "Subsystem.Sales.Subsystem.Regional"),
+                include.getIncludedSubsystems());
+        for (String section : List.of("exclude", "auto")) {
+            ExclusionRules rules = ExclusionRules.load(write(section + ".json",
+                    "{'" + section + "':{'subsystems':['Sales']}}"), tempDir, tree, new ExclusionReport());
+            ExclusionRules.Rule rule = rules.getRules().get(0);
+            assertTrue(rule.matches(new ModuleId("root.bsl", List.of(), Set.of("Subsystem.Sales"))));
+            assertTrue(rule.matches(new ModuleId("child.bsl", List.of(),
+                    Set.of("Subsystem.Sales.Subsystem.Regional"))));
+            assertFalse(rule.matches(new ModuleId("other.bsl", List.of(),
+                    Set.of("Subsystem.Operations.Subsystem.Sales"))));
+        }
+    }
+
+    private static Subsystem namedSubsystem(String path, Subsystem... children) {
+        return Subsystem.builder().name(path.substring(path.lastIndexOf('.') + 1))
+                .mdoReference(MdoReference.create("Subsystem." + path.replace(".", ".Subsystem.")))
+                .subsystems(List.of(children)).build();
     }
 
     @Test
