@@ -779,15 +779,18 @@ class ConfiguredCoverageTest {
                   <lineToCover covered="true" lineNumber="2"/>
                 </file></coverage>
                 """);
-        Path output = directory.resolve("coverage.xml");
+        Path output = directory.resolve("coverage-with-report.xml");
+        Path convertedReport = directory.resolve("convert-exclusions.json");
         assertEquals(0, execute("convert", "-s", processor.toString(), "-c", input.toString(),
-                "-o", output.toString(), "--exclusion-report", report.toString()));
+                "-o", output.toString(), "--exclusion-report", convertedReport.toString()));
         assertEquals(0, Utils.newInputXmlBuilder().parse(output.toFile()).getElementsByTagName("lineToCover").getLength());
-        assertTrue(new ObjectMapper().readTree(report.toFile()).path("warnings").toString()
+        assertTrue(new ObjectMapper().readTree(convertedReport.toFile()).path("warnings").toString()
                 .contains("ObjectModule.bsl: cannot read module"));
+        Path outputWithoutReport = directory.resolve("coverage-without-report.xml");
         assertEquals(0, execute("convert", "-s", processor.toString(), "-c", input.toString(),
-                "-o", output.toString()));
-        assertEquals(0, Utils.newInputXmlBuilder().parse(output.toFile()).getElementsByTagName("lineToCover").getLength());
+                "-o", outputWithoutReport.toString()));
+        assertEquals(0, Utils.newInputXmlBuilder().parse(outputWithoutReport.toFile())
+                .getElementsByTagName("lineToCover").getLength());
     }
 
     @Test

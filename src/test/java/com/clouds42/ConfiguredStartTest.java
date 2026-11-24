@@ -41,6 +41,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -55,6 +56,7 @@ import static com.clouds42.ConfiguredCoverageTest.OBJECT_ID;
 import static com.clouds42.ConfiguredCoverageTest.PROPERTY_ID;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -630,7 +632,17 @@ class ConfiguredStartTest {
         List<String> connection = List.of("-u", "http://127.0.0.1:0", "-i", "test_" + UUID.randomUUID());
         CountDownLatch listening = new CountDownLatch(1);
         CountDownLatch resume = new CountDownLatch(1);
+        CountDownLatch dumpEntered = new CountDownLatch(1);
+        CompletableFuture<Boolean> dumpResult = new CompletableFuture<>();
         CoverageCommand command = new CoverageCommand() {
+            @Override
+            protected boolean writeCoverageDump() {
+                dumpEntered.countDown();
+                boolean result = super.writeCoverageDump();
+                dumpResult.complete(result);
+                return result;
+            }
+
             @Override
             protected ServerSocket getServerSocket() throws IOException {
                 ServerSocket socket = super.getServerSocket();
@@ -654,10 +666,12 @@ class ConfiguredStartTest {
             try {
                 assertTrue(listening.await(5, TimeUnit.SECONDS));
                 Future<Integer> dump = executor.submit(() -> send(connection, "dump"));
+                assertTrue(dumpEntered.await(5, TimeUnit.SECONDS), "dump reached the write hook");
                 assertThrows(TimeoutException.class, () -> dump.get(1, TimeUnit.SECONDS));
                 resume.countDown();
                 assertNotEquals(0, start.get(10, TimeUnit.SECONDS));
                 assertNotEquals(0, dump.get(10, TimeUnit.SECONDS));
+                assertFalse(dumpResult.get(5, TimeUnit.SECONDS), "the write hook refused the unsafe output");
                 assertEquals(ConfiguredCoverageTest.SOURCE, Files.readString(source));
             } finally {
                 resume.countDown();
