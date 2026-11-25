@@ -25,6 +25,7 @@ import com.clouds42.CommandLineOptions.MetadataOptions;
 import com.github._1c_syntax.bsl.mdclasses.CF;
 import com.github._1c_syntax.bsl.mdclasses.Configuration;
 import com.github._1c_syntax.bsl.mdclasses.MDClasses;
+import com.github._1c_syntax.bsl.mdo.ChildrenOwner;
 import com.github._1c_syntax.bsl.mdo.MD;
 import com.github._1c_syntax.bsl.mdo.Module;
 import com.github._1c_syntax.bsl.support.SupportVariant;
@@ -33,6 +34,13 @@ import com.github._1c_syntax.bsl.types.MDOType;
 import com.github._1c_syntax.bsl.types.MdoReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.w3c.dom.NodeList;
+import org.xml.sax.SAXException;
+
+import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.xpath.XPathConstants;
+import javax.xml.xpath.XPathExpressionException;
+import javax.xml.xpath.XPathFactory;
 
 import java.io.File;
 import java.io.IOException;
@@ -289,7 +297,8 @@ public final class ConfiguredCoverage {
         }
     }
 
-    private static void collectMetadataInputs(Path root, CF configuration, Set<URI> inputs) {
+    private static void collectMetadataInputs(Path root, CF configuration, Set<URI> inputs)
+            throws IOException, ParserConfigurationException, SAXException, XPathExpressionException {
         boolean edt = configuration.getConfigurationSource() == ConfigurationSource.EDT;
         Path metadataRoot = edt ? root.resolve("src") : root;
         if (edt) {
@@ -307,6 +316,11 @@ public final class ConfiguredCoverage {
         Set<MDOType> childDescriptors = Set.of(MDOType.FORM, MDOType.COMMAND, MDOType.TEMPLATE,
                 MDOType.RECALCULATION, MDOType.EXTERNAL_DATA_SOURCE_TABLE, MDOType.EXTERNAL_DATA_SOURCE_CUBE,
                 MDOType.EXTERNAL_DATA_SOURCE_FUNCTION, MDOType.EXTERNAL_DATA_SOURCE_CUBE_DIMENSION_TABLE);
+        collectReferencedDescriptors(edt ? metadataRoot.resolve("Configuration/Configuration.mdo")
+                        : root.resolve("Configuration.xml"), metadataRoot, edt,
+                new HashSet<>(MDOType.valuesWithoutChildren()), inputs);
+        Set<MDOType> nestedDescriptors = new HashSet<>(childDescriptors);
+        nestedDescriptors.add(MDOType.SUBSYSTEM);
         for (MD object : configuration.getPlainChildren()) {
             MDOType type = object.getMdoType();
             if (!MDOType.valuesWithoutChildren().contains(type) && !childDescriptors.contains(type)) {
@@ -317,6 +331,47 @@ public final class ConfiguredCoverage {
                 collectEdtMetadataInputs(root, folder, object, inputs);
             } else {
                 collectDesignerMetadataInputs(folder, object, inputs);
+            }
+            collectReferencedChildDescriptors(folder, object, edt, nestedDescriptors, inputs);
+        }
+    }
+
+    private static void collectReferencedChildDescriptors(Path folder, MD object, boolean edt,
+                                                          Set<MDOType> types, Set<URI> inputs)
+            throws IOException, ParserConfigurationException, SAXException, XPathExpressionException {
+        if (object instanceof ChildrenOwner && (!edt || object.getMdoType() == MDOType.SUBSYSTEM)) {
+            Path descriptor = edt ? folder.resolve(object.getName() + ".mdo")
+                    : folder.resolveSibling(object.getName() + ".xml");
+            if (Files.isRegularFile(descriptor)) {
+                collectReferencedDescriptors(descriptor, folder, edt, types, inputs);
+            }
+        }
+    }
+
+    private static void collectReferencedDescriptors(Path descriptor, Path folder, boolean edt,
+                                                     Set<MDOType> types, Set<URI> inputs)
+            throws IOException, ParserConfigurationException, SAXException, XPathExpressionException {
+        // MDClasses skips unreadable objects; the parent still names their input descriptors.
+        var document = Utils.newInputXmlBuilder().parse(descriptor.toFile());
+        String expression = edt ? "/*/*" : "/MetaDataObject/*/ChildObjects/*";
+        NodeList references = (NodeList) XPathFactory.newInstance().newXPath()
+                .evaluate(expression, document, XPathConstants.NODESET);
+        for (int index = 0; index < references.getLength(); index++) {
+            var reference = references.item(index);
+            MDOType type = MDOType.valueByName(reference.getNodeName());
+            if (!types.contains(type)) {
+                continue;
+            }
+            String name = reference.getTextContent().trim();
+            if (edt && name.startsWith(type.nameEn() + ".")) {
+                name = name.substring(type.nameEn().length() + 1);
+            }
+            Path child = folder.resolve(type.groupName()).resolve(name);
+            Path file = edt ? child.resolve(name + ".mdo") : child.resolveSibling(name + ".xml");
+            inputs.add(file.toUri());
+            if (edt && !Files.exists(file) && (type == MDOType.INTERFACE || type == MDOType.STYLE)) {
+                inputs.add(folder.getParent().resolve("unknown").resolve(type.groupName())
+                        .resolve(name + ".xml").toUri());
             }
         }
     }

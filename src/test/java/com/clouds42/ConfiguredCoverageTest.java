@@ -496,6 +496,95 @@ class ConfiguredCoverageTest {
     }
 
     @Test
+    void designerReportsProtectUnreadableObjectDescriptors() throws Exception {
+        Path sources = project().resolve("configuration");
+        assertUnreadableDescriptorCannotBeOverwritten(sources,
+                sources.resolve("CommonModules/ПростойОбщийМодуль.xml"));
+    }
+
+    @Test
+    void designerReportsProtectUnreadableChildDescriptors() throws Exception {
+        Path sources = project().resolve("configuration");
+        assertUnreadableDescriptorCannotBeOverwritten(sources,
+                sources.resolve("Catalogs/Справочник1/Forms/ФормаСписка.xml"));
+    }
+
+    @Test
+    void designerReportsProtectUnreadableNestedSubsystemDescriptors() throws Exception {
+        Path sources = project().resolve("configuration");
+        assertUnreadableDescriptorCannotBeOverwritten(sources,
+                sources.resolve("Subsystems/ПерваяПодсистема/Subsystems/ПодчиненнаяПодсистема.xml"));
+    }
+
+    @Test
+    void edtReportsProtectUnreadableObjectDescriptors() throws Exception {
+        Path sources = edtProject();
+        assertUnreadableDescriptorCannotBeOverwritten(sources,
+                sources.resolve("src/CommonModules/ПростойОбщийМодуль/ПростойОбщийМодуль.mdo"));
+    }
+
+    @Test
+    void edtReportsProtectUnreadableNestedSubsystemDescriptors() throws Exception {
+        Path sources = edtProject();
+        assertUnreadableDescriptorCannotBeOverwritten(sources,
+                sources.resolve("src/Subsystems/ПерваяПодсистема/Subsystems/ПодчиненнаяПодсистема/ПодчиненнаяПодсистема.mdo"));
+    }
+
+    @Test
+    void edtReportsProtectUnreadableLegacyInterfaceDescriptors() throws Exception {
+        Path sources = edtProject();
+        assertUnreadableDescriptorCannotBeOverwritten(sources,
+                sources.resolve("unknown/Interfaces/Интерфейс1.xml"));
+    }
+
+    @Test
+    void validationDoesNotCreateAReportInPlaceOfAMissingDescriptor() throws Exception {
+        Path sources = project().resolve("configuration");
+        Path descriptor = sources.resolve("CommonModules/ПростойОбщийМодуль.xml");
+        Files.delete(descriptor);
+        assertEquals(1, execute("validate", "-s", sources.toString(), "--exclusion-report", descriptor.toString()));
+        assertFalse(Files.exists(descriptor));
+    }
+
+    private void assertUnreadableDescriptorCannotBeOverwritten(Path sources, Path descriptor) throws Exception {
+        byte[] original = "<broken-metadata".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        Files.write(descriptor, original);
+        Path report = descriptor.resolveSibling("exclusions.xml");
+        assertEquals(0, execute("validate", "-s", sources.toString(), "--exclusion-report", report.toString()));
+        assertTrue(new ObjectMapper().readTree(report.toFile()).has("excludedLines"));
+        assertEquals(1, execute("validate", "-s", sources.toString(), "--exclusion-report", descriptor.toString()));
+        assertArrayEquals(original, Files.readAllBytes(descriptor));
+
+        Path input = Files.writeString(directory.resolve("empty-raw.xml"), "<coverage/>");
+        Path output = directory.resolve("coverage.xml");
+        Files.delete(report);
+        assertEquals(1, execute("convert", "-s", sources.toString(), "-c", input.toString(),
+                "-o", descriptor.toString(), "--exclusion-report", report.toString()));
+        assertArrayEquals(original, Files.readAllBytes(descriptor));
+        assertFalse(Files.exists(report));
+        assertEquals(1, execute("convert", "-s", sources.toString(), "-c", input.toString(),
+                "-o", output.toString(), "--exclusion-report", descriptor.toString()));
+        assertArrayEquals(original, Files.readAllBytes(descriptor));
+        assertFalse(Files.exists(output));
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    void validationProtectsUnreadableDescriptorsThroughFileAliases() throws Exception {
+        Path sources = project().resolve("configuration");
+        Path descriptor = sources.resolve("CommonModules/ПростойОбщийМодуль.xml");
+        Files.writeString(descriptor, "<broken-metadata");
+        byte[] original = Files.readAllBytes(descriptor);
+        for (boolean symbolic : List.of(false, true)) {
+            Path report = directory.resolve("unreadable-alias-" + symbolic + ".json");
+            if (symbolic) Files.createSymbolicLink(report, descriptor);
+            else Files.createLink(report, descriptor);
+            assertEquals(1, execute("validate", "-s", sources.toString(), "--exclusion-report", report.toString()));
+            assertArrayEquals(original, Files.readAllBytes(descriptor));
+        }
+    }
+
+    @Test
     void designerSupportDataCannotBeReplacedByEitherReport() throws Exception {
         Path sources = project().resolve("configuration");
         Path support = sources.resolve("Ext/ParentConfigurations.bin");
