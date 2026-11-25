@@ -34,9 +34,12 @@ import com._1c.g5.v8.dt.debug.model.measure.PerformanceInfoMain;
 import com._1c.g5.v8.dt.debug.model.measure.PerformanceInfoModule;
 import com._1c.g5.v8.dt.internal.debug.core.runtime.client.RuntimeDebugModelXmlSerializer;
 import com.clouds42.CommandLineOptions.*;
+import com.clouds42.ConfiguredCoverage;
 import com.clouds42.DebugClient;
+import com.clouds42.IncludeUsers;
 import com.clouds42.MyRuntimeDebugModelXmlSerializer;
 import com.clouds42.PipeMessages;
+import com.clouds42.UserTargets;
 import com.clouds42.Utils;
 import org.eclipse.emf.common.util.EList;
 import org.slf4j.Logger;
@@ -56,6 +59,8 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 
@@ -87,7 +92,23 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
     @Option(names = {"--opid"}, description = "Owner process PID", defaultValue = "-1")
     Integer opid;
 
+    @Option(names = "--include-user", paramLabel = "USER",
+            description = "Only collect measures for this infobase user. Repeat to specify multiple users.")
+    private List<String> includeUserNames = new ArrayList<>();
+
     private DebugClient client;
+    private UserTargets targets = new UserTargets(IncludeUsers.NONE);
+    private final Map<URI, Set<BigDecimal>> autoLines = new HashMap<>();
+    private boolean coveragePrepared;
+    private boolean finalOutputFailed = true;
+    private boolean finalCollectionFailed;
+    // A ping and its merge finish before stop disables profiling and reads the final packets.
+    private final ReentrantLock collectionLock = new ReentrantLock(true);
+    private Map<String, URI> modules = Map.of();
+    private final Set<String> externalDataProcessors = new HashSet<>();
+    private long targetLookupAllowedAt = System.nanoTime();
+    private int targetLookupIntervalSeconds = 1;
+    private boolean targetListingIncomplete;
 
     private final Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<>() {
         @Override
@@ -104,17 +125,29 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
 
     private final AtomicBoolean stopExecution = new AtomicBoolean(false);
     private boolean rawMode = false;
-    private boolean systemStarted = false;
+    private volatile boolean systemStarted = false;
 
     private void connectAllTargets(List<DebugTargetId> debugTargets) {
-        logger.info("Current debug targets size: {}", debugTargets.size());
+        if (systemStarted) {
+            logger.debug("Current debug targets size: {}", debugTargets.size());
+        } else {
+            logger.info("Current debug targets size: {}", debugTargets.size());
+        }
         debugTargets.forEach(debugTarget -> {
+            if (targets.isActive() && !targets.register(debugTarget)) {
+                return;
+            }
             String id = debugTarget.getId();
             String seanceId = debugTarget.getSeanceId();
             String targetType = debugTarget.getTargetType().getName();
             logger.info("Id: {} , seance id: {} , target type: {}", id, seanceId, targetType);
             try {
                 client.attachRuntimeDebugTargets(Collections.singletonList(UUID.fromString(debugTarget.getId())));
+                if (targets.isActive()) {
+                    targets.attached(debugTarget.getId());
+                    targetLookupIntervalSeconds = 1;
+                    targetLookupAllowedAt = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+                }
             } catch (RuntimeDebugClientException e) {
                 logger.error(e.getLocalizedMessage());
             }
@@ -126,17 +159,39 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
 
         int result = CommandLine.ExitCode.OK;
         metadataOptions.validate(filterOptions.getExtensionName());
-        getServerSocket();
+        IncludeUsers users = IncludeUsers.load(metadataOptions.getConfigFile(), includeUserNames);
+        targets = new UserTargets(users);
+        if (users.isActive()) {
+            logger.info(users.describe());
+        }
+        UUID measureUuid = UUID.randomUUID();
+        rawMode = metadataOptions.isRawMode();
 
+        ConfiguredCoverage.Prepared prepared;
+        try {
+            synchronized (coverageData) {
+                coveragePrepared = false;
+                getServerSocket();
+                prepared = ConfiguredCoverage.prepare(metadataOptions, filterOptions.getExtensionName(),
+                        coverageData, outputOptions.getOutputFile(), null, users.isActive());
+                if (!rawMode) {
+                    rememberAutoLines();
+                }
+                prepared.writeReport();
+                modules = prepared.modules();
+                coveragePrepared = true;
+            }
+        } catch (Exception failure) {
+            try {
+                closeSocket();
+            } catch (IOException cleanup) {
+                failure.addSuppressed(cleanup);
+            }
+            throw failure;
+        }
 
         RuntimeDebugModelXmlSerializer serializer = new MyRuntimeDebugModelXmlSerializer();
         client = new DebugClient(serializer);
-
-        UUID measureUuid = UUID.randomUUID();
-
-        rawMode = metadataOptions.isRawMode();
-
-        Map<String, URI> uriListByKey = Utils.readMetadata(metadataOptions, filterOptions.getExtensionName(), coverageData);
 
         try {
             startSystem(measureUuid);
@@ -149,11 +204,9 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
 
         addShutdownHook();
 
-        Set<String> externalDataProcessorsUriSet = new HashSet<>();
-
         try {
-            mainLoop(uriListByKey, externalDataProcessorsUriSet);
-        } catch (RuntimeDebugClientException e) {
+            mainLoop();
+        } catch (RuntimeDebugClientException | RuntimeException e) {
             logger.error("Can't send ping to debug server. Coverage analyzing finished");
             logger.error(e.getLocalizedMessage());
             e.printStackTrace();
@@ -162,7 +215,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
         Thread.sleep(debuggerOptions.getPingTimeout());
 
         shutdown();
-        return result;
+        return collectionSucceeded() ? result : CommandLine.ExitCode.SOFTWARE;
     }
 
     private void shutdown() throws IOException {
@@ -198,26 +251,103 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
 
     private void targetStarted(DBGUIExtCmdInfoStartedImpl command) {
         DebugTargetId targetId = command.getTargetID();
+        if (targets.isActive() && !targets.register(targetId)) {
+            return;
+        }
         try {
             client.attachRuntimeDebugTargets(Collections.singletonList(UUID.fromString(targetId.getId())));
+            if (targets.isActive()) {
+                targets.attached(targetId.getId());
+                targetLookupIntervalSeconds = 1;
+                targetLookupAllowedAt = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            }
         } catch (RuntimeDebugClientException e) {
             logger.info("Command: {} error!", command.getCmdID().getName());
             logger.error(e.getLocalizedMessage());
         }
     }
 
-    private void mainLoop(Map<String, URI> uriListByKey, Set<String> externalDataProcessorsUriSet) throws RuntimeDebugClientException {
+    private void mainLoop() throws RuntimeDebugClientException {
         while (!stopExecution.get()) {
-            List<? extends DBGUIExtCmdInfoBase> commandsList = client.ping();
-            logger.info("Ping result commands size: {}", commandsList.size());
-            commandsList.forEach(command -> {
+            collectionLock.lock();
+            try {
+                if (stopExecution.get()) {
+                    break;
+                }
+                processCommands(client.ping(), true);
+                if ((targets.hasPendingTargets() || (targets.isActive() && targetListingIncomplete))
+                        && System.nanoTime() - targetLookupAllowedAt >= 0) {
+                    try {
+                        connectAllTargets(listDebugTargets());
+                    } catch (RuntimeDebugClientException e) {
+                        logger.warn("Cannot refresh debug targets: {}", e.getLocalizedMessage());
+                    }
+                    targetLookupAllowedAt = System.nanoTime() + TimeUnit.SECONDS.toNanos(targetLookupIntervalSeconds);
+                    targetLookupIntervalSeconds = Math.min(30, targetLookupIntervalSeconds * 2);
+                }
+            } catch (RuntimeDebugClientException | RuntimeException e) {
+                // Stop sees this failure before it can acquire the lock and publish the final result.
+                finalCollectionFailed = true;
+                throw e;
+            } finally {
+                collectionLock.unlock();
+            }
+        }
+    }
+
+    private void processCommands(List<? extends DBGUIExtCmdInfoBase> commands, boolean attachTargets) {
+        logger.info("Ping result commands size: {}", commands.size());
+        synchronized (coverageData) {
+            Map<String, String> listedUsers = null;
+            boolean lookupAttempted = false;
+            for (DBGUIExtCmdInfoBase command : commands) {
                 logger.info("Command: {}", command.getCmdID().getName());
                 if (command.getCmdID() == DBGUIExtCmds.MEASURE_RESULT_PROCESSING) {
-                    measureResultProcessing(uriListByKey, externalDataProcessorsUriSet, (DBGUIExtCmdInfoMeasureImpl) command);
-                } else if (command.getCmdID() == DBGUIExtCmds.TARGET_STARTED) {
+                    DBGUIExtCmdInfoMeasureImpl measure = (DBGUIExtCmdInfoMeasureImpl) command;
+                    if (targets.needsLookup(measure)) {
+                        if (!lookupAttempted) {
+                            lookupAttempted = true;
+                            listedUsers = lookupUsers();
+                        }
+                        String id = UserTargets.targetIdOf(measure);
+                        if (listedUsers != null) {
+                            targets.rememberListedUser(id, listedUsers);
+                        }
+                        targets.markUnknown(id);
+                    }
+                    if (targets.verdict(measure, loggingOptions.isVerbose()) == UserTargets.Verdict.ACCEPTED) {
+                        measureResultProcessing(modules, externalDataProcessors, measure);
+                    }
+                } else if (attachTargets && command.getCmdID() == DBGUIExtCmds.TARGET_STARTED) {
                     targetStarted((DBGUIExtCmdInfoStartedImpl) command);
                 }
-            });
+            }
+        }
+    }
+
+    private List<DebugTargetId> listDebugTargets() throws RuntimeDebugClientException {
+        if (debuggerOptions.getDebugAreaNames().isEmpty()) {
+            return client.getRuntimeDebugTargets(null);
+        }
+        List<DebugTargetId> listed = new ArrayList<>();
+        targetListingIncomplete = false;
+        for (String area : debuggerOptions.getDebugAreaNames()) {
+            try {
+                listed.addAll(client.getRuntimeDebugTargets(area));
+            } catch (RuntimeDebugClientException e) {
+                targetListingIncomplete = true;
+                logger.error(e.getLocalizedMessage());
+            }
+        }
+        return listed;
+    }
+
+    private Map<String, String> lookupUsers() {
+        try {
+            return UserTargets.listedUsersById(client.getRuntimeDebugTargets(null));
+        } catch (RuntimeDebugClientException e) {
+            logger.warn("Cannot refresh debug target users: {}", e.getLocalizedMessage());
+            return null;
         }
     }
 
@@ -259,9 +389,8 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                             if (!rawMode && !coverMap.containsKey(lineNo)) {
                                 if (loggingOptions.isVerbose()) {
                                     logger.info("Can't find line to cover {} in module {}", lineNo, uri);
-                                    try {
-                                        Stream<String> all_lines = Files.lines(Paths.get(uri));
-                                        Optional<String> first = all_lines.skip(lineNo.longValue() - 1).findFirst();
+                                    try (Stream<String> lines = Files.lines(Paths.get(uri))) {
+                                        Optional<String> first = lines.skip(lineNo.longValue() - 1).findFirst();
                                         if (first.isPresent()) {
                                             String specific_line_n = first.get();
                                             logger.info(">>> {}", specific_line_n);
@@ -310,20 +439,7 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
                 debuggerOptions.getDebugAreaNames(),
                 debuggerOptions.getFilteredAutoconnectTargets(apiver));
         logger.info("Setup targets...");
-        List<DebugTargetId> debugTargets;
-        if (debuggerOptions.getDebugAreaNames().isEmpty()) {
-            debugTargets = client.getRuntimeDebugTargets(null);
-        } else {
-            debugTargets = new LinkedList<>();
-            debuggerOptions.getDebugAreaNames().forEach(areaName -> {
-                try {
-                    debugTargets.addAll(client.getRuntimeDebugTargets(areaName));
-                } catch (RuntimeDebugClientException ex) {
-                    logger.error(ex.getLocalizedMessage());
-                }
-            });
-        }
-        connectAllTargets(debugTargets);
+        connectAllTargets(listDebugTargets());
 
         logger.info("Enabling profiling...");
         client.toggleProfiling(null);
@@ -333,30 +449,92 @@ public class CoverageCommand extends CoverServer implements Callable<Integer> {
 
     }
 
-    protected void gracefulShutdown(PrintWriter serverPipeOut) {
-        if (stopExecution.get()) {
-            return;
-        }
+    private boolean collectionSucceeded() {
+        return !finalOutputFailed && !finalCollectionFailed && targets.matchedAnyTarget();
+    }
 
-        logger.info("Disabling profiling...");
+    @Override
+    protected synchronized void gracefulShutdown(PrintWriter serverPipeOut) {
+        collectionLock.lock();
         try {
-            client.toggleProfiling(null);
-        } catch (RuntimeDebugClientException e) {
-            logger.error(e.getLocalizedMessage());
+            synchronized (coverageData) {
+                if (!systemStarted) {
+                    if (serverPipeOut != null) {
+                        serverPipeOut.println(PipeMessages.FAIL_RESULT);
+                    }
+                    return;
+                }
+                if (!stopExecution.get()) {
+                    stopExecution.set(true);
+                    logger.info("Disabling profiling...");
+                    try {
+                        client.toggleProfiling(null);
+                    } catch (RuntimeDebugClientException | RuntimeException e) {
+                        finalCollectionFailed = true;
+                        logger.error("Cannot disable profiling: {}", e.getLocalizedMessage());
+                    }
+                    // A failed or empty first response must not prevent the second final poll.
+                    for (int poll = 0; poll < 2; poll++) {
+                        try {
+                            processCommands(client.ping(), false);
+                        } catch (RuntimeDebugClientException | RuntimeException e) {
+                            finalCollectionFailed = true;
+                            logger.error("Cannot finish collecting measures: {}", e.getLocalizedMessage());
+                        }
+                    }
+                    try {
+                        finalOutputFailed = !writeCoverageDump();
+                    } catch (RuntimeException e) {
+                        logger.error("Cannot write final coverage: {}", e.getLocalizedMessage());
+                    }
+                    targets.summary().forEach(logger::info);
+                    if (!targets.matchedAnyTarget()) {
+                        logger.error(targets.noMatchMessage());
+                    }
+                    logger.info("Bye!");
+                }
+                if (serverPipeOut != null) {
+                    serverPipeOut.println(collectionSucceeded() ? PipeMessages.OK_RESULT : PipeMessages.FAIL_RESULT);
+                }
+            }
+        } finally {
+            collectionLock.unlock();
         }
-
-        Utils.dumpCoverageFile(coverageData, metadataOptions, outputOptions);
-        if (serverPipeOut != null) {
-            serverPipeOut.println(PipeMessages.OK_RESULT);
-        }
-        stopExecution.set(true);
-
-        logger.info("Bye!");
     }
 
     @Override
     protected MetadataOptions getMetadataOptions() {
         return metadataOptions;
+    }
+
+    private void rememberAutoLines() {
+        coverageData.forEach((uri, lines) -> lines.forEach((line, hits) -> {
+            if (hits < 0) {
+                autoLines.computeIfAbsent(uri, ignored -> new HashSet<>()).add(line);
+            }
+        }));
+    }
+
+    @Override
+    protected boolean writeCoverageDump() {
+        synchronized (coverageData) {
+            if (!coveragePrepared) {
+                return false;
+            }
+            return super.writeCoverageDump();
+        }
+    }
+
+    @Override
+    protected void cleanCoverageData() {
+        synchronized (coverageData) {
+            if (rawMode) {
+                coverageData.clear();
+                return;
+            }
+            super.cleanCoverageData();
+            autoLines.forEach((uri, lines) -> lines.forEach(line -> coverageData.get(uri).put(line, -1)));
+        }
     }
 
     @Override

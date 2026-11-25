@@ -29,8 +29,11 @@ import org.w3c.dom.NodeList;
 
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.File;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.math.BigDecimal;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -129,6 +132,29 @@ class UtilsTest {
         assertEquals("2", lineByExtension.get(""));
         assertEquals("6", lineByExtension.get("Доработки"));
         assertFalse(lineByExtension.containsKey("Второе"));
+    }
+
+    @Test
+    void statsSkipModulesWithoutMeasurableLines() {
+        var original = System.out;
+        var bytes = new ByteArrayOutputStream();
+        Map<URI, Map<BigDecimal, Integer>> data = new LinkedHashMap<>();
+        data.put(new File("optional.bsl").toURI(), Map.of(BigDecimal.ONE, -1));
+        data.put(new File("empty.bsl").toURI(), Map.of());
+        data.put(new File("measured.bsl").toURI(), Map.of(BigDecimal.ONE, 1, BigDecimal.valueOf(2), 0));
+        MetadataOptions options = new MetadataOptions();
+        options.setProjectDirName(new File(".").getAbsolutePath());
+        try (var output = new PrintStream(bytes)) {
+            System.setOut(output);
+            Utils.printCoverageStats(data, options);
+        } finally {
+            System.setOut(original);
+        }
+        String table = bytes.toString(StandardCharsets.UTF_8);
+        assertTrue(table.contains("measured.bsl"));
+        assertTrue(table.contains("50.0"));
+        assertFalse(table.contains("optional.bsl"));
+        assertFalse(table.contains("empty.bsl"));
     }
 
     @Test

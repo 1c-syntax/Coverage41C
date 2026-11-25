@@ -23,20 +23,24 @@ package com.clouds42.Commands;
 
 import com.clouds42.BuildConfig;
 import com.clouds42.CommandLineOptions.*;
+import com.clouds42.ConfiguredCoverage;
 import com.clouds42.PipeMessages;
 import com.clouds42.Utils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
+import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
+import org.xml.sax.SAXException;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Mixin;
 
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
+import java.io.File;
 import java.io.FileInputStream;
+import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.math.BigDecimal;
 import java.net.URI;
@@ -44,6 +48,8 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -74,19 +80,17 @@ public class ConvertCommand implements Callable<Integer> {
         String srcDirExtensionName = convertOptions.getExtensionName();
         metadataOptions.validate(srcDirExtensionName);
 
+        File rawInput = convertOptions.getInputRawXmlFile();
+        Map<Element, String> rawFiles = readRawFiles(rawInput);
         Map<URI, Map<BigDecimal, Integer>> coverageData = new HashMap<URI,Map<BigDecimal, Integer>>();
 
-        Map<String, URI> uriListByKey = Utils.readMetadata(metadataOptions, srcDirExtensionName, coverageData);
-
-        FileInputStream fileIS = new FileInputStream(convertOptions.getInputRawXmlFile());
-        DocumentBuilderFactory builderFactory = DocumentBuilderFactory.newInstance();
-        DocumentBuilder builder = builderFactory.newDocumentBuilder();
-        Document xmlDocument = builder.parse(fileIS);
-        NodeList fileNodeList = xmlDocument.getElementsByTagName("file");
+        ConfiguredCoverage.Prepared prepared = ConfiguredCoverage.prepare(metadataOptions, srcDirExtensionName,
+                coverageData, outputOptions.getOutputFile(), rawInput, false);
+        Map<String, URI> uriListByKey = prepared.modules();
 
         // without -e and --extension the extension attribute is ignored: -s may point to sources of any extension, as before
         boolean matchExtensions = !srcDirExtensionName.isEmpty() || !metadataOptions.getExtensionSources().isEmpty();
-        if (matchExtensions && !hasExtensionAttribute(fileNodeList)) {
+        if (matchExtensions && rawFiles.keySet().stream().noneMatch(file -> file.hasAttribute("extension"))) {
             logger.warn("RAW file doesn't contain modules of extensions: it was made by previous version" +
                     " or extensions code wasn't executed. All modules are treated as modules of --srcDir sources");
             matchExtensions = false;
@@ -98,15 +102,11 @@ public class ConvertCommand implements Callable<Integer> {
         metadataOptions.getExtensionSources().forEach(source -> sourcesExtensionNames.add(source.getName()));
         int skippedModulesCount = 0;
 
-        for(int fileNodeNumber = 0; fileNodeNumber < fileNodeList.getLength(); fileNodeNumber++) {
-            Node fileNode = fileNodeList.item(fileNodeNumber);
-            String fileKey = fileNode.getAttributes().getNamedItem("path").getTextContent();
-            if (fileKey.startsWith("/")) {
-                fileKey = fileKey.substring(1);
-            }
-            String extensionName = matchExtensions ? getExtensionName(fileNode) : srcDirExtensionName;
+        for (Map.Entry<Element, String> entry : rawFiles.entrySet()) {
+            Element fileNode = entry.getKey();
+            String extensionName = matchExtensions ? fileNode.getAttribute("extension") : srcDirExtensionName;
             boolean hasSources = sourcesExtensionNames.contains(extensionName);
-            fileKey = Utils.getExtensionUriKey(extensionName, fileKey);
+            String fileKey = Utils.getExtensionUriKey(extensionName, entry.getValue());
             URI fileUri = hasSources ? uriListByKey.get(fileKey) : null;
             if (fileUri == null) {
                 if (hasSources) {
@@ -121,19 +121,19 @@ public class ConvertCommand implements Callable<Integer> {
                 NodeList lineNoNodeList = fileNode.getChildNodes();
                 for (int lineNoNodeNumber = 0; lineNoNodeNumber < lineNoNodeList.getLength(); lineNoNodeNumber++) {
                     Node lineNoNode = lineNoNodeList.item(lineNoNodeNumber);
-                    if (!lineNoNode.getNodeName().equals("lineToCover")) {
+                    if (!(lineNoNode instanceof Element) || !lineNoNode.getNodeName().equals("lineToCover")) {
                         continue;
                     }
                     if (!lineNoNode.getAttributes().getNamedItem("covered").getTextContent().equals("true")) {
                         continue;
                     }
-                    BigDecimal lineNo = new BigDecimal(lineNoNode.getAttributes().getNamedItem("lineNumber").getTextContent());
+                    String number = lineNoNode.getAttributes().getNamedItem("lineNumber").getTextContent();
+                    BigDecimal lineNo = readRawLineNumber(number, entry.getValue());
                     if (!coverMap.containsKey(lineNo)) {
                         if (loggingOptions.isVerbose()) {
                             logger.info("Can't find line to cover {} in module {}", lineNo, fileUri);
-                            try {
-                                Stream<String> all_lines = Files.lines(Paths.get(fileUri));
-                                String specific_line_n = all_lines.skip(lineNo.longValue() - 1).findFirst().get();
+                            try (Stream<String> lines = Files.lines(Paths.get(fileUri))) {
+                                String specific_line_n = lines.skip(lineNo.longValue() - 1).findFirst().get();
                                 logger.info(">>> {}", specific_line_n);
                             } catch (Exception e) {
                                 logger.error(e.getLocalizedMessage());
@@ -148,24 +148,96 @@ public class ConvertCommand implements Callable<Integer> {
         if (skippedModulesCount > 0) {
             logger.info("Skipped {} modules of configuration or extensions without sources", skippedModulesCount);
         }
-        Utils.dumpCoverageFile(coverageData, metadataOptions, outputOptions);
+        prepared.writeReport();
+        boolean coverageWritten = Utils.tryDumpCoverageFile(coverageData, metadataOptions, outputOptions);
+        if (!coverageWritten) {
+            return CommandLine.ExitCode.SOFTWARE;
+        }
         logger.info("Convert done");
 
         return CommandLine.ExitCode.OK;
     }
 
-    private static boolean hasExtensionAttribute(NodeList fileNodeList) {
-        for (int fileNodeNumber = 0; fileNodeNumber < fileNodeList.getLength(); fileNodeNumber++) {
-            if (fileNodeList.item(fileNodeNumber).getAttributes().getNamedItem("extension") != null) {
-                return true;
+    private static Map<Element, String> readRawFiles(File input)
+            throws IOException, ParserConfigurationException, SAXException {
+        Document document;
+        try (FileInputStream stream = new FileInputStream(input)) {
+            document = Utils.newInputXmlBuilder().parse(stream);
+        }
+        Element coverage = document.getDocumentElement();
+        if (!coverage.getTagName().equals("coverage")) {
+            throw new IllegalArgumentException("Expected a RAW coverage XML document");
+        }
+        if (coverage.hasAttribute("version") && !coverage.getAttribute("version").equals("1")) {
+            throw new IllegalArgumentException("Unsupported RAW coverage version: " + coverage.getAttribute("version"));
+        }
+        Map<Element, String> files = new LinkedHashMap<>();
+        for (Node node = coverage.getFirstChild(); node != null; node = node.getNextSibling()) {
+            rejectRawText(node);
+            if (node instanceof Element file) {
+                if (!file.getTagName().equals("file")) {
+                    throw new IllegalArgumentException("Expected a file entry in the RAW coverage XML");
+                }
+                String key = rawModuleKey(file);
+                validateRawLines(file, key);
+                files.put(file, key);
             }
         }
-        return false;
+        return files;
     }
 
-    // no attribute - configuration
-    private static String getExtensionName(Node fileNode) {
-        Node extensionNode = fileNode.getAttributes().getNamedItem("extension");
-        return extensionNode == null ? "" : extensionNode.getTextContent();
+    private static void validateRawLines(Element file, String key) {
+        for (Node node = file.getFirstChild(); node != null; node = node.getNextSibling()) {
+            rejectRawText(node);
+            if (!(node instanceof Element line)) {
+                continue;
+            }
+            if (!line.getTagName().equals("lineToCover")) {
+                throw new IllegalArgumentException("Unexpected RAW element in module " + key + ": " + line.getTagName());
+            }
+            String covered = line.getAttribute("covered");
+            if (!covered.equals("true") && !covered.equals("false")) {
+                throw new IllegalArgumentException("Invalid RAW covered value in module " + key + ": " + covered);
+            }
+            readRawLineNumber(line.getAttribute("lineNumber"), key);
+            for (Node child = line.getFirstChild(); child != null; child = child.getNextSibling()) {
+                rejectRawText(child);
+                if (child instanceof Element) {
+                    throw new IllegalArgumentException("Unexpected RAW element inside lineToCover in module " + key);
+                }
+            }
+        }
+    }
+
+    private static void rejectRawText(Node node) {
+        if ((node.getNodeType() == Node.TEXT_NODE || node.getNodeType() == Node.CDATA_SECTION_NODE)
+                && !node.getTextContent().isBlank()) {
+            throw new IllegalArgumentException("Unexpected text in RAW coverage XML");
+        }
+    }
+
+    private static BigDecimal readRawLineNumber(String number, String key) {
+        try {
+            int line = new BigDecimal(number).intValueExact();
+            if (line > 0) {
+                return BigDecimal.valueOf(line);
+            }
+        } catch (NumberFormatException | ArithmeticException invalid) {
+            throw new IllegalArgumentException("Invalid RAW line number in module " + key + ": " + number, invalid);
+        }
+        throw new IllegalArgumentException("Invalid RAW line number in module " + key + ": " + number);
+    }
+
+    private static String rawModuleKey(Element file) {
+        String path = file.getAttribute("path");
+        String key = path.startsWith("/") ? path.substring(1) : path;
+        String[] parts = key.split("/", -1);
+        // A RAW key has two IDs. Finished Generic Coverage reports contain BSL file paths.
+        if (parts.length != 2 || parts[0].isBlank() || parts[1].isBlank()
+                || parts[1].toLowerCase(Locale.ROOT).endsWith(".bsl")) {
+            throw new IllegalArgumentException("Unsupported RAW module path: " + path
+                    + ". Expected object ID/module type ID");
+        }
+        return Utils.getUriKey(parts[0], parts[1]);
     }
 }

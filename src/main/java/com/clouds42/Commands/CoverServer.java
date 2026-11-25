@@ -43,20 +43,20 @@ import java.net.Socket;
 import java.net.URI;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 public abstract class CoverServer {
 
     public abstract ConnectionOptions getConnectionOptions();
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
-    private ServerSocket serverSocket;
+    private volatile ServerSocket serverSocket;
     private final boolean isWindows = System.getProperty ("os.name").toLowerCase().contains("win");
 
     protected void closeSocket() throws IOException {
-        if (serverSocket != null) {
-            serverSocket.close();
+        ServerSocket listener = serverSocket;
+        if (listener != null) {
             serverSocket = null;
+            listener.close();
             logger.info("Close server socket");
         }
     }
@@ -70,23 +70,28 @@ public abstract class CoverServer {
             } else {
                 serverSocket = new UnixDomainServerSocket(pipeName);
             }
-            CompletableFuture.supplyAsync(() -> {
+            ServerSocket listener = serverSocket;
+            // A blocking native accept must leave the shared workers available for client commands.
+            Thread.ofPlatform().daemon().name("coverage-socket-listener").start(() -> {
                 logger.info("Set socket listener...");
-                AtomicBoolean stopListen = new AtomicBoolean(false);
-                while (!stopListen.get()) {
+                while (serverSocket == listener) {
                     try {
-                        Socket clientSocket = serverSocket.accept();
-                        CompletableFuture.supplyAsync(() -> listenSocket(clientSocket)).thenAccept(aBoolean -> {
-                            if (aBoolean) {
+                        Socket clientSocket = listener.accept();
+                        if (serverSocket != listener) {
+                            clientSocket.close();
+                            return;
+                        }
+                        CompletableFuture.runAsync(() -> {
+                            if (listenSocket(clientSocket)) {
                                 logger.info("Start listen");
-                                stopListen.set(false);
                             }
                         });
                     } catch (IOException e) {
-                        logger.info("Can't accept socket: {}", e.getLocalizedMessage());
+                        if (serverSocket == listener) {
+                            logger.info("Can't accept socket: {}", e.getLocalizedMessage());
+                        }
                     }
                 }
-                return true;
             });
             logger.info("Create server socket");
         }
@@ -107,15 +112,13 @@ public abstract class CoverServer {
                     logger.info("Get command: {}", line);
                     switch (line) {
                         case PipeMessages.DUMP_COMMAND:
-                            Utils.dumpCoverageFile(getCoverageData(), getMetadataOptions(), getOutputOptions());
-                            out.println(PipeMessages.OK_RESULT);
+                            out.println(writeCoverageDump() ? PipeMessages.OK_RESULT : PipeMessages.FAIL_RESULT);
                             return true;
                         case PipeMessages.STATS_COMMAND:
                             out.println(PipeMessages.OK_RESULT);
                             return true;
                         case PipeMessages.CLEAN_COMMAND:
-                            getCoverageData().forEach((uri, bigDecimalIntegerMap) ->
-                                    bigDecimalIntegerMap.replaceAll((k, v) -> 0));
+                            cleanCoverageData();
                             out.println(PipeMessages.OK_RESULT);
                             return true;
                         case PipeMessages.CHECK_COMMAND:
@@ -140,6 +143,14 @@ public abstract class CoverServer {
     }
 
     protected abstract boolean getSystemStarted();
+
+    protected boolean writeCoverageDump() {
+        return Utils.tryDumpCoverageFile(getCoverageData(), getMetadataOptions(), getOutputOptions());
+    }
+
+    protected void cleanCoverageData() {
+        getCoverageData().forEach((uri, lines) -> lines.replaceAll((line, hits) -> 0));
+    }
 
     protected abstract void gracefulShutdown(PrintWriter out) throws IOException;
 

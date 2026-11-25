@@ -129,8 +129,8 @@ public abstract class AbstractDebugClient {
             if (HttpStatus.isSuccess(status)) {
                 if (responseClass != null && status != 204) {
                     String type = response.getMediaType();
-                    if(!type.equalsIgnoreCase("application/xml")) {
-                        return null;
+                    if (!"application/xml".equalsIgnoreCase(type)) {
+                        throw new RuntimeDebugClientException("Expected XML response from 1C:Enterprise, received: " + type);
                     }
                     try {
                         String contentString = getStringFromContent(response);
