@@ -312,17 +312,22 @@ public final class ConfiguredCoverage {
             if (!MDOType.valuesWithoutChildren().contains(type) && !childDescriptors.contains(type)) {
                 continue;
             }
-            String[] reference = object.getMdoReference().getMdoRef().split("\\.");
-            Path folder = metadataRoot;
-            for (int index = 0; index + 1 < reference.length; index += 2) {
-                folder = folder.resolve(MDOType.valueByName(reference[index]).groupName()).resolve(reference[index + 1]);
-            }
+            Path folder = metadataObjectFolder(metadataRoot, object.getMdoReference());
             if (edt) {
                 collectEdtMetadataInputs(root, folder, object, inputs);
             } else {
                 collectDesignerMetadataInputs(folder, object, inputs);
             }
         }
+    }
+
+    private static Path metadataObjectFolder(Path root, MdoReference object) {
+        String[] reference = object.getMdoRef().split("\\.");
+        Path folder = root;
+        for (int index = 0; index + 1 < reference.length; index += 2) {
+            folder = folder.resolve(MDOType.valueByName(reference[index]).groupName()).resolve(reference[index + 1]);
+        }
+        return folder;
     }
 
     private static void collectEdtMetadataInputs(Path root, Path folder, MD object, Set<URI> inputs) {
