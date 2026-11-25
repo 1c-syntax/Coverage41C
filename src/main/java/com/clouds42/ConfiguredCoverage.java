@@ -363,8 +363,9 @@ public final class ConfiguredCoverage {
                 continue;
             }
             String name = reference.getTextContent().trim();
-            if (edt && name.startsWith(type.nameEn() + ".")) {
-                name = name.substring(type.nameEn().length() + 1);
+            int separator = name.indexOf('.');
+            if (edt && separator > 0 && MDOType.valueByName(name.substring(0, separator)) == type) {
+                name = name.substring(separator + 1);
             }
             Path child = folder.resolve(type.groupName()).resolve(name);
             Path file = edt ? child.resolve(name + ".mdo") : child.resolveSibling(name + ".xml");

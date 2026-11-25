@@ -524,6 +524,30 @@ class ConfiguredCoverageTest {
     }
 
     @Test
+    void edtReportsProtectDescriptorsWithLowerCaseTypePrefixes() throws Exception {
+        assertEdtReferencePrefix("commonmodule");
+    }
+
+    @Test
+    void edtReportsProtectDescriptorsWithMixedCaseTypePrefixes() throws Exception {
+        assertEdtReferencePrefix("CoMmOnMoDuLe");
+    }
+
+    private void assertEdtReferencePrefix(String prefix) throws Exception {
+        Path sources = edtProject();
+        Path configuration = sources.resolve("src/Configuration/Configuration.mdo");
+        String original = Files.readString(configuration);
+        String updated = original.replace("CommonModule.ПростойОбщийМодуль", prefix + ".ПростойОбщийМодуль");
+        assertFalse(original.equals(updated));
+        Files.writeString(configuration, updated);
+        Path descriptor = sources.resolve("src/CommonModules/ПростойОбщийМодуль/ПростойОбщийМодуль.mdo");
+        byte[] previous = Files.readAllBytes(descriptor);
+        assertEquals(1, execute("validate", "-s", sources.toString(), "--exclusion-report", descriptor.toString()));
+        assertArrayEquals(previous, Files.readAllBytes(descriptor));
+        assertUnreadableDescriptorCannotBeOverwritten(sources, descriptor);
+    }
+
+    @Test
     void edtReportsProtectUnreadableNestedSubsystemDescriptors() throws Exception {
         Path sources = edtProject();
         assertUnreadableDescriptorCannotBeOverwritten(sources,
