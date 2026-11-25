@@ -41,21 +41,15 @@ import java.net.URI;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystemLoopException;
-import java.nio.file.FileVisitOption;
-import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
-import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -170,8 +164,7 @@ public final class ConfiguredCoverage {
             if (reportFile == null) {
                 reportFile = rules.getExclusionReportFile();
             }
-            rejectMetadataReport(root, configuration.getConfigurationSource(), coverageFile);
-            rejectMetadataReport(root, configuration.getConfigurationSource(), reportFile);
+            collectMetadataInputs(root, configuration, inputFiles);
             rules.getIncludeSources().forEach(report::addScopeSource);
             if (!rules.getPrefixes().isEmpty()) {
                 report.setPrefixScope(rules.getPrefixScope());
@@ -296,55 +289,75 @@ public final class ConfiguredCoverage {
         }
     }
 
-    private static void rejectMetadataReport(Path root, ConfigurationSource format, File report) throws IOException {
-        // A new file cannot alias existing metadata. Check existing reports by file identity, including hard links.
-        if (report == null || !report.isFile()) {
-            return;
-        }
-        Path output = report.toPath().toRealPath();
-        if (format == ConfigurationSource.EDT) {
-            rejectMetadataIn(root.resolve("src"), output, Set.of("mdo", "form", "xml"));
+    private static void collectMetadataInputs(Path root, CF configuration, Set<URI> inputs) {
+        boolean edt = configuration.getConfigurationSource() == ConfigurationSource.EDT;
+        Path metadataRoot = edt ? root.resolve("src") : root;
+        if (edt) {
+            inputs.add(root.resolve("src/Configuration/Configuration.mdo").toUri());
+            Path support = root.resolve("src/Configuration/Configuration.distr");
+            inputs.add((Files.exists(support) ? support
+                    : root.resolve("src/Configuration/ParentConfigurations.bin")).toUri());
         } else {
-            Path dumpInfo = root.resolve("ConfigDumpInfo.xml");
-            if (Files.isRegularFile(dumpInfo)) {
-                rejectSame(dumpInfo.toFile(), report);
+            for (String path : List.of("Configuration.xml", "ConfigDumpInfo.xml", "Ext/ParentConfigurations.bin",
+                    "Ext/HomePageWorkArea.xml", "Ext/CommandInterface.xml")) {
+                inputs.add(root.resolve(path).toUri());
             }
-            Set<String> metadataDirectories = new HashSet<>();
-            metadataDirectories.add("Ext");
-            MDOType.valuesWithoutChildren().forEach(type -> metadataDirectories.add(type.groupName()));
-            metadataDirectories.remove("");
-            for (String directory : metadataDirectories) {
-                rejectMetadataIn(root.resolve(directory), output, Set.of("xml"));
+        }
+        // A report in an export directory is not itself metadata. Use the named files of the loaded objects.
+        Set<MDOType> childDescriptors = Set.of(MDOType.FORM, MDOType.COMMAND, MDOType.TEMPLATE,
+                MDOType.RECALCULATION, MDOType.EXTERNAL_DATA_SOURCE_TABLE, MDOType.EXTERNAL_DATA_SOURCE_CUBE,
+                MDOType.EXTERNAL_DATA_SOURCE_FUNCTION, MDOType.EXTERNAL_DATA_SOURCE_CUBE_DIMENSION_TABLE);
+        for (MD object : configuration.getPlainChildren()) {
+            MDOType type = object.getMdoType();
+            if (!MDOType.valuesWithoutChildren().contains(type) && !childDescriptors.contains(type)) {
+                continue;
+            }
+            String[] reference = object.getMdoReference().getMdoRef().split("\\.");
+            Path folder = metadataRoot;
+            for (int index = 0; index + 1 < reference.length; index += 2) {
+                folder = folder.resolve(MDOType.valueByName(reference[index]).groupName()).resolve(reference[index + 1]);
+            }
+            if (edt) {
+                collectEdtMetadataInputs(root, folder, object, inputs);
+            } else {
+                collectDesignerMetadataInputs(folder, object, inputs);
             }
         }
     }
 
-    private static void rejectMetadataIn(Path directory, Path output, Set<String> extensions) throws IOException {
-        if (!Files.isDirectory(directory)) {
-            return;
+    private static void collectEdtMetadataInputs(Path root, Path folder, MD object, Set<URI> inputs) {
+        MDOType type = object.getMdoType();
+        // EDT embeds forms, commands and templates in their owner's .mdo.
+        if (type != MDOType.FORM && type != MDOType.COMMAND && type != MDOType.TEMPLATE) {
+            Path descriptor = folder.resolve(object.getName() + ".mdo");
+            inputs.add(descriptor.toUri());
+            if (!Files.exists(descriptor) && (type == MDOType.INTERFACE || type == MDOType.STYLE)) {
+                inputs.add(root.resolve("unknown").resolve(type.groupName())
+                        .resolve(object.getName() + ".xml").toUri());
+            }
         }
-        Files.walkFileTree(directory, EnumSet.of(FileVisitOption.FOLLOW_LINKS), Integer.MAX_VALUE,
-                new SimpleFileVisitor<>() {
-                    @Override
-                    public FileVisitResult visitFile(Path input, BasicFileAttributes attributes) throws IOException {
-                        String name = input.getFileName().toString();
-                        int dot = name.lastIndexOf('.');
-                        if (attributes.isRegularFile() && dot >= 0
-                                && extensions.contains(name.substring(dot + 1).toLowerCase(Locale.ROOT))
-                                && Files.isSameFile(input, output)) {
-                            throw new IllegalArgumentException("Report output would overwrite metadata: " + input);
-                        }
-                        return FileVisitResult.CONTINUE;
-                    }
+        if (type == MDOType.FORM || type == MDOType.COMMON_FORM) {
+            inputs.add(folder.resolve("Form.form").toUri());
+        }
+    }
 
-                    @Override
-                    public FileVisitResult visitFileFailed(Path file, IOException error) throws IOException {
-                        if (error instanceof FileSystemLoopException) {
-                            return FileVisitResult.CONTINUE;
-                        }
-                        throw error;
-                    }
-                });
+    private static void collectDesignerMetadataInputs(Path folder, MD object, Set<URI> inputs) {
+        inputs.add(folder.resolveSibling(object.getName() + ".xml").toUri());
+        List<String> auxiliaryFiles = switch (object.getMdoType()) {
+            case FORM, COMMON_FORM -> List.of("Form.xml");
+            case ROLE -> List.of("Rights.xml");
+            case SCHEDULED_JOB -> List.of("Schedule.xml");
+            case COMMON_TEMPLATE, TEMPLATE -> List.of("Template.xml");
+            case XDTO_PACKAGE -> List.of("Package.xml");
+            case WS_REFERENCE -> List.of("WSDefinition.xml");
+            case SUBSYSTEM -> List.of("CommandInterface.xml");
+            case CATALOG, CHART_OF_ACCOUNTS, CHART_OF_CHARACTERISTIC_TYPES, CHART_OF_CALCULATION_TYPES ->
+                    List.of("Predefined.xml");
+            default -> List.of();
+        };
+        for (String name : auxiliaryFiles) {
+            inputs.add(folder.resolve("Ext").resolve(name).toUri());
+        }
     }
 
     private static void checkOutputs(File config, File raw, File coverage, File report, Set<URI> sources)

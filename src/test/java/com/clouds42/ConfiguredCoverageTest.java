@@ -496,6 +496,162 @@ class ConfiguredCoverageTest {
     }
 
     @Test
+    void designerSupportDataCannotBeReplacedByEitherReport() throws Exception {
+        Path sources = project().resolve("configuration");
+        Path support = sources.resolve("Ext/ParentConfigurations.bin");
+        Files.copy(Path.of("src/test/resources/support-data/ParentConfigurations.bin"), support);
+        assertSupportDataCannotBeOverwritten(sources, support);
+    }
+
+    @Test
+    void edtSupportDataCannotBeReplacedByEitherReport() throws Exception {
+        Path sources = edtProject();
+        Path support = sources.resolve("src/Configuration/ParentConfigurations.bin");
+        Files.copy(Path.of("src/test/resources/support-data/ParentConfigurations.bin"), support);
+        assertSupportDataCannotBeOverwritten(sources, support);
+    }
+
+    @Test
+    void edtDistributionCannotBeReplacedByEitherReport() throws Exception {
+        Path sources = edtProject();
+        Path support = sources.resolve("src/Configuration/Configuration.distr");
+        Files.copy(Path.of("src/test/resources/support-data/Configuration.distr"), support);
+        assertSupportDataCannotBeOverwritten(sources, support);
+    }
+
+    private void assertSupportDataCannotBeOverwritten(Path sources, Path support) throws Exception {
+        byte[] original = Files.readAllBytes(support);
+        assertEquals(0, execute("validate", "-s", sources.toString()));
+        assertEquals(1, execute("validate", "-s", sources.toString(), "--exclusion-report", support.toString()));
+        assertArrayEquals(original, Files.readAllBytes(support));
+
+        Path input = raw("");
+        Path output = directory.resolve("coverage.xml");
+        Path report = directory.resolve("exclusions.json");
+        assertEquals(1, execute("convert", "-s", sources.toString(), "-c", input.toString(),
+                "-o", support.toString(), "--exclusion-report", report.toString()));
+        assertArrayEquals(original, Files.readAllBytes(support));
+        assertFalse(Files.exists(report));
+        assertEquals(1, execute("convert", "-s", sources.toString(), "-c", input.toString(),
+                "-o", output.toString(), "--exclusion-report", support.toString()));
+        assertArrayEquals(original, Files.readAllBytes(support));
+        assertFalse(Files.exists(output));
+    }
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    void validationProtectsSupportDataThroughFileAliases() throws Exception {
+        Path sources = project().resolve("configuration");
+        Path support = sources.resolve("Ext/ParentConfigurations.bin");
+        Files.copy(Path.of("src/test/resources/support-data/ParentConfigurations.bin"), support);
+        byte[] original = Files.readAllBytes(support);
+        for (boolean symbolic : List.of(false, true)) {
+            Path report = directory.resolve("alias-" + symbolic + ".json");
+            if (symbolic) Files.createSymbolicLink(report, support);
+            else Files.createLink(report, support);
+            assertEquals(1, execute("validate", "-s", sources.toString(), "--exclusion-report", report.toString()));
+            assertArrayEquals(original, Files.readAllBytes(support));
+        }
+    }
+
+    @Test
+    void designerConversionCanUpdateItsOwnReportsInsideSources() throws Exception {
+        Path sources = project().resolve("configuration");
+        assertRepeatedConversion(sources, List.of(
+                "CommonModules/ПростойОбщийМодуль/Ext/coverage.xml", "CommonModules/coverage.xml"), MODULE);
+    }
+
+    @Test
+    void edtConversionCanUpdateItsOwnReportsInsideSources() throws Exception {
+        Path sources = edtProject();
+        String module = "src/CommonModules/ПростойОбщийМодуль/Module.bsl";
+        Files.writeString(sources.resolve(module), SOURCE);
+        assertRepeatedConversion(sources, List.of(
+                "src/CommonModules/ПростойОбщийМодуль/coverage.xml", "src/CommonModules/coverage.xml",
+                "src/CommonModules/ПростойОбщийМодуль/coverage.mdo"), module);
+    }
+
+    private void assertRepeatedConversion(Path sources, List<String> paths, String module) throws Exception {
+        Path input = raw("");
+        String before = Files.readString(input);
+        Path report = directory.resolve("exclusions.json");
+        for (String format : List.of("GENERIC_COVERAGE", "LCOV", "COBERTURA")) {
+            for (String path : paths) {
+                Path output = sources.resolve(path);
+                Files.writeString(input, before);
+                String[] arguments = {"convert", "-s", sources.toString(), "-c", input.toString(),
+                        "-o", output.toString(), "-f", format, "--exclusion-report", report.toString()};
+                assertEquals(0, execute(arguments), format + ": first write to " + path);
+                Files.writeString(input, before.replace("covered=\"true\" lineNumber=\"4\"",
+                        "covered=\"false\" lineNumber=\"4\""));
+                assertEquals(0, execute(arguments), format + ": repeated write to " + path);
+                if (format.equals("GENERIC_COVERAGE")) {
+                    assertEquals(Map.of(2, true, 4, false, 6, false), coverage(output, module));
+                }
+                Files.delete(output);
+            }
+        }
+    }
+
+    @Test
+    void designerValidationCanUpdateAJsonReportNamedXmlInsideSources() throws Exception {
+        Path sources = project().resolve("configuration");
+        assertRepeatedValidation(sources, sources.resolve(MODULE),
+                sources.resolve("CommonModules/ПростойОбщийМодуль/Ext/exclusions.xml"));
+    }
+
+    @Test
+    void edtValidationCanUpdateAJsonReportNamedXmlInsideSources() throws Exception {
+        Path sources = edtProject();
+        Path module = sources.resolve("src/CommonModules/ПростойОбщийМодуль/Module.bsl");
+        Files.writeString(module, SOURCE);
+        assertRepeatedValidation(sources, module,
+                sources.resolve("src/CommonModules/ПростойОбщийМодуль/exclusions.xml"));
+    }
+
+    private void assertRepeatedValidation(Path sources, Path module, Path report) throws Exception {
+        String[] arguments = {"validate", "-s", sources.toString(), "--exclusion-report", report.toString()};
+        assertEquals(0, execute(arguments));
+        assertTrue(new ObjectMapper().readTree(report.toFile()).path("warnings").isEmpty());
+        Files.writeString(module, "// Cover:off\n" + SOURCE);
+        assertEquals(0, execute(arguments));
+        assertTrue(new ObjectMapper().readTree(report.toFile()).path("warnings").toString().contains("not closed"));
+    }
+
+    @Test
+    void validationStillProtectsDesignerMetadataFiles() throws Exception {
+        Path sources = project().resolve("configuration");
+        assertMetadataFilesCannotBeOverwritten(sources, sources);
+    }
+
+    @Test
+    void validationStillProtectsEdtMetadataFiles() throws Exception {
+        Path sources = edtProject();
+        assertMetadataFilesCannotBeOverwritten(sources, sources.resolve("src"));
+    }
+
+    private void assertMetadataFilesCannotBeOverwritten(Path sources, Path metadata) throws Exception {
+        List<Path> inputs;
+        try (var files = Files.walk(metadata)) {
+            inputs = files.filter(Files::isRegularFile)
+                    .filter(path -> path.toString().matches(".*\\.(xml|mdo|form)")).sorted().toList();
+        }
+        assertFalse(inputs.isEmpty());
+        for (Path input : inputs) {
+            byte[] original = Files.readAllBytes(input);
+            assertEquals(1, execute("validate", "-s", sources.toString(), "--exclusion-report", input.toString()),
+                    "metadata must remain protected: " + input);
+            assertArrayEquals(original, Files.readAllBytes(input));
+        }
+    }
+
+    private Path edtProject() throws Exception {
+        Path sources = directory.resolve("edt");
+        TestUtils.copyDirectory(Path.of("src/test/resources/edt/pc"), sources);
+        return sources;
+    }
+
+    @Test
     void configuredConversionStillSeparatesExtensionsSelectedWithTheExistingFlags() throws Exception {
         Path project = project();
         Path extension = project.resolve("extensions/Sample");
